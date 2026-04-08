@@ -9,7 +9,7 @@ Required environment variables:
   PORT               - optional, defaults to 8765
 """
 
-import os, json, urllib.request, urllib.error, urllib.parse, tempfile, mimetypes
+import os, json, urllib.request, urllib.error, urllib.parse, tempfile, mimetypes, zipfile, io
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 API_KEY      = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -144,6 +144,7 @@ class Handler(BaseHTTPRequestHandler):
             "/analyze": self._analyze,
             "/transcribe_and_analyze": self._transcribe_and_analyze,
             "/check_duplicate": self._check_dup_endpoint,
+            "/extract_zip": self._extract_zip,
             "/save": self._save,
             "/update": self._update,
             "/delete": self._delete,
@@ -155,6 +156,40 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _extract_zip(self, body):
+        """Accept a base64-encoded zip file, extract audio files, return their names and base64 content"""
+        try:
+            import base64
+            p = json.loads(body)
+            zip_b64 = p.get("zip", "")
+            zip_bytes = base64.b64decode(zip_b64)
+            audio_exts = {".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".webm", ".mpeg", ".mpga"}
+            results = []
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                for name in zf.namelist():
+                    # Skip hidden files, directories, and non-audio files
+                    if name.startswith("__") or name.startswith(".") or name.endswith("/"):
+                        continue
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext not in audio_exts:
+                        continue
+                    # Use just the filename, not the full path
+                    filename = os.path.basename(name)
+                    if not filename:
+                        continue
+                    audio_data = zf.read(name)
+                    audio_b64 = base64.b64encode(audio_data).decode()
+                    results.append({
+                        "filename": filename,
+                        "audio": audio_b64,
+                        "size": len(audio_data)
+                    })
+            self._ok({"files": results, "count": len(results)})
+        except zipfile.BadZipFile:
+            self._err(400, "Invalid zip file")
+        except Exception as e:
+            self._err(500, f"Zip extraction failed: {str(e)}")
 
     def _check_dup_endpoint(self, body):
         """Check if filename already exists before transcribing"""
