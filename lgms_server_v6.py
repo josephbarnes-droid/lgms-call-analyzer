@@ -341,7 +341,7 @@ if __name__ == "__main__":
     print("="*55)
     missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","OPENAI_API_KEY"] if not os.environ.get(v)]
     if missing:
-        print(f"\n  WARNING: Missing env vars: {\', \'.join(missing)}")
+        print("\n  WARNING: Missing env vars: " + ", ".join(missing))
     else:
         print("\n  All environment variables loaded")
     print(f"  Running at http://127.0.0.1:{PORT}")
