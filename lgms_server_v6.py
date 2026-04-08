@@ -143,6 +143,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {
             "/analyze": self._analyze,
             "/transcribe_and_analyze": self._transcribe_and_analyze,
+            "/check_duplicate": self._check_dup_endpoint,
             "/save": self._save,
             "/update": self._update,
             "/delete": self._delete,
@@ -154,6 +155,16 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _check_dup_endpoint(self, body):
+        """Check if filename already exists before transcribing"""
+        try:
+            p = json.loads(body)
+            filename = p.get("filename", "")
+            is_dup = self._check_filename_exists(filename)
+            self._ok({"duplicate": is_dup, "filename": filename})
+        except Exception as e:
+            self._ok({"duplicate": False})
 
     def _get_calls(self):
         try:
@@ -261,21 +272,32 @@ class Handler(BaseHTTPRequestHandler):
     def _check_duplicate(self, filename, transcript):
         """Check if a call already exists with same filename or similar transcript"""
         try:
-            # Check by filename first (fast)
-            existing = supa("GET", f"calls?filename=eq.{urllib.parse.quote(filename)}&limit=1")
+            # Check by filename - use ilike for case-insensitive match
+            clean = filename.replace("'", "''")
+            existing = supa("GET", f"calls?filename=ilike.{urllib.parse.quote(clean)}&limit=1")
             if existing:
                 return True, f"Duplicate filename: {filename}"
-            # Check by transcript similarity (first 200 chars)
-            if transcript and len(transcript) > 50:
-                snippet = transcript[:200].replace("'", "''")
-                # Check if transcript starts the same way
-                all_calls = supa("GET", "calls?limit=500&select=transcript,filename")
+            # Check transcript similarity if provided
+            if transcript and len(transcript) > 100:
+                all_calls = supa("GET", "calls?limit=1000&select=transcript,filename")
+                tx_start = transcript[:150].strip()
                 for c in all_calls:
-                    if c.get("transcript") and c["transcript"][:200] == transcript[:200]:
+                    ctx = (c.get("transcript") or "")[:150].strip()
+                    if ctx and ctx == tx_start:
                         return True, f"Duplicate content (matches {c.get('filename','unknown')})"
             return False, ""
-        except Exception:
+        except Exception as e:
+            print(f"  Duplicate check error: {e}")
             return False, ""
+
+    def _check_filename_exists(self, filename):
+        """Quick filename-only check before transcription"""
+        try:
+            clean = filename.replace("'", "''")
+            existing = supa("GET", f"calls?filename=ilike.{urllib.parse.quote(clean)}&limit=1")
+            return bool(existing)
+        except Exception:
+            return False
 
     def _save(self, body):
         try:
