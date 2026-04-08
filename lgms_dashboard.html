@@ -726,7 +726,19 @@ async function submitCall(){
         updAudioQueue(i,"skipped");
         continue;
       }
+      // Check for duplicate by filename BEFORE transcribing
       updAudioQueue(i,"processing");
+      document.getElementById("audioProgressText").textContent=`Checking ${i+1} of ${total}: ${af.name}...`;
+      try{
+        const dupCheck=await fetch(S+"/check_duplicate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:af.name})});
+        const dupRes=await dupCheck.json();
+        if(dupRes.duplicate){
+          skipped.push(`${af.name} — already in dashboard`);
+          updAudioQueue(i,"skipped");
+          continue;
+        }
+      }catch(e){/* if check fails just continue */}
+
       const pct=Math.round((i/total)*90)+5;
       document.getElementById("audioProgressBar").style.width=pct+"%";
       document.getElementById("audioProgressText").textContent=`Processing ${i+1} of ${total}: ${af.name}`;
