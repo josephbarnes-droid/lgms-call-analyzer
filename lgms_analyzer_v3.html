@@ -288,6 +288,7 @@ textarea.nt:focus{border-color:var(--green)}
     <div class="mtabs">
       <div class="mtab active" onclick="switchTab('paste')">Paste transcript</div>
       <div class="mtab" onclick="switchTab('upload')">Upload .txt file</div>
+      <div class="mtab" onclick="switchTab('audio')">Upload audio (MP3)</div>
     </div>
     <div id="pasteP">
       <div class="fg"><label>Rep name *</label><input type="text" id="mRep" placeholder="Will auto-detect from transcript" /></div>
@@ -300,6 +301,21 @@ textarea.nt:focus{border-color:var(--green)}
       <div id="repDetectF" class="rep-detect"></div>
       <div class="fg"><label>Call outcome</label><select id="mOutF"><option value="unknown">Let AI decide</option><option value="booked">Booked</option><option value="estimate_sent">Estimate sent</option><option value="lost">Lost</option></select></div>
       <div class="fg"><label>Transcript file (.txt)</label><input type="file" id="mFile" accept=".txt,text/plain" /></div>
+    </div>
+    <div id="audioP" style="display:none">
+      <div style="background:#e8f4e6;border:1px solid #6aa35e;border-radius:8px;padding:10px 12px;font-size:12px;color:#2d5226;margin-bottom:12px">
+        &#127908; Audio files are transcribed automatically using OpenAI Whisper (~$0.006/min), then analyzed with Claude. A 5-minute call costs about $0.03 total.
+      </div>
+      <div class="fg"><label>Rep name</label><input type="text" id="mRepA" placeholder="Will auto-detect from transcript" /></div>
+      <div id="repDetectA" style="display:none;background:#e8f4e6;border:1px solid #6aa35e;border-radius:8px;padding:8px 11px;font-size:12px;color:#2d5226;margin-bottom:10px"></div>
+      <div class="fg"><label>Call outcome</label><select id="mOutA"><option value="unknown">Let AI decide</option><option value="booked">Booked</option><option value="estimate_sent">Estimate sent</option><option value="lost">Lost</option></select></div>
+      <div class="fg"><label>Audio file (MP3, M4A, WAV, OGG — max 25MB)</label><input type="file" id="mAudio" accept="audio/*,.mp3,.m4a,.wav,.ogg,.mp4" /></div>
+      <div id="audioProgress" style="display:none;margin-top:8px">
+        <div style="background:#e5e7eb;border-radius:6px;height:6px;overflow:hidden">
+          <div id="audioProgressBar" style="height:100%;background:#4a7c3f;border-radius:6px;width:0%;transition:width .3s"></div>
+        </div>
+        <div id="audioProgressText" style="font-size:11px;color:#6b7280;margin-top:4px">Preparing...</div>
+      </div>
     </div>
     <div id="mMsg"></div>
     <div class="mbtns">
@@ -652,20 +668,99 @@ function closeModal(){
   document.getElementById("mTx").value="";
   document.getElementById("mRep").value="";
   document.getElementById("repDetect").style.display="none";
+  document.getElementById("repDetectA").style.display="none";
+  document.getElementById("audioProgress").style.display="none";
+  document.getElementById("audioProgressBar").style.width="0%";
   document.getElementById("subBtn").disabled=false;
   document.getElementById("subTxt").textContent="Analyze & Save";
 }
 function switchTab(t){
   mTab=t;
-  document.querySelectorAll(".mtab").forEach((el,i)=>el.classList.toggle("active",i===(t==="paste"?0:1)));
+  document.querySelectorAll(".mtab").forEach((el,i)=>el.classList.toggle("active",
+    (i===0&&t==="paste")||(i===1&&t==="upload")||(i===2&&t==="audio")));
   document.getElementById("pasteP").style.display=t==="paste"?"block":"none";
   document.getElementById("uploadP").style.display=t==="upload"?"block":"none";
+  document.getElementById("audioP").style.display=t==="audio"?"block":"none";
 }
 
 async function submitCall(){
   const btn=document.getElementById("subBtn"),msg=document.getElementById("mMsg");
   msg.innerHTML="";
   let rep,tx,fn,out;
+
+  if(mTab==="audio"){
+    // Handle audio upload with Whisper transcription
+    rep=document.getElementById("mRepA").value.trim();
+    out=document.getElementById("mOutA").value;
+    const af=document.getElementById("mAudio").files[0];
+    if(!af){msg.innerHTML='<div class="errmsg">Please select an audio file.</div>';return;}
+    if(af.size>25*1024*1024){msg.innerHTML='<div class="errmsg">File too large. Maximum size is 25MB.</div>';return;}
+    fn=af.name;
+
+    // Show progress
+    document.getElementById("audioProgress").style.display="block";
+    document.getElementById("audioProgressBar").style.width="20%";
+    document.getElementById("audioProgressText").textContent="Reading audio file...";
+
+    btn.disabled=true;
+    document.getElementById("subTxt").innerHTML='<span class="spin"></span>Transcribing...';
+
+    try{
+      // Convert to base64
+      const b64 = await new Promise((res,rej)=>{
+        const r=new FileReader();
+        r.onload=()=>res(r.result.split(",")[1]);
+        r.onerror=()=>rej(new Error("Read failed"));
+        r.readAsDataURL(af);
+      });
+
+      document.getElementById("audioProgressBar").style.width="40%";
+      document.getElementById("audioProgressText").textContent="Transcribing with Whisper (~1 min per 5 min of audio)...";
+      document.getElementById("subTxt").innerHTML='<span class="spin"></span>Transcribing audio...';
+
+      const tr=await fetch(S+"/transcribe_and_analyze",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({audio:b64,filename:fn})
+      });
+
+      document.getElementById("audioProgressBar").style.width="80%";
+      document.getElementById("audioProgressText").textContent="Analyzing call...";
+      document.getElementById("subTxt").innerHTML='<span class="spin"></span>Analyzing...';
+
+      const res=await tr.json();
+      if(!tr.ok)throw new Error(res.error||"Transcription/analysis failed");
+      if(out!=="unknown")res.call_outcome=out;
+      if(!rep&&res.rep_name_detected&&res.rep_name_detected!=="Unknown"){
+        rep=res.rep_name_detected;
+        const det=document.getElementById("repDetectA");
+        det.style.display="block";
+        det.textContent=`Auto-detected rep: "${rep}"`;
+      }
+      if(!rep)rep=res.rep_name_detected||"Unknown";
+
+      document.getElementById("audioProgressBar").style.width="95%";
+      document.getElementById("audioProgressText").textContent="Saving...";
+
+      const sr=await fetch(S+"/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...res,rep_name:rep,filename:fn})});
+      const saved=await sr.json();
+      if(!sr.ok)throw new Error(saved.error||"Save failed");
+      allCalls.unshift(Array.isArray(saved)?saved[0]:saved);
+      applyFilters();
+
+      document.getElementById("audioProgressBar").style.width="100%";
+      document.getElementById("audioProgressText").textContent="Done!";
+      setTimeout(closeModal, 800);
+      return;
+    }catch(e){
+      document.getElementById("audioProgress").style.display="none";
+      msg.innerHTML=`<div class="errmsg">&#9888; ${e.message}</div>`;
+      btn.disabled=false;
+      document.getElementById("subTxt").textContent="Analyze & Save";
+      return;
+    }
+  }
+
   if(mTab==="paste"){
     rep=document.getElementById("mRep").value.trim();
     tx=document.getElementById("mTx").value.trim();
