@@ -342,6 +342,7 @@ textarea.nt:focus{border-color:var(--green)}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 const S="";
 let allCalls=[],filtered=[],lbKey="overall",lbDir=-1,mTab="paste",tChart=null,selected=new Set();
@@ -883,39 +884,44 @@ function handleAudioSelect(files){
 }
 
 async function handleFilesWithZip(files){
-  const zipFiles=files.filter(f=>f.name.toLowerCase().endsWith(".zip")||f.type==="application/zip");
+  const zipFiles=files.filter(f=>f.name.toLowerCase().endsWith(".zip")||f.type==="application/zip"||f.type==="application/x-zip-compressed");
   const audioOnly=files.filter(f=>f.type.startsWith("audio/")||f.name.match(/\.(mp3|m4a|wav|ogg|mp4|webm)$/i));
 
   if(zipFiles.length>0){
-    // Show extracting message
     document.getElementById("audioQueue").style.display="block";
-    document.getElementById("audioQueueList").innerHTML=`<div style="padding:8px;font-size:12px;color:#6b7280"><span class="spin" style="border-top-color:#4a7c3f;border-color:#e5e7eb;display:inline-block;width:12px;height:12px;border-width:2px;border-style:solid;border-radius:50%;animation:spin .7s linear infinite;margin-right:6px;vertical-align:middle"></span>Extracting ZIP file...</div>`;
+    document.getElementById("audioQueueList").innerHTML=`<div style="padding:8px;font-size:12px;color:#6b7280;display:flex;align-items:center;gap:8px"><span style="display:inline-block;width:12px;height:12px;border:2px solid #e5e7eb;border-top-color:#4a7c3f;border-radius:50%;animation:spin .7s linear infinite"></span>Extracting ZIP in browser...</div>`;
 
     for(const zf of zipFiles){
       try{
-        const b64=await new Promise((res,rej)=>{
-          const r=new FileReader();
-          r.onload=()=>res(r.result.split(",")[1]);
-          r.onerror=()=>rej(new Error("Read failed"));
-          r.readAsDataURL(zf);
+        // Use JSZip to extract in the browser - no size limit
+        const zip=await JSZip.loadAsync(zf);
+        const audioExts=new Set([".mp3",".m4a",".wav",".ogg",".mp4",".webm",".mpeg",".mpga"]);
+        let count=0;
+        const entries=Object.values(zip.files).filter(f=>{
+          if(f.dir)return false;
+          const name=f.name.toLowerCase();
+          if(name.startsWith("__")||name.startsWith("."))return false;
+          const ext=name.substring(name.lastIndexOf("."));
+          return audioExts.has(ext);
         });
-        const resp=await fetch(S+"/extract_zip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({zip:b64})});
-        const data=await resp.json();
-        if(!resp.ok)throw new Error(data.error||"Zip extraction failed");
 
-        // Convert extracted files back to File objects
-        const extracted=data.files.map(f=>{
-          const bytes=Uint8Array.from(atob(f.audio),c=>c.charCodeAt(0));
-          return new File([bytes],f.filename,{type:"audio/mpeg"});
-        });
-        audioOnly.push(...extracted);
-        document.getElementById("audioQueueList").innerHTML=`<div style="padding:6px 8px;font-size:12px;color:#2d5226;background:#e8f4e6;border-radius:6px">&#9989; Extracted ${data.count} audio file${data.count!==1?"s":""} from ${zf.name}</div>`;
+        document.getElementById("audioQueueList").innerHTML=`<div style="padding:8px;font-size:12px;color:#6b7280;display:flex;align-items:center;gap:8px"><span style="display:inline-block;width:12px;height:12px;border:2px solid #e5e7eb;border-top-color:#4a7c3f;border-radius:50%;animation:spin .7s linear infinite"></span>Loading ${entries.length} audio files from ZIP...</div>`;
+
+        for(const entry of entries){
+          const blob=await entry.async("blob");
+          const filename=entry.name.split("/").pop(); // just filename, no path
+          const file=new File([blob],filename,{type:"audio/mpeg"});
+          audioOnly.push(file);
+          count++;
+        }
+
+        document.getElementById("audioQueueList").innerHTML=`<div style="padding:6px 8px;font-size:12px;color:#2d5226;background:#e8f4e6;border-radius:6px">&#9989; Extracted ${count} audio file${count!==1?"s":""} from ${zf.name} — ready to process</div>`;
       }catch(err){
         document.getElementById("audioQueueList").innerHTML=`<div style="padding:6px 8px;font-size:12px;color:#dc2626;background:#fef2f2;border-radius:6px">&#10060; Failed to extract ${zf.name}: ${err.message}</div>`;
         return;
       }
     }
-    setTimeout(()=>setAudioFiles(audioOnly),800);
+    setTimeout(()=>setAudioFiles(audioOnly),600);
   }else{
     setAudioFiles(audioOnly);
   }
