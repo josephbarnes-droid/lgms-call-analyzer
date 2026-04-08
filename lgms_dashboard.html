@@ -304,17 +304,33 @@ textarea.nt:focus{border-color:var(--green)}
     </div>
     <div id="audioP" style="display:none">
       <div style="background:#e8f4e6;border:1px solid #6aa35e;border-radius:8px;padding:10px 12px;font-size:12px;color:#2d5226;margin-bottom:12px">
-        &#127908; Audio files are transcribed automatically using OpenAI Whisper (~$0.006/min), then analyzed with Claude. A 5-minute call costs about $0.03 total.
+        &#127908; Drop multiple MP3s at once. Each is transcribed with Whisper (~$0.006/min) and analyzed automatically. Duplicates are detected and skipped. A 5-min call costs ~$0.03.
       </div>
-      <div class="fg"><label>Rep name</label><input type="text" id="mRepA" placeholder="Will auto-detect from transcript" /></div>
-      <div id="repDetectA" style="display:none;background:#e8f4e6;border:1px solid #6aa35e;border-radius:8px;padding:8px 11px;font-size:12px;color:#2d5226;margin-bottom:10px"></div>
-      <div class="fg"><label>Call outcome</label><select id="mOutA"><option value="unknown">Let AI decide</option><option value="booked">Booked</option><option value="estimate_sent">Estimate sent</option><option value="lost">Lost</option></select></div>
-      <div class="fg"><label>Audio file (MP3, M4A, WAV, OGG — max 25MB)</label><input type="file" id="mAudio" accept="audio/*,.mp3,.m4a,.wav,.ogg,.mp4" /></div>
-      <div id="audioProgress" style="display:none;margin-top:8px">
-        <div style="background:#e5e7eb;border-radius:6px;height:6px;overflow:hidden">
-          <div id="audioProgressBar" style="height:100%;background:#4a7c3f;border-radius:6px;width:0%;transition:width .3s"></div>
+      <div class="fg"><label>Audio files (MP3, M4A, WAV, OGG — up to 25MB each, select multiple)</label>
+        <div id="audioDrop" style="border:2px dashed #e5e7eb;border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:all .2s" 
+             onclick="document.getElementById('mAudio').click()"
+             ondragover="event.preventDefault();this.style.borderColor='#4a7c3f';this.style.background='#e8f4e6'"
+             ondragleave="this.style.borderColor='#e5e7eb';this.style.background=''"
+             ondrop="handleAudioDrop(event)">
+          <div style="font-size:24px;margin-bottom:6px">&#127908;</div>
+          <div style="font-size:13px;font-weight:500;color:#374151">Drop audio files here or click to browse</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:4px">MP3, M4A, WAV, OGG — select multiple files</div>
         </div>
-        <div id="audioProgressText" style="font-size:11px;color:#6b7280;margin-top:4px">Preparing...</div>
+        <input type="file" id="mAudio" accept="audio/*,.mp3,.m4a,.wav,.ogg,.mp4" multiple style="display:none" onchange="handleAudioSelect(this.files)" />
+      </div>
+      <div id="audioQueue" style="display:none;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Queue</div>
+        <div id="audioQueueList"></div>
+      </div>
+      <div id="audioProgress" style="display:none;margin-top:8px">
+        <div style="background:#e5e7eb;border-radius:6px;height:8px;overflow:hidden;margin-bottom:6px">
+          <div id="audioProgressBar" style="height:100%;background:#4a7c3f;border-radius:6px;width:0%;transition:width .5s"></div>
+        </div>
+        <div id="audioProgressText" style="font-size:12px;color:#6b7280">Preparing...</div>
+        <div id="audioSkipped" style="margin-top:8px;display:none">
+          <div style="font-size:11px;font-weight:600;color:#d97706;margin-bottom:4px">Skipped (duplicates):</div>
+          <div id="audioSkippedList" style="font-size:11px;color:#6b7280"></div>
+        </div>
       </div>
     </div>
     <div id="mMsg"></div>
@@ -671,6 +687,12 @@ function closeModal(){
   document.getElementById("repDetectA").style.display="none";
   document.getElementById("audioProgress").style.display="none";
   document.getElementById("audioProgressBar").style.width="0%";
+  document.getElementById("audioQueue").style.display="none";
+  document.getElementById("audioQueueList").innerHTML="";
+  document.getElementById("audioSkipped").style.display="none";
+  document.getElementById("audioSkippedList").innerHTML="";
+  document.getElementById("mAudio").value="";
+  audioFiles=[];
   document.getElementById("subBtn").disabled=false;
   document.getElementById("subTxt").textContent="Analyze & Save";
 }
@@ -689,76 +711,74 @@ async function submitCall(){
   let rep,tx,fn,out;
 
   if(mTab==="audio"){
-    // Handle audio upload with Whisper transcription
-    rep=document.getElementById("mRepA").value.trim();
-    out=document.getElementById("mOutA").value;
-    const af=document.getElementById("mAudio").files[0];
-    if(!af){msg.innerHTML='<div class="errmsg">Please select an audio file.</div>';return;}
-    if(af.size>25*1024*1024){msg.innerHTML='<div class="errmsg">File too large. Maximum size is 25MB.</div>';return;}
-    fn=af.name;
-
-    // Show progress
-    document.getElementById("audioProgress").style.display="block";
-    document.getElementById("audioProgressBar").style.width="20%";
-    document.getElementById("audioProgressText").textContent="Reading audio file...";
-
+    if(!audioFiles.length){msg.innerHTML='<div class="errmsg">Please select at least one audio file.</div>';return;}
     btn.disabled=true;
-    document.getElementById("subTxt").innerHTML='<span class="spin"></span>Transcribing...';
+    document.getElementById("subTxt").innerHTML='<span class="spin"></span>Processing...';
+    document.getElementById("audioProgress").style.display="block";
+    const skipped=[];
+    let processed=0;
+    const total=audioFiles.length;
 
-    try{
-      // Convert to base64
-      const b64 = await new Promise((res,rej)=>{
-        const r=new FileReader();
-        r.onload=()=>res(r.result.split(",")[1]);
-        r.onerror=()=>rej(new Error("Read failed"));
-        r.readAsDataURL(af);
-      });
-
-      document.getElementById("audioProgressBar").style.width="40%";
-      document.getElementById("audioProgressText").textContent="Transcribing with Whisper (~1 min per 5 min of audio)...";
-      document.getElementById("subTxt").innerHTML='<span class="spin"></span>Transcribing audio...';
-
-      const tr=await fetch(S+"/transcribe_and_analyze",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({audio:b64,filename:fn})
-      });
-
-      document.getElementById("audioProgressBar").style.width="80%";
-      document.getElementById("audioProgressText").textContent="Analyzing call...";
-      document.getElementById("subTxt").innerHTML='<span class="spin"></span>Analyzing...';
-
-      const res=await tr.json();
-      if(!tr.ok)throw new Error(res.error||"Transcription/analysis failed");
-      if(out!=="unknown")res.call_outcome=out;
-      if(!rep&&res.rep_name_detected&&res.rep_name_detected!=="Unknown"){
-        rep=res.rep_name_detected;
-        const det=document.getElementById("repDetectA");
-        det.style.display="block";
-        det.textContent=`Auto-detected rep: "${rep}"`;
+    for(let i=0;i<audioFiles.length;i++){
+      const af=audioFiles[i];
+      if(af.size>25*1024*1024){
+        skipped.push(`${af.name} (too large, max 25MB)`);
+        updAudioQueue(i,"skipped");
+        continue;
       }
-      if(!rep)rep=res.rep_name_detected||"Unknown";
+      updAudioQueue(i,"processing");
+      const pct=Math.round((i/total)*90)+5;
+      document.getElementById("audioProgressBar").style.width=pct+"%";
+      document.getElementById("audioProgressText").textContent=`Processing ${i+1} of ${total}: ${af.name}`;
 
-      document.getElementById("audioProgressBar").style.width="95%";
-      document.getElementById("audioProgressText").textContent="Saving...";
+      try{
+        const b64=await new Promise((res,rej)=>{
+          const r=new FileReader();
+          r.onload=()=>res(r.result.split(",")[1]);
+          r.onerror=()=>rej(new Error("Read failed"));
+          r.readAsDataURL(af);
+        });
 
-      const sr=await fetch(S+"/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...res,rep_name:rep,filename:fn})});
-      const saved=await sr.json();
-      if(!sr.ok)throw new Error(saved.error||"Save failed");
-      allCalls.unshift(Array.isArray(saved)?saved[0]:saved);
-      applyFilters();
+        const tr=await fetch(S+"/transcribe_and_analyze",{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({audio:b64,filename:af.name})
+        });
+        const trText=await tr.text();
+        let res;
+        try{res=JSON.parse(trText);}
+        catch(e){skipped.push(`${af.name} (invalid server response)`);updAudioQueue(i,"error");continue;}
+        if(!tr.ok){skipped.push(`${af.name} (${res.error||"failed"})`);updAudioQueue(i,"error");continue;}
 
-      document.getElementById("audioProgressBar").style.width="100%";
-      document.getElementById("audioProgressText").textContent="Done!";
-      setTimeout(closeModal, 800);
-      return;
-    }catch(e){
-      document.getElementById("audioProgress").style.display="none";
-      msg.innerHTML=`<div class="errmsg">&#9888; ${e.message}</div>`;
-      btn.disabled=false;
-      document.getElementById("subTxt").textContent="Analyze & Save";
-      return;
+        const repName=res.rep_name_detected&&res.rep_name_detected!=="Unknown"?res.rep_name_detected:"Unknown";
+        const sr=await fetch(S+"/save",{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({...res,rep_name:repName,filename:af.name,check_duplicate:true})
+        });
+        const saved=await sr.json();
+        if(!sr.ok){skipped.push(`${af.name} (save failed)`);updAudioQueue(i,"error");continue;}
+        if(saved.duplicate){skipped.push(`${af.name} (duplicate: ${saved.reason})`);updAudioQueue(i,"skipped");continue;}
+        allCalls.unshift(Array.isArray(saved)?saved[0]:saved);
+        updAudioQueue(i,"done");
+        processed++;
+      }catch(e){
+        skipped.push(`${af.name} (${e.message})`);
+        updAudioQueue(i,"error");
+      }
     }
+
+    document.getElementById("audioProgressBar").style.width="100%";
+    document.getElementById("audioProgressText").textContent=`Done! ${processed} analyzed, ${skipped.length} skipped.`;
+
+    if(skipped.length){
+      document.getElementById("audioSkipped").style.display="block";
+      document.getElementById("audioSkippedList").innerHTML=skipped.map(s=>`<div>&#8226; ${s}</div>`).join("");
+    }
+
+    applyFilters();
+    btn.disabled=false;
+    document.getElementById("subTxt").textContent="Analyze & Save";
+    if(processed>0)setTimeout(closeModal,2000);
+    return;
   }
 
   if(mTab==="paste"){
@@ -833,6 +853,42 @@ function exportCSV(){
   a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
   a.download=`lgms_calls_${new Date().toISOString().split("T")[0]}.csv`;
   a.click();URL.revokeObjectURL(a.href);
+}
+
+// AUDIO BULK UPLOAD
+let audioFiles=[];
+
+function handleAudioDrop(e){
+  e.preventDefault();
+  document.getElementById("audioDrop").style.borderColor="#e5e7eb";
+  document.getElementById("audioDrop").style.background="";
+  const files=[...e.dataTransfer.files].filter(f=>f.type.startsWith("audio/")||f.name.match(/\.(mp3|m4a|wav|ogg|mp4|webm)$/i));
+  setAudioFiles(files);
+}
+
+function handleAudioSelect(files){
+  setAudioFiles([...files]);
+}
+
+function setAudioFiles(files){
+  audioFiles=files;
+  if(!files.length)return;
+  const queue=document.getElementById("audioQueue");
+  const list=document.getElementById("audioQueueList");
+  queue.style.display="block";
+  list.innerHTML=files.map((f,i)=>`
+    <div id="aq-${i}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#f9fafb;border-radius:6px;margin-bottom:4px;font-size:12px">
+      <span id="aqi-${i}" style="font-size:14px">&#9711;</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.name}</span>
+      <span style="color:#6b7280">${(f.size/1024/1024).toFixed(1)}MB</span>
+    </div>`).join("");
+}
+
+function updAudioQueue(i,status){
+  const el=document.getElementById("aqi-"+i);
+  if(!el)return;
+  const icons={processing:"&#9654;",done:"&#9989;",skipped:"&#9888;",error:"&#10060;"};
+  el.innerHTML=icons[status]||"&#9711;";
 }
 
 init();
