@@ -9,7 +9,7 @@ Required environment variables:
   PORT               - optional, defaults to 8765
 """
 
-import os, json, urllib.request, urllib.error, tempfile, mimetypes
+import os, json, urllib.request, urllib.error, urllib.parse, tempfile, mimetypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 API_KEY      = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -193,11 +193,15 @@ class Handler(BaseHTTPRequestHandler):
             print(f"  Transcribing {filename} ({len(audio_bytes)} bytes)...")
             transcript = transcribe_audio(audio_bytes, filename)
             print(f"  Transcription done: {len(transcript)} chars")
+            if not transcript or not transcript.strip():
+                self._err(400, "Transcription returned empty — audio may be too short or silent")
+                return
         except urllib.error.HTTPError as e:
-            self._err(e.code, f"Whisper API error: {e.read().decode()}")
+            err_body = e.read().decode()
+            self._err(e.code, f"Whisper API error: {err_body}")
             return
         except Exception as e:
-            self._err(500, f"Transcription failed: {e}")
+            self._err(500, f"Transcription failed: {str(e)}")
             return
 
         # Step 2: Analyze with Claude
@@ -206,8 +210,13 @@ class Handler(BaseHTTPRequestHandler):
             result["transcript"] = transcript
             result["filename"] = filename
             self._ok(result)
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode()
+            self._err(e.code, f"Claude API error: {err_body}")
+        except json.JSONDecodeError as e:
+            self._err(500, f"Could not parse Claude response as JSON: {str(e)}")
         except Exception as e:
-            self._err(500, str(e))
+            self._err(500, f"Analysis failed: {str(e)}")
 
     def _analyze(self, body):
         if not API_KEY:
@@ -249,9 +258,38 @@ class Handler(BaseHTTPRequestHandler):
         raw = tb["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
         return json.loads(raw)
 
+    def _check_duplicate(self, filename, transcript):
+        """Check if a call already exists with same filename or similar transcript"""
+        try:
+            # Check by filename first (fast)
+            existing = supa("GET", f"calls?filename=eq.{urllib.parse.quote(filename)}&limit=1")
+            if existing:
+                return True, f"Duplicate filename: {filename}"
+            # Check by transcript similarity (first 200 chars)
+            if transcript and len(transcript) > 50:
+                snippet = transcript[:200].replace("'", "''")
+                # Check if transcript starts the same way
+                all_calls = supa("GET", "calls?limit=500&select=transcript,filename")
+                for c in all_calls:
+                    if c.get("transcript") and c["transcript"][:200] == transcript[:200]:
+                        return True, f"Duplicate content (matches {c.get('filename','unknown')})"
+            return False, ""
+        except Exception:
+            return False, ""
+
     def _save(self, body):
         try:
             p = json.loads(body)
+
+            # Duplicate check
+            skip_dup = p.get("check_duplicate", True)
+            if skip_dup:
+                is_dup, dup_reason = self._check_duplicate(
+                    p.get("filename",""), p.get("transcript",""))
+                if is_dup:
+                    self._ok({"duplicate": True, "reason": dup_reason})
+                    return
+
             record = {
                 "rep_name": p.get("rep_name") or p.get("rep_name_detected") or "Unknown",
                 "filename": p.get("filename",""),
