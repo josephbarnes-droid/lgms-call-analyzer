@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lgms-call-analyzer
+    env: python
+    buildCommand: |
+      apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info || true
+      pip install -r requirements.txt
+    startCommand: python lgms_server_v7.py
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
