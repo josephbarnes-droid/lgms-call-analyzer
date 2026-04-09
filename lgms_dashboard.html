@@ -376,7 +376,7 @@ function g(id){return document.getElementById(id);}
 function renderOverview(){
   const fc=getFC(),sc=scc(fc);
   const declines=allCalls.filter(c=>c.availability_decline).length;
-  const onsites=allCalls.filter(c=>c.onsite_suggested).length;
+  const turnedAway=allCalls.filter(c=>c.turned_away).length;
   const badQ=allCalls.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
   const conts=allCalls.filter(c=>c.is_continuation&&c.continuation_group_id).length;
   const booked=sc.filter(c=>c.call_outcome==='booked').length;
@@ -561,7 +561,7 @@ function renderLibrary(opts={}){
   </div>`);
   renderCallList();
 }
-function clearLibF(){libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:''};renderLibrary();}
+function clearLibF(){libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};renderLibrary();}
 function renderCallList(){
   const q=libFilters.search.toLowerCase();
   let list=allCalls.filter(c=>{
