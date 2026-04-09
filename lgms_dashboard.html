@@ -597,7 +597,7 @@ function buildRow(c){
       ${!SHARE_MODE?`<input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleSel('${c.id}')" style="width:15px;height:15px;cursor:pointer;flex-shrink:0" />`:''}
       <div class="cr-av" style="${isExcl?'background:var(--ink3)':''}">${ini(c.rep_name)}</div>
       <div class="cr-info">
-        <div class="cr-title"><span style="color:var(--g);cursor:pointer;font-weight:600" onclick="event.stopPropagation();nav('profiles',{rep:'${esc(c.rep_name||''})">${esc(c.rep_name||'?')}</span> — ${esc(c.caller_name||'Unknown')}${isExcl?' <span style="font-size:10px;color:var(--ink3)">(excl.)</span>':''}</div>
+        <div class="cr-title"><span style="color:var(--g);cursor:pointer;font-weight:600" onclick="event.stopPropagation();nav('profiles',{rep:'${esc(c.rep_name||'').replace(/'/g,'')}'})">${esc(c.rep_name||'?')}</span> — ${esc(c.caller_name||'Unknown')}${isExcl?' <span style="font-size:10px;color:var(--ink3)">(excl.)</span>':''}</div>
         <div class="cr-sub">${esc(c.call_purpose||'')} · ${esc(c.move_type||'')} · ${fmt(c.call_date||c.created_at)}${c.word_count?` · ~${c.word_count} words`:''}</div>
       </div>
       <div class="cr-right">
