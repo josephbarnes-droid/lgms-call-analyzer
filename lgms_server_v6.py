@@ -73,7 +73,8 @@ THIRD — detect call quality:
 - Short disconnected calls: set exclude_from_scoring=true
 
 FOURTH — detect call flags:
-- availability_decline: customer said they are NOT available or the move date doesn't work
+- availability_decline: customer said their date/situation doesn't work for THEM — they are declining or unavailable
+- turned_away: LGMS could NOT accommodate the customer — rep said things like "we don't have availability", "we're booked up", "that date is full", "we can't do that weekend", "we're not available then"
 - onsite_suggested: customer or rep mentioned an onsite visit/estimate would be preferred
 - is_continuation: contains "calling back about", "as we discussed", "following up on", "this is a follow-up", "called earlier", "spoke earlier"
 
@@ -145,7 +146,7 @@ Transcript:
 
 Respond ONLY with valid JSON, no markdown:
 
-{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_type":"local/long distance/unknown","call_outcome":"booked/estimate_sent/lost/unknown","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","availability_decline":false,"onsite_suggested":false,"is_continuation":false,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":false,"offered_alternatives":false,"took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
+{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_type":"local/long distance/unknown","call_outcome":"booked/estimate_sent/lost/unknown","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","availability_decline":false,"turned_away":false,"onsite_suggested":false,"is_continuation":false,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":false,"offered_alternatives":false,"took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
     return prompt
 
 # ──────────────────────────────────────────────
@@ -510,6 +511,7 @@ def _reanalyze_worker():
                 call_date = parse_call_date_from_filename(filename)
                 update_data = {
                     "availability_decline": result.get("availability_decline", False),
+                    "turned_away": result.get("turned_away", False),
                     "onsite_suggested": result.get("onsite_suggested", False),
                     "call_quality": result.get("call_quality", "normal"),
                     "is_continuation": result.get("is_continuation", False),
@@ -585,6 +587,8 @@ class Handler(BaseHTTPRequestHandler):
             self._reanalyze_status()
         elif path == "/corrections":
             self._get_corrections()
+        elif path.startswith("/audio_url/"):
+            self._get_audio_url()
         else:
             html = read_html()
             self.send_response(200)
@@ -822,6 +826,7 @@ class Handler(BaseHTTPRequestHandler):
                 "audio_url": p.get("audio_url", ""),
                 "share_token": p.get("share_token", ""),
                 "availability_decline": p.get("availability_decline", False),
+                "turned_away": p.get("turned_away", False),
                 "onsite_suggested": p.get("onsite_suggested", False),
                 "call_quality": call_quality,
                 "is_continuation": is_continuation,
@@ -867,6 +872,22 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = supa("GET", "corrections?order=created_at.desc&limit=200")
             self._ok(result)
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _get_audio_url(self):
+        try:
+            call_id = self.path.split("/audio_url/")[1].split("?")[0]
+            result = supa("GET", f"calls?id=eq.{call_id}&select=filename&limit=1")
+            if not result:
+                self._err(404, "Call not found"); return
+            filename = result[0].get("filename", "")
+            if not filename:
+                self._err(404, "No audio filename"); return
+            signed_url = supa_storage_signed_url("call-audio", filename, expires=3600)
+            if not signed_url:
+                self._err(404, "Audio file not found in storage"); return
+            self._ok({"url": signed_url})
         except Exception as e:
             self._err(500, str(e))
 
