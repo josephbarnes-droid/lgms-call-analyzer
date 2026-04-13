@@ -268,6 +268,8 @@ textarea.nt:focus{border-color:var(--g)}
     <button class="sb-btn" onclick="nav('management')" id="nav-management"><span class="sb-ico">⚙️</span>Rep Management</button>
     <button class="sb-btn" onclick="nav('shared')" id="nav-shared"><span class="sb-ico">📤</span>Shared Views</button>
     <button class="sb-btn" onclick="nav('corrections')" id="nav-corrections"><span class="sb-ico">✏️</span>Correction Log</button>
+    <button class="sb-btn" onclick="nav('tx_corrections')" id="nav-tx_corrections"><span class="sb-ico">🔤</span>Transcript Rules</button>
+    <button class="sb-btn" onclick="nav('txcorrections')" id="nav-txcorrections"><span class="sb-ico">🔤</span>Transcript Rules</button>
     <div class="sb-sep"></div>
     <button class="sb-btn" onclick="nav('add')" id="nav-add"><span class="sb-ico">➕</span>Add Calls</button>
   </div>
@@ -311,7 +313,7 @@ let currentPage='overview';
 let trendChart=null,repTrendChart=null;
 let shareType='location';
 let reanalyzePoller=null;
-let libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};
+let libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};
 let dateFilter=30;
 
 const SHARE_MODE=!!(window.SHARE_TOKEN);
@@ -322,7 +324,7 @@ async function init(){
   if(SHARE_MODE){
     g('share-banner').style.display='flex';
     g('share-banner-label').textContent=SHARE_LABEL||'Shared View';
-    ['sb-g2','nav-management','nav-shared','nav-corrections','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
+    ['sb-g2','nav-management','nav-shared','nav-corrections','nav-txcorrections','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
     g('tb-right').innerHTML='';
   }
   await loadCalls();
@@ -339,11 +341,11 @@ function nav(page,opts={}){
   currentPage=page;
   document.querySelectorAll('.sb-btn').forEach(el=>el.classList.remove('active'));
   const btn=g('nav-'+page);if(btn)btn.classList.add('active');
-  const titles={overview:'Overview',library:'Call Library',profiles:'Rep Profiles',management:'Rep Management',shared:'Shared Views',corrections:'Correction Log',add:'Add Calls'};
+  const titles={overview:'Overview',library:'Call Library',profiles:'Rep Profiles',management:'Rep Management',shared:'Shared Views',corrections:'Correction Log',txcorrections:'Transcript Rules',add:'Add Calls'};
   g('tb-title').textContent=opts.title||titles[page]||page;
   if(!SHARE_MODE)g('tb-right').innerHTML=page==='add'?'':`<button class="btn btn-g btn-sm" onclick="exportCSV()">↓ CSV</button><button class="btn btn-p btn-sm" onclick="nav('add')">+ Add Calls</button>`;
   closeMob();
-  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,add:renderAdd})[page]?.(opts);
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,tx_corrections:renderTxCorrections,add:renderAdd})[page]?.(opts);
 }
 function openMob(){g('sidebar').classList.add('mobile-open');g('mob-overlay').classList.add('on');}
 function closeMob(){g('sidebar').classList.remove('mobile-open');g('mob-overlay').classList.remove('on');}
@@ -380,6 +382,7 @@ function renderOverview(){
   const badQ=allCalls.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
   const conts=allCalls.filter(c=>c.is_continuation&&c.continuation_group_id).length;
   const booked=sc.filter(c=>c.call_outcome==='booked').length;
+  const softPipeline=sc.filter(c=>c.call_outcome==='soft_pipeline').length;
   const br=sc.length?Math.round(booked/sc.length*100):0;
   const compPct=sc.length?Math.round(sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]).length,0)/(sc.length*CK.length)*100):0;
   const excl=fc.filter(c=>c.exclude_from_scoring).length;
@@ -409,7 +412,7 @@ function renderOverview(){
       <div class="mc blue" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'score_high',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Avg Overall</div><div class="mc-val">${avg(sc,'overall')}</div><div class="mc-sub">out of 10</div></div>
       <div class="mc blue" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'score_high',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Avg Rapport</div><div class="mc-val">${avg(sc,'rapport_tone')}</div><div class="mc-sub">out of 10</div></div>
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Compliance</div><div class="mc-val">${compPct}%</div><div class="mc-sub">22-step avg</div></div>
-      <div class="mc ${br>=50?'green':'red'}" onclick="libFilters={rep:'',out:'booked',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Booking Rate</div><div class="mc-val">${br}%</div><div class="mc-sub">${booked} booked</div></div>
+      <div class="mc ${br>=50?'green':'red'}" onclick="libFilters={rep:'',out:'booked',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Booking Rate</div><div class="mc-val">${br}%</div><div class="mc-sub">${booked} booked · ${softPipeline} pipeline</div></div>
       <div class="mc red" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'decline',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Avail. Declines</div><div class="mc-val">${declines}</div><div class="mc-sub">customer declined</div></div>
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'turned_away',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Turned Away</div><div class="mc-val">${turnedAway}</div><div class="mc-sub">no LGMS availability</div></div>
     </div>
@@ -445,7 +448,7 @@ function navFilter(attn){libFilters.attn=attn;nav('library');}
 function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
 function renderLB(){
   const sc=scc(getFC());
-  const repNames=[...new Set(sc.map(c=>c.rep_name))].filter(Boolean);
+  const repNames=[...new Set(sc.map(c=>c.rep_name))].filter(r=>r&&sc.filter(c=>c.rep_name===r).length>=5);
   const data=repNames.map(r=>{
     const rc=sc.filter(c=>c.rep_name===r);
     const a=k=>rc.length?(rc.reduce((s,c)=>s+(c.scores?.[k]?.score||0),0)/rc.length):0;
@@ -503,7 +506,7 @@ function toggleCG(i){const el=g('cg-'+i);if(el)el.classList.toggle('open');}
 function renderTalk(sc){
   const w=(sc||[]).filter(c=>c.talk_ratio_rep>0);const el=g('talk-viz');if(!el)return;
   if(!w.length){el.innerHTML='<div style="color:var(--ink3);font-size:12px">No data yet</div>';return;}
-  const ar=Math.round(w.reduce((a,c)=>a+c.talk_ratio_rep,0)/w.length),ac=100-ar,ok=Math.abs(ar-40)<=8;
+  const ar=Math.round(w.reduce((a,c)=>a+c.talk_ratio_rep,0)/w.length),ac=100-ar;
   el.innerHTML=`<div class="tr-bar" style="margin-bottom:9px"><div class="tr-rep" style="width:${ar}%">${ar}%</div><div class="tr-cust" style="width:${ac}%">${ac}%</div></div>
     <div style="display:flex;gap:14px;font-size:11px;color:var(--ink3);margin-bottom:8px"><span style="color:var(--g)">■ Rep ${ar}%</span><span style="color:var(--blue)">■ Cust ${ac}%</span></div>
     <div style="font-size:12px;font-weight:600;color:${ok?'#16a34a':'#d97706'}">${ok?'✓ On target':'⚠ Target: 40/60'}</div>`;
@@ -533,12 +536,22 @@ function renderLibrary(opts={}){
         <option value="booked"${libFilters.out==='booked'?' selected':''}>Booked</option>
         <option value="estimate_sent"${libFilters.out==='estimate_sent'?' selected':''}>Estimate sent</option>
         <option value="lost"${libFilters.out==='lost'?' selected':''}>Lost</option>
+        <option value="soft_pipeline"${libFilters.out==='soft_pipeline'?' selected':''}>Soft Pipeline</option>
       </select>
       <select class="fsel" onchange="libFilters.score=this.value;renderCallList()">
         <option value="">All scores</option>
         <option value="high"${libFilters.score==='high'?' selected':''}>High 8-10</option>
         <option value="mid"${libFilters.score==='mid'?' selected':''}>Mid 5-7</option>
         <option value="low"${libFilters.score==='low'?' selected':''}>Low 1-4</option>
+      </select>
+      <select class="fsel" onchange="libFilters.move_cat=this.value;renderCallList()">
+        <option value="">All move types</option>
+        <option value="standard"${libFilters.move_cat==='standard'?' selected':''}>Standard</option>
+        <option value="specialty"${libFilters.move_cat==='specialty'?' selected':''}>Specialty</option>
+        <option value="unload_only"${libFilters.move_cat==='unload_only'?' selected':''}>Unload Only</option>
+        <option value="in_house"${libFilters.move_cat==='in_house'?' selected':''}>In-House</option>
+        <option value="commercial"${libFilters.move_cat==='commercial'?' selected':''}>Commercial</option>
+        <option value="storage"${libFilters.move_cat==='storage'?' selected':''}>Storage</option>
       </select>
       <select class="fsel" onchange="libFilters.sort=this.value;renderCallList()">
         <option value="newest"${libFilters.sort==='newest'?' selected':''}>Newest first</option>
@@ -561,7 +574,7 @@ function renderLibrary(opts={}){
   </div>`);
   renderCallList();
 }
-function clearLibF(){libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};renderLibrary();}
+function clearLibF(){libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};renderLibrary();}
 function renderCallList(){
   const q=libFilters.search.toLowerCase();
   let list=allCalls.filter(c=>{
@@ -575,6 +588,8 @@ function renderCallList(){
     if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
     if(libFilters.obj&&!(c.objections_detected||[]).includes(libFilters.obj))return false;
     if(libFilters.kw&&!(c.keywords_detected||[]).includes(libFilters.kw))return false;
+    if(libFilters.move_cat&&c.move_category!==libFilters.move_cat)return false;
+    if(libFilters.confidence==='low'&&(c.evaluation_confidence||10)>5)return false;
     if(libFilters.attn==='onsite'&&!c.onsite_suggested)return false;
     if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
     if(libFilters.attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
@@ -594,12 +609,12 @@ function renderCallList(){
 function buildRow(c){
   const s=c.scores?.overall?.score||0,eff=c.score_overrides?.overall??s;
   const isExcl=c.exclude_from_scoring,sel=selected.has(c.id);
-  const oClass=c.call_outcome==='booked'?'op-b':c.call_outcome==='estimate_sent'?'op-e':c.call_outcome==='lost'?'op-l':'op-u';
-  const oLabel=c.call_outcome==='booked'?'Booked':c.call_outcome==='estimate_sent'?'Estimate sent':c.call_outcome==='lost'?'Lost':'Unknown';
+  const oClass=c.call_outcome==='booked'?'op-b':c.call_outcome==='estimate_sent'?'op-e':c.call_outcome==='lost'?'op-l':c.call_outcome==='soft_pipeline'?'op-sp':'op-u';
+  const oLabel=c.call_outcome==='booked'?'Booked':c.call_outcome==='estimate_sent'?'Estimate sent':c.call_outcome==='lost'?'Lost':c.call_outcome==='soft_pipeline'?'Soft Pipeline':'Unknown';
   const sClass=c.customer_sentiment==='positive'?'sd-pos':c.customer_sentiment==='hesitant'?'sd-hes':c.customer_sentiment==='negative'?'sd-neg':'sd-neu';
   const tags=(c.tags||[]).map(t=>`<span class="tag" onclick="event.stopPropagation()">${esc(t)}</span>`).join('');
   const scoresHtml=SK.map((k,i)=>{const v=c.score_overrides?.[k]??c.scores?.[k]?.score??0,col=scCol(v);return`<div class="score-box"><div class="score-box-lbl">${SL[i]}</div><div class="score-box-val" style="color:${col}">${v}<span style="font-size:10px;color:var(--ink3)">/10</span></div><div class="score-box-bar"><div class="score-box-fill" style="width:${v*10}%;background:${col}"></div></div><div class="score-box-note">${esc(c.scores?.[k]?.note||'')}</div></div>`;}).join('');
-  const ckHtml=CK.map((k,i)=>`<div class="ck-item">${c.checklist?.[k]?'✅':'❌'} <span>${CKFULL[i]}</span></div>`).join('');
+  const ckHtml=CK.map((k,i)=>`<div class="ck-item">${(()=>{const v=c.checklist?.[k];return v===true?'<span style="color:#66bb6a">✓</span>':v==='na'?'<span style="color:var(--tx4);font-size:10px">N/A</span>':'<span style="color:var(--tx4);opacity:.5">✗</span>';})()}</span> <span>${CKFULL[i]}</span></div>`).join('');
   const ovCnt=c.score_overrides&&Object.keys(c.score_overrides).length;
   const ovrHtml=`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
     <select id="ok-${c.id}"><option value="">Category…</option>${SK.map(k=>`<option value="${k}">${k.replace(/_/g,' ')}</option>`).join('')}</select>
@@ -618,10 +633,11 @@ function buildRow(c){
       </div>
       <div class="cr-right">
         <span class="op ${oClass}">${oLabel}</span>
+        ${c.move_category&&c.move_category!=='standard'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(206,147,216,.12);color:var(--purple)">${c.move_category.replace('_',' ')}</span>`:''}
         ${c.call_quality&&c.call_quality!=='normal'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">${c.call_quality==='disconnected'?'📵':'⚠'} ${c.call_quality}</span>`:''}
         ${c.is_continuation?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--bl);color:var(--blue)">🔗</span>':''}
         ${c.availability_decline?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">🚫</span>':''}
-        ${c.onsite_suggested?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--al);color:var(--amber)">🏠</span>':''}
+        ${c.turned_away?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--al);color:var(--amber)">📵 Turned Away</span>':''}
         <span class="sdot ${sClass}"></span>
         ${tags}
         ${!isExcl?`<span class="score-big" style="color:${scCol(eff)}">${eff}<span style="font-size:11px;color:var(--ink3)">/10</span></span> <span style="font-size:11px;color:var(--ink3)">${avg([c],'rapport_tone')} R</span>`:''}
@@ -631,6 +647,9 @@ function buildRow(c){
     </div>
     <div class="cr-body">
       ${isExcl?`<div class="excl-banner">⚠ Excluded — ${esc(c.exclusion_reason||c.call_type||'marked excluded')}</div>`:''}
+      ${c.evaluation_confidence&&c.evaluation_confidence<=5?`<div style="background:rgba(255,183,77,.06);border:1px solid rgba(255,183,77,.2);border-radius:9px;padding:8px 13px;font-size:12px;color:var(--amber);margin-bottom:8px">⚠ Low confidence (${c.evaluation_confidence}/10) — manager review recommended</div>`:''}
+      ${c.loss_reason?`<div style="background:rgba(239,83,80,.06);border:1px solid rgba(239,83,80,.2);border-radius:9px;padding:8px 13px;font-size:12px;color:#ef9a9a;margin-bottom:8px">Lost — ${c.loss_reason.replace(/_/g,' ')}</div>`:''}
+      ${c.soft_pipeline_reason?`<div style="background:rgba(206,147,216,.06);border:1px solid rgba(206,147,216,.2);border-radius:9px;padding:8px 13px;font-size:12px;color:#ce93d8;margin-bottom:8px">Pipeline — ${c.soft_pipeline_reason.replace(/_/g,' ')}</div>`:''}
       <div class="ds"><h4>Summary</h4><p style="font-size:13px;line-height:1.75">${esc(c.call_summary||'')}</p>${c.key_details?`<div style="background:var(--gl);border-radius:9px;padding:10px 13px;margin-top:9px;font-size:12px;color:var(--gd);border:1px solid var(--g2)">${esc(c.key_details)}</div>`:''}</div>
       ${!isExcl?`<div class="ds"><h4>Performance Scores</h4><div class="scores-grid">${scoresHtml}</div></div>`:''}
       <div class="ds"><h4>22-Step Checklist</h4><div class="ck-grid">${ckHtml}</div></div>
@@ -650,8 +669,10 @@ function buildRow(c){
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
         <button class="btn btn-g btn-sm" onclick="exportPDFCall('${c.id}')">↓ PDF</button>
         ${c.filename?`<button class="btn btn-g btn-sm" onclick="playAudio('${c.id}',this)">▶ Audio</button>`:''}
+        <button class="btn btn-g btn-sm" onclick="openEditTranscript('${c.id}')">✏ Edit Transcript</button>
+        <button class="btn btn-g btn-sm" onclick="reapplyCorrections('${c.id}',this)">↻ Re-analyze</button>
       </div>
-      ${c.transcript?`<div class="ds"><h4>Transcript</h4><div class="txb" id="tx-${c.id}">${esc(c.transcript)}</div></div>`:''}
+      ${c.transcript?`<div class="ds"><h4>Transcript <span style="font-weight:400;color:var(--tx4);text-transform:none;letter-spacing:0">— click words to fix, then save correction rule</span></h4><div class="txb" id="tx-${c.id}" contenteditable="${SHARE_MODE?'false':'true'}" oninput="markTxEdited('${c.id}')" spellcheck="false">${esc(c.transcript)}</div>${!SHARE_MODE?`<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><input type="text" placeholder="Incorrect phrase" id="tx-find-${c.id}" class="ovr-inp" style="width:180px" /><span style="color:var(--tx3)">→</span><input type="text" placeholder="Correct phrase" id="tx-replace-${c.id}" class="ovr-inp" style="width:180px" /><button class="btn btn-s btn-sm" onclick="saveTranscriptCorrection('${c.id}')">Save rule</button><button class="btn btn-s btn-sm" onclick="reapplyCorrections('${c.id}')">↺ Re-analyze</button></div>`:''}</div>`:''}
       ${!SHARE_MODE?`<div style="text-align:right;margin-top:10px"><button class="btn btn-d btn-sm" onclick="delCall('${c.id}')">🗑 Delete</button></div>`:''}
     </div>
   </div>`;
@@ -669,6 +690,46 @@ async function playAudio(callId,btn){
     btn.innerHTML='Not found';btn.disabled=false;
     setTimeout(()=>{btn.innerHTML=orig;},2000);
   }
+}
+
+
+function markTxEdited(callId){
+  const tx=g('tx-'+callId);if(!tx)return;
+  tx.style.outline='2px solid var(--amber)';
+}
+
+async function saveTranscriptCorrection(callId){
+  const find=g('tx-find-'+callId)?.value.trim();
+  const replace=g('tx-replace-'+callId)?.value.trim();
+  const tx=g('tx-'+callId);
+  if(!find){alert('Enter the incorrect phrase to find');return;}
+  if(!replace){alert('Enter the correct replacement');return;}
+  const newTranscript=tx?tx.innerText:'';
+  try{
+    const r=await fetch(API+'/transcript_corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({find_text:find,replace_text:replace,call_id:callId,new_transcript:newTranscript})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);
+    // Update local call
+    const idx=allCalls.findIndex(c=>c.id===callId);
+    if(idx>=0){allCalls[idx].transcript=newTranscript;}
+    if(g('tx-find-'+callId))g('tx-find-'+callId).value='';
+    if(g('tx-replace-'+callId))g('tx-replace-'+callId).value='';
+    if(tx){tx.style.outline='2px solid var(--g)';setTimeout(()=>{tx.style.outline='';},1500);}
+    alert('✓ Correction saved! Will apply to all future transcripts.');
+  }catch(e){alert('Failed: '+e.message);}
+}
+
+async function reapplyCorrections(callId){
+  if(!confirm('Re-apply corrections and re-analyze this call? This will update the transcript and scores.'))return;
+  const btn=event.target;btn.disabled=true;btn.innerHTML='<span class="spin"></span> Re-analyzing…';
+  try{
+    const r=await fetch(API+'/transcript_corrections/reapply',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({call_id:callId})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);
+    await loadCalls();
+    if(currentPage==='library')renderCallList();
+    alert('✓ Re-analyzed with corrections applied.');
+  }catch(e){alert('Failed: '+e.message);}finally{btn.disabled=false;btn.innerHTML='↺ Re-analyze';}
 }
 
 function jumpTx(callId,charPos){
@@ -1049,6 +1110,227 @@ async function submitFile(){
     allCalls.unshift(Array.isArray(saved)?saved[0]:saved);
     msg.innerHTML='<div class="msg-ok">✓ Saved!</div>';btn.disabled=false;btn.textContent='Analyze & Save';
   }catch(e){msg.innerHTML=`<div class="msg-err">⚠ ${e.message}</div>`;btn.disabled=false;btn.textContent='Analyze & Save';}
+}
+
+
+async function renderTxCorrections(){
+  // Load fresh from server
+  let txc=[];
+  try{const r=await fetch(API+'/transcript_corrections');if(r.ok)txc=await r.json();}catch(e){}
+  set('page',`<div class="card">
+    <div class="card-hdr"><h3>Transcript Correction Rules</h3><span class="bdg">${txc.length} rules</span></div>
+    <p style="font-size:13px;color:var(--tx3);margin-bottom:16px;line-height:1.6">
+      These find-and-replace rules are applied to every new transcript before Claude analysis.
+      They also auto-populate Deepgram's keyterm list to improve recognition at the source.
+      Add rules here or directly from any call's transcript editor.
+    </p>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:10px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Incorrect phrase</div>
+        <input type="text" id="new-find" class="ovr-inp" placeholder="e.g. guys and neighbors" style="width:100%;padding:9px 12px;border-radius:10px" />
+      </div>
+      <div style="color:var(--tx3);padding-bottom:2px">→</div>
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:10px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Correct phrase</div>
+        <input type="text" id="new-replace" class="ovr-inp" placeholder="e.g. Little Guys Movers" style="width:100%;padding:9px 12px;border-radius:10px" />
+      </div>
+      <button class="btn btn-p btn-sm" onclick="addTxCorrection()" style="flex-shrink:0">Add Rule</button>
+    </div>
+    <div id="tx-rules-msg"></div>
+    ${txc.length?`<table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr>
+        <th style="padding:8px 11px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Find (incorrect)</th>
+        <th style="padding:8px 11px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Replace with</th>
+        <th style="padding:8px 11px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Added</th>
+        <th style="border-bottom:1px solid var(--border)"></th>
+      </tr></thead>
+      <tbody>${txc.map(c=>`<tr>
+        <td style="padding:11px;border-bottom:1px solid var(--border);color:var(--red);font-family:'JetBrains Mono',monospace;font-size:12px">${esc(c.find_text)}</td>
+        <td style="padding:11px;border-bottom:1px solid var(--border);color:#66bb6a;font-family:'JetBrains Mono',monospace;font-size:12px">${esc(c.replace_text)}</td>
+        <td style="padding:11px;border-bottom:1px solid var(--border);color:var(--tx3);font-size:12px">${fmt(c.created_at)}</td>
+        <td style="padding:11px;border-bottom:1px solid var(--border)"><button class="btn btn-d btn-xs" onclick="deleteTxCorrection('${c.id}')">Delete</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`:'<div class="empty"><span class="empty-ico">🔤</span><p>No correction rules yet.<br>Add rules here or from the transcript editor in any call.</p></div>'}
+  </div>`);
+}
+
+async function addTxCorrection(){
+  const find=g('new-find')?.value.trim(), replace=g('new-replace')?.value.trim();
+  if(!find||!replace){g('tx-rules-msg').innerHTML='<div class="msg-err">Both fields required</div>';return;}
+  try{
+    const r=await fetch(API+'/transcript_corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({find_text:find,replace_text:replace})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);
+    g('new-find').value='';g('new-replace').value='';
+    g('tx-rules-msg').innerHTML='<div class="msg-ok">✓ Rule saved</div>';
+    setTimeout(()=>renderTxCorrections(),800);
+  }catch(e){g('tx-rules-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+
+async function deleteTxCorrection(id){
+  if(!confirm('Delete this correction rule?'))return;
+  try{
+    await fetch(API+'/transcript_corrections/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+    renderTxCorrections();
+  }catch(e){alert(e.message);}
+}
+
+
+// ── TRANSCRIPT EDITING ──
+function openEditTranscript(callId) {
+  const c = allCalls.find(x => x.id === callId);
+  if (!c) return;
+  // Build modal
+  const existing = document.getElementById('edit-tx-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'edit-tx-modal';
+  modal.className = 'modal-bg';
+  modal.innerHTML = `<div class="modal-box" style="max-width:700px">
+    <h2>Edit Transcript</h2>
+    <p style="font-size:12.5px;color:var(--tx3);margin-bottom:14px;line-height:1.6">
+      Fix transcription errors below. Optionally save a find/replace rule so future calls are corrected automatically.
+    </p>
+    <div class="fg"><label>Transcript</label>
+      <textarea id="edit-tx-text" style="min-height:300px;font-size:12px">${esc(c.transcript||'')}</textarea>
+    </div>
+    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border);margin-bottom:12px">
+      <div style="font-size:10px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px">Save as correction rule (optional)</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="edit-tx-find" placeholder="Find text (e.g. guys and neighbors)" class="ovr-inp" style="flex:1;min-width:160px" />
+        <span style="color:var(--tx3)">→</span>
+        <input type="text" id="edit-tx-replace" placeholder="Replace with (e.g. Little Guys Movers)" class="ovr-inp" style="flex:1;min-width:160px" />
+      </div>
+      <div style="font-size:11.5px;color:var(--tx3);margin-top:7px">If filled, this rule will auto-apply to all future transcripts.</div>
+    </div>
+    <div id="edit-tx-msg"></div>
+    <div class="modal-btns">
+      <button class="btn btn-g" onclick="document.getElementById('edit-tx-modal').remove()">Cancel</button>
+      <button class="btn btn-p" onclick="saveEditedTranscript('${callId}')">Save & Re-analyze</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function saveEditedTranscript(callId) {
+  const newTx = document.getElementById('edit-tx-text')?.value?.trim();
+  const findText = document.getElementById('edit-tx-find')?.value?.trim();
+  const replaceText = document.getElementById('edit-tx-replace')?.value?.trim();
+  const msg = document.getElementById('edit-tx-msg');
+  if (!newTx) { msg.innerHTML = '<div class="msg-err">Transcript cannot be empty</div>'; return; }
+  const btn = document.querySelector('#edit-tx-modal .btn-p');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Saving…';
+  try {
+    await fetch(API + '/transcript_corrections/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ call_id: callId, find_text: findText||'', replace_text: replaceText||'', new_transcript: newTx })
+    });
+    // Re-analyze with corrected transcript
+    const r = await fetch(API + '/transcript_corrections/reapply', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ call_id: callId })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Re-analyze failed');
+    msg.innerHTML = '<div class="msg-ok">✓ Saved and re-analyzed!</div>';
+    await loadCalls();
+    setTimeout(() => { document.getElementById('edit-tx-modal')?.remove(); if(currentPage==='library')renderCallList(); }, 1200);
+  } catch(e) {
+    msg.innerHTML = `<div class="msg-err">${e.message}</div>`;
+    btn.disabled = false; btn.innerHTML = 'Save & Re-analyze';
+  }
+}
+
+async function reapplyCorrections(callId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  try {
+    const r = await fetch(API + '/transcript_corrections/reapply', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ call_id: callId })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    await loadCalls();
+    if (currentPage === 'library') renderCallList();
+    btn.innerHTML = '✓';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 1500);
+  } catch(e) {
+    btn.innerHTML = orig; btn.disabled = false;
+    alert('Re-analyze failed: ' + e.message);
+  }
+}
+
+
+// ── TRANSCRIPT CORRECTIONS PAGE ──
+let txCorrections = [];
+async function loadTxCorrections() {
+  try {
+    const r = await fetch(API + '/transcript_corrections');
+    if (r.ok) txCorrections = await r.json();
+  } catch(e) {}
+}
+
+function renderTxCorrections() {
+  loadTxCorrections().then(() => {
+    set('page', `<div class="card">
+      <div class="card-hdr"><h3>Transcript Correction Rules</h3><span class="bdg">${txCorrections.length} rules</span></div>
+      <p style="font-size:13px;color:var(--tx3);margin-bottom:16px;line-height:1.6">
+        These find/replace rules are automatically applied to every new transcript before Claude analysis.
+        They also populate Deepgram's keyterm list to improve recognition at the source.
+        Add rules by clicking "Edit Transcript" on any call.
+      </p>
+      <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <input type="text" id="new-find" class="ovr-inp" placeholder="Find text…" style="flex:1;min-width:160px" />
+        <input type="text" id="new-replace" class="ovr-inp" placeholder="Replace with…" style="flex:1;min-width:160px" />
+        <button class="btn btn-p btn-sm" onclick="addTxRule()">+ Add Rule</button>
+      </div>
+      <div id="tx-rules-msg"></div>
+      ${txCorrections.length ? `
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr>
+          <th style="padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Find</th>
+          <th style="padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Replace With</th>
+          <th style="padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Added</th>
+          <th style="border-bottom:1px solid var(--border)"></th>
+        </tr></thead>
+        <tbody>${txCorrections.map(r => `<tr>
+          <td style="padding:10px;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--red)">${esc(r.find_text)}</td>
+          <td style="padding:10px;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:12px;color:#66bb6a">${esc(r.replace_text)}</td>
+          <td style="padding:10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--tx3)">${fmt(r.created_at)}</td>
+          <td style="padding:10px;border-bottom:1px solid var(--border)"><button class="btn btn-d btn-xs" onclick="deleteTxRule('${r.id}')">Delete</button></td>
+        </tr>`).join('')}
+        </tbody>
+      </table>` : '<div class="empty"><span class="empty-ico">🔤</span><p>No rules yet.<br>Edit a transcript to add your first correction rule.</p></div>'}
+    </div>`);
+  });
+}
+
+async function addTxRule() {
+  const find = document.getElementById('new-find')?.value?.trim();
+  const replace = document.getElementById('new-replace')?.value?.trim();
+  const msg = document.getElementById('tx-rules-msg');
+  if (!find || !replace) { msg.innerHTML = '<div class="msg-err">Both fields required</div>'; return; }
+  try {
+    await fetch(API + '/transcript_corrections/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ find_text: find, replace_text: replace })
+    });
+    msg.innerHTML = '<div class="msg-ok">✓ Rule saved</div>';
+    await loadTxCorrections();
+    setTimeout(() => renderTxCorrections(), 800);
+  } catch(e) { msg.innerHTML = `<div class="msg-err">${e.message}</div>`; }
+}
+
+async function deleteTxRule(id) {
+  if (!confirm('Delete this rule?')) return;
+  try {
+    await fetch(API + '/transcript_corrections/delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ id })
+    });
+    txCorrections = txCorrections.filter(r => r.id !== id);
+    renderTxCorrections();
+  } catch(e) { alert(e.message); }
 }
 
 function exportCSV(){window.open(API+'/export/csv','_blank');}
