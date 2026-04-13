@@ -11,9 +11,15 @@ Required environment variables:
 """
 
 import os, json, urllib.request, urllib.error, urllib.parse, tempfile, mimetypes
-import zipfile, io, secrets, re, uuid, threading, time
+import zipfile, io, secrets, re, uuid, threading, time, sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone, timedelta
+
+# Force stdout flush immediately so Render logs show in real time
+sys.stdout.reconfigure(line_buffering=True)
+
+def log(msg):
+    print(msg, flush=True)
 
 API_KEY      = os.environ.get("ANTHROPIC_API_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
@@ -324,9 +330,9 @@ def enforce_storage_cap():
                     supa("PATCH", f"calls?id=eq.{call['id']}", {"audio_url": ""})
                     total_bytes -= file_size
                 except Exception as e:
-                    print(f"  Storage cleanup error: {e}")
+                    log(f"  Storage cleanup error: {e}")
     except Exception as e:
-        print(f"  Storage cap error: {e}")
+        log(f"  Storage cap error: {e}")
 
 # ──────────────────────────────────────────────
 # CORRECTIONS
@@ -391,7 +397,7 @@ def find_or_create_continuation_group(rep_name, caller_name):
         if existing and existing[0].get("continuation_group_id"):
             return existing[0]["continuation_group_id"]
     except Exception as e:
-        print(f"  Continuation lookup error: {e}")
+        log(f"  Continuation lookup error: {e}")
     return str(uuid.uuid4())
 
 def retroactively_link_continuation(rep_name, caller_name, group_id):
@@ -403,7 +409,7 @@ def retroactively_link_continuation(rep_name, caller_name, group_id):
         for call in (unlinked or []):
             supa("PATCH", f"calls?id=eq.{call['id']}", {"continuation_group_id": group_id, "is_continuation": True})
     except Exception as e:
-        print(f"  Retroactive linking error: {e}")
+        log(f"  Retroactive linking error: {e}")
 
 # ──────────────────────────────────────────────
 # HTML LOADER
@@ -497,7 +503,12 @@ def transcribe_audio_deepgram(audio_bytes, filename, keyterms=None):
     with urllib.request.urlopen(req, timeout=300) as r:
         result = json.loads(r.read())
 
-    # Extract diarized transcript with speaker labels
+    # Log Deepgram response structure for debugging
+    has_utterances = bool(result.get("results", {}).get("utterances"))
+    has_channels = bool(result.get("results", {}).get("channels"))
+    log(f"  Deepgram response: utterances={has_utterances}, channels={has_channels}")
+
+    # Try utterances first (best diarization)
     utterances = result.get("results", {}).get("utterances", [])
     if utterances:
         lines = []
@@ -507,17 +518,41 @@ def transcribe_audio_deepgram(audio_bytes, filename, keyterms=None):
             if text:
                 lines.append(f"Speaker {speaker}: {text}")
         transcript = "\n".join(lines)
-        is_diarized = True
-    else:
-        # Fallback to plain transcript
-        channels = result.get("results", {}).get("channels", [])
-        if channels:
-            transcript = channels[0].get("alternatives", [{}])[0].get("transcript", "")
-        else:
-            transcript = ""
-        is_diarized = False
+        log(f"  Diarized via utterances: {len(utterances)} turns")
+        return transcript, True
 
-    return transcript, is_diarized
+    # Fallback: try word-level diarization from channels
+    channels = result.get("results", {}).get("channels", [])
+    if channels:
+        words = channels[0].get("alternatives", [{}])[0].get("words", [])
+        plain = channels[0].get("alternatives", [{}])[0].get("transcript", "")
+
+        if words and any("speaker" in w for w in words):
+            # Build diarized transcript from word-level speaker tags
+            lines = []
+            current_speaker = None
+            current_words = []
+            for w in words:
+                spk = w.get("speaker", 0)
+                word = w.get("punctuated_word", w.get("word", ""))
+                if spk != current_speaker:
+                    if current_words:
+                        lines.append(f"Speaker {current_speaker}: {' '.join(current_words)}")
+                    current_speaker = spk
+                    current_words = [word]
+                else:
+                    current_words.append(word)
+            if current_words:
+                lines.append(f"Speaker {current_speaker}: {' '.join(current_words)}")
+            transcript = "\n".join(lines)
+            log(f"  Diarized via word-level: {len(lines)} turns")
+            return transcript, True
+        else:
+            log(f"  No diarization data, using plain transcript ({len(plain)} chars)")
+            return plain, False
+
+    log("  Deepgram returned no usable transcript")
+    return "", False
 
 # Fallback Whisper transcription if Deepgram unavailable
 def transcribe_audio_whisper(audio_bytes, filename):
@@ -549,7 +584,7 @@ def transcribe_audio(audio_bytes, filename, keyterms=None):
     if DEEPGRAM_KEY:
         return transcribe_audio_deepgram(audio_bytes, filename, keyterms)
     elif OPENAI_KEY:
-        print("  WARNING: Deepgram not configured, falling back to Whisper")
+        log("  WARNING: Deepgram not configured, falling back to Whisper")
         return transcribe_audio_whisper(audio_bytes, filename)
     else:
         raise Exception("No transcription API configured. Set DEEPGRAM_API_KEY.")
@@ -726,7 +761,7 @@ def _reanalyze_worker():
                     _reanalyze_job["processed"] += 1
 
             except Exception as e:
-                print(f"  Re-analyze error for {filename}: {e}")
+                log(f"  Re-analyze error for {filename}: {e}")
                 with _reanalyze_lock:
                     _reanalyze_job["errors"] += 1
                     _reanalyze_job["processed"] += 1
@@ -740,7 +775,7 @@ def _reanalyze_worker():
         with _reanalyze_lock:
             _reanalyze_job["status"] = "error"
             _reanalyze_job["current"] = str(e)
-        print(f"  Re-analyze worker error: {e}")
+        log(f"  Re-analyze worker error: {e}")
 
 # ──────────────────────────────────────────────
 # HTTP HANDLER
@@ -748,7 +783,7 @@ def _reanalyze_worker():
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        print(f"  {args[0]} {args[1]}")
+        log(f"  {args[0]} {args[1]}")
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -889,11 +924,11 @@ class Handler(BaseHTTPRequestHandler):
                     keyterms = build_keyterms()
                     tx_corrections = []
 
-                print(f"  Transcribing {filename} ({len(audio_bytes)} bytes) via {'Deepgram' if DEEPGRAM_KEY else 'Whisper'}...")
+                log(f"  Transcribing {filename} ({len(audio_bytes)} bytes) via {'Deepgram' if DEEPGRAM_KEY else 'Whisper'}...")
                 transcript, is_diarized = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
                 if not transcript or not transcript.strip():
                     self._err(400, "Transcription empty — audio may be silent"); return
-                print(f"  Transcription done: {len(transcript)} chars, diarized={is_diarized}")
+                log(f"  Transcription done: {len(transcript)} chars, diarized={is_diarized}")
 
                 # Apply corrections
                 clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
@@ -910,7 +945,7 @@ class Handler(BaseHTTPRequestHandler):
                 supa_storage_upload("call-audio", filename, audio_bytes, "audio/mpeg")
                 result["audio_url"] = supa_storage_signed_url("call-audio", filename)
             except Exception as e:
-                print(f"  Audio storage warning: {e}")
+                log(f"  Audio storage warning: {e}")
                 result["audio_url"] = ""
 
             self._ok(result)
@@ -1313,7 +1348,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
 
             result = call_claude("claude-sonnet-4-6")
             if result.get("confidence_overall", 1.0) < 0.85:
-                print("  Dedup: escalating to Opus")
+                log("  Dedup: escalating to Opus")
                 result = call_claude("claude-opus-4-6")
 
             self._ok(result)
@@ -1464,14 +1499,14 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
 
 
 if __name__ == "__main__":
-    print("=" * 55)
-    print("  Little Guys Movers — Call Analyzer Server v9")
-    print("=" * 55)
+    log("=" * 55)
+    log("  Little Guys Movers — Call Analyzer Server v9")
+    log("=" * 55)
     missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","DEEPGRAM_API_KEY"] if not os.environ.get(v)]
     if missing:
-        print("\n  WARNING: Missing env vars: " + ", ".join(missing))
+        log("\n  WARNING: Missing env vars: " + ", ".join(missing))
     else:
-        print("\n  All environment variables loaded")
-    print(f"  Running at http://127.0.0.1:{PORT}")
-    print("  Press Ctrl+C to stop\n")
+        log("\n  All environment variables loaded")
+    log(f"  Running at http://127.0.0.1:{PORT}")
+    log("  Press Ctrl+C to stop\n")
     HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
