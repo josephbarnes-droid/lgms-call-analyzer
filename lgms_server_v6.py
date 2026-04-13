@@ -1,11 +1,12 @@
 """
-Little Guys Movers - Call Analyzer Server v8
+Little Guys Movers - Call Analyzer Server v9
 =============================================
 Required environment variables:
   ANTHROPIC_API_KEY  - Anthropic API key
   SUPABASE_URL       - Supabase project URL
   SUPABASE_KEY       - Supabase anon/publishable key
-  OPENAI_API_KEY     - OpenAI API key for Whisper transcription
+  DEEPGRAM_API_KEY   - Deepgram API key for transcription
+  OPENAI_API_KEY     - optional fallback if Deepgram unavailable
   PORT               - optional, defaults to 8765
 """
 
@@ -17,10 +18,11 @@ from datetime import datetime, timezone, timedelta
 API_KEY      = os.environ.get("ANTHROPIC_API_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-OPENAI_KEY   = os.environ.get("OPENAI_API_KEY", "")
+DEEPGRAM_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
+OPENAI_KEY   = os.environ.get("OPENAI_API_KEY", "")  # fallback
 PORT         = int(os.environ.get("PORT", 8765))
 
-# Global semaphore — max 3 concurrent Whisper/Claude calls across ALL requests
+# Global semaphore — max 3 concurrent transcription/Claude calls
 _analysis_semaphore = threading.Semaphore(3)
 
 # Background re-analyze job state
@@ -39,77 +41,154 @@ _reanalyze_lock = threading.Lock()
 # CLAUDE PROMPT
 # ──────────────────────────────────────────────
 
-def build_prompt(transcript, filename, corrections=None):
-    """Build Claude prompt, optionally injecting recent corrections as few-shot examples."""
+def build_prompt(transcript, filename, corrections=None, is_diarized=False):
+    """Build Claude prompt with move-type classification, updated scoring, NA checklist items."""
 
     corrections_block = ""
     if corrections:
         examples = []
-        for c in corrections[:20]:  # max 20 examples
+        for c in corrections[:20]:
             note = c.get("manager_note", "")
             examples.append(
                 f"- {c['category']}: scored {c['original_score']} but correct score is {c['corrected_score']}"
                 + (f" — reason: {note}" if note else "")
             )
         if examples:
-            corrections_block = "\n\nRECENT SCORING CORRECTIONS (use these to calibrate your scoring):\n" + "\n".join(examples) + "\n"
+            corrections_block = "\n\nRECENT SCORING CORRECTIONS (calibrate your scoring using these):\n" + "\n".join(examples) + "\n"
+
+    diarization_note = ""
+    if is_diarized:
+        diarization_note = """
+TRANSCRIPT FORMAT: This transcript has speaker labels (Speaker 0, Speaker 1, etc.).
+- Speaker 0 is typically the rep (answers the phone, introduces themselves first)
+- Speaker 1 is typically the customer
+- Use these labels to accurately determine talk ratio and who said what
+- Rep name detection: look for Speaker 0's introduction
+"""
 
     prompt = f"""You are a sales call evaluator for Little Guys Movers (LGMS).
-{corrections_block}
-FIRST — classify this call:
-- Count approximately how many words are in the transcript
-- Determine the call type: "sales_estimate", "follow_up", "complaint", "booking_confirmation", "non_sales", "too_short", or "other"
-- If the transcript has fewer than 80 words OR is clearly not a sales estimate call, set call_type accordingly and set exclude_from_scoring to true
+{corrections_block}{diarization_note}
+STEP 1 — CLASSIFY CALL TYPE:
+Determine the move_category (this drives which checklist steps apply):
+- "standard": typical household move, load and unload
+- "specialty": single heavy item — piano, safe, hot tub, pool table, single appliance
+- "unload_only": truck already packed, just unloading
+- "in_house": moving items within the same location
+- "commercial": office or business move
+- "storage": moving out of or into storage
+- "non_move": not a moving estimate — complaint, inquiry, wrong number, etc.
 
-SECOND — detect the rep name:
-- Look for how the rep introduces themselves (e.g. "This is JD", "Hi this is Manning", "Thank you for calling Little Guys this is Sarah")
-- Return FIRST NAME ONLY (e.g. "Caleb" not "Caleb Smith")
-- Return "Unknown" if not found
+Also determine:
+- call_type: "sales_estimate" | "follow_up" | "complaint" | "booking_confirmation" | "non_sales" | "too_short" | "other"
+- word_count: approximate word count
+- exclude_from_scoring: true if fewer than 80 words OR clearly not a sales call OR disconnected
 
-THIRD — detect call quality:
-- "disconnected": abrupt ending, "Hello? Hello?" patterns, very short (<60 sec of content)
-- "poor_audio": heavy [inaudible] density (5+ occurrences), one-sided conversation
+STEP 2 — DETECT REP NAME:
+- Look for rep introduction (e.g. "This is Britt", "Thank you for calling Little Guys this is Sarah")
+- If diarized transcript, look at Speaker 0's first lines
+- Return FIRST NAME ONLY. Return "Unknown" if not found.
+
+STEP 3 — CALL QUALITY:
+- "disconnected": abrupt ending, "Hello? Hello?" patterns, very short
+- "poor_audio": heavy [inaudible] density (5+ occurrences), one-sided
 - "normal": otherwise
-- Short disconnected calls: set exclude_from_scoring=true
 
-FOURTH — detect call flags:
-- availability_decline: customer said their date/situation doesn't work for THEM — they are declining or unavailable
-- turned_away: LGMS could NOT accommodate the customer — rep said things like "we don't have availability", "we're booked up", "that date is full", "we can't do that weekend", "we're not available then"
-- onsite_suggested: customer or rep mentioned an onsite visit/estimate would be preferred
-- is_continuation: contains "calling back about", "as we discussed", "following up on", "this is a follow-up", "called earlier", "spoke earlier"
+STEP 4 — FLAGS:
+- availability_decline: CUSTOMER's date/situation doesn't work for them
+- turned_away: LGMS could NOT accommodate — rep said "we're booked", "no availability", "can't do that date"
+- onsite_suggested: onsite visit/estimate mentioned
+- is_continuation: "calling back about", "as we discussed", "following up", "spoke earlier"
 
-REQUIRED CALL SEQUENCE (22 steps):
-1. Move date
-2. Customer full name
-3. Phone number
-4. Cities/locations
-5. House or apt (load AND unload)
-6. Stairs/long walk both locations
-7. Room-by-room inventory (rep controls pace)
-8. Forgotten items: appliances, outdoor/garage, rugs/pictures/lamps/TVs
-9. Boxes ("moving boxes")
-10. Give price IMMEDIATELY — #1 priority
-11. FVP pitch: declared value, $7 per $1,000, handle objections
-12. Attempt to close
-13. If booking: confirm time slot, email, 2 confirmation calls
-14. If not booking: offer email estimate
-15. Thank customer
-16. Asked customer name at START of call
-17. Led the estimate process (Navigator/Pilot) — rep controlled flow
-18. Attempted to schedule onsite if customer preferred it
-19. Offered alternative solutions if customer hesitated on full-service (pack-only, load-only, National Express) — evaluate as customer-first problem solving
-20. Took rapport opportunities — acknowledged personal info customer shared
-21. Booking wrap-up — reviewed service, confirmed nothing missing, explained crew call-ahead
-22. Lead captured — name, number, notes logged even if no booking
+STEP 5 — OUTCOME & PIPELINE:
+- call_outcome: "booked" | "estimate_sent" | "soft_pipeline" | "lost" | "unknown"
+- Use "soft_pipeline" when customer is interested but not ready: needs partner approval, no exact date, needs to think, will call back
+- loss_reason (only if lost): "price_too_high" | "went_with_competitor" | "wrong_timing" | "no_availability" | "just_shopping" | "other" | ""
+- soft_pipeline_reason (only if soft_pipeline): "needs_partner" | "no_exact_date" | "needs_to_think" | "will_call_back" | "other" | ""
+- Did rep attempt to overcome objection before letting soft pipeline go? (affects closing_attempt score)
 
-KEY RULES:
-- Simple moves (apt, 1-2BR): quote HOURLY with price RANGE
-- Always attempt to close
-- Give price on first contact
-- Be confident, friendly, knowledgeable
-- Rep should sound engaged and enthusiastic — not flat or bothered
+STEP 6 — CHECKLIST (apply based on move_category):
 
-TALK RATIO: Count rep lines vs customer lines as percentages. Ideal: rep 40% / customer 60%.
+STANDARD MOVE — all 22 steps apply:
+1. got_move_date
+2. got_customer_name
+3. got_phone_number
+4. got_cities
+5. got_home_type
+6. got_stairs_info
+7. did_full_inventory
+8. asked_forgotten_items
+9. asked_about_boxes
+10. gave_price_on_call
+11. pitched_fvp (Full Value Protection — ALWAYS required for standard)
+12. attempted_to_close
+13. offered_email_estimate (if not booked) / mentioned_confirmations (if booked)
+14. mentioned_confirmations
+15. thanked_customer
+16. asked_name_at_start
+17. led_estimate_process
+18. scheduled_onsite_attempt — set to "na" unless customer specifically asked for onsite
+19. offered_alternatives — set to "na" unless customer hesitated or move was difficult
+20. took_rapport_opportunities
+21. completed_booking_wrapup (if booked)
+22. captured_lead
+
+SPECIALTY (piano, safe, hot tub, etc.) — reduced checklist:
+- Apply: got_move_date, got_customer_name, got_phone_number, got_cities, got_stairs_info, gave_price_on_call, pitched_fvp, attempted_to_close, mentioned_confirmations, thanked_customer, asked_name_at_start, captured_lead
+- Set to "na": got_home_type, did_full_inventory, asked_forgotten_items, asked_about_boxes, scheduled_onsite_attempt, offered_alternatives, led_estimate_process, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities
+
+UNLOAD ONLY — reduced checklist:
+- Apply: got_move_date, got_customer_name, got_phone_number, got_cities, got_stairs_info, gave_price_on_call, attempted_to_close, mentioned_confirmations, thanked_customer, asked_name_at_start, captured_lead
+- Set to "na": got_home_type, did_full_inventory, asked_forgotten_items, asked_about_boxes, pitched_fvp, scheduled_onsite_attempt, offered_alternatives, led_estimate_process, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities
+
+IN-HOUSE SHUFFLE — reduced checklist:
+- Apply: got_move_date, got_customer_name, got_phone_number, did_full_inventory, gave_price_on_call, pitched_fvp, attempted_to_close, thanked_customer, asked_name_at_start, captured_lead
+- Set to "na": got_cities, got_home_type, got_stairs_info, asked_forgotten_items, asked_about_boxes, scheduled_onsite_attempt, offered_alternatives, mentioned_confirmations, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities, led_estimate_process
+
+COMMERCIAL — apply most steps, treat inventory as equipment/furniture list:
+- Apply all standard steps
+- Set to "na": scheduled_onsite_attempt, offered_alternatives (unless triggered)
+
+STORAGE — reduced checklist:
+- Apply: got_move_date, got_customer_name, got_phone_number, got_cities, got_stairs_info, gave_price_on_call, pitched_fvp, attempted_to_close, mentioned_confirmations, thanked_customer, asked_name_at_start, captured_lead
+- Set to "na": got_home_type, did_full_inventory, asked_forgotten_items, asked_about_boxes, scheduled_onsite_attempt, offered_alternatives, led_estimate_process, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities
+
+CHECKLIST VALUES: true | false | "na"
+- true: step was completed
+- false: step was applicable and NOT completed (counts against compliance)
+- "na": step does not apply to this move type (excluded from compliance %)
+
+STEP 7 — SCORING (1-10, be honest and critical):
+
+INFORMATION COMPLETENESS (renamed from info_sequence):
+- Score based on WHAT information was gathered, NOT the order it was gathered
+- A rep who gets all required info while having a natural conversation scores high
+- Penalize only if required information was NEVER obtained, not if the path was nonlinear
+- A rep who lets the customer talk and then smoothly circles back to get missing info scores well
+
+CALL CONTROL / LED ESTIMATE PROCESS:
+- Score on whether rep ULTIMATELY steered the call to all required destinations
+- Do NOT penalize for allowing natural conversation, rapport-building, or customer tangents
+- Penalize only if the rep lost control and never recovered key information
+- A rep who acknowledges a customer story and then smoothly returns to the estimate scores well
+
+FVP PITCH:
+- Standard, specialty, commercial, in_house: required
+- Unload only, storage: not required — score 0 only if it was a missed opportunity, otherwise N/A note
+
+RAPPORT & TONE (1-10):
+- 1-3: Flat, bothered, disengaged; missed obvious rapport opportunities; customer seemed uncomfortable
+- 4-6: Polite but mechanical; some warmth but rapport opportunities missed or awkward
+- 7-8: Warm and engaged; acknowledged customer's situation; customer felt heard
+- 9-10: Excellent — enthusiastic, genuine connection, customer felt this was the right company
+
+CONFIDENCE SCORE:
+Rate your own confidence in this evaluation 1-10.
+- 10: Clear, complete transcript, straightforward call
+- 7-9: Good transcript, minor ambiguities
+- 4-6: Some audio issues or ambiguous moments affecting scoring
+- 1-3: Poor audio, very short, or highly ambiguous — manager should review
+
+TALK RATIO: Use speaker labels if diarized, otherwise estimate from line counts.
 
 KEYWORDS — check if rep said:
 - "Full Value Protection" or "FVP"
@@ -121,23 +200,11 @@ KEYWORDS — check if rep said:
 - "schedule" or "get you on the calendar"
 - "Little Guys" or "Little Guys Movers"
 
-For each detected keyword and objection, return the CHARACTER POSITION (integer) of its first occurrence in the transcript:
-  keyword_positions: {{"Full Value Protection": 342}}
-  objection_positions: {{"Price too high": 891}}
+Return CHARACTER POSITION of first occurrence in transcript for each keyword and objection found.
 
 OBJECTIONS: Price too high, Need to think about it, Already have another quote, Wrong timing, Need to check with partner, Other
 
 SENTIMENT: positive / neutral / hesitant / negative
-OUTCOME: booked / estimate_sent / lost / unknown
-
-Score 1-10. Be honest and critical. 10 = near perfect.
-For too_short or non_sales calls, score everything 0.
-
-RAPPORT & TONE (1-10):
-- 1-3: Flat, bothered, disengaged; missed rapport opportunities; customer didn't trust them
-- 4-6: Polite but mechanical; some warmth but rapport opportunities missed
-- 7-8: Warm and engaged; took most rapport opportunities; customer felt heard
-- 9-10: Excellent — enthusiastic, built genuine trust, customer felt this was the right choice
 
 Filename: {filename}
 
@@ -146,7 +213,7 @@ Transcript:
 
 Respond ONLY with valid JSON, no markdown:
 
-{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_type":"local/long distance/unknown","call_outcome":"booked/estimate_sent/lost/unknown","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","availability_decline":false,"turned_away":false,"onsite_suggested":false,"is_continuation":false,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":false,"offered_alternatives":false,"took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
+{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","availability_decline":false,"turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
     return prompt
 
 # ──────────────────────────────────────────────
@@ -350,12 +417,112 @@ def read_html():
     return b"<h1>Missing lgms_dashboard.html</h1>"
 
 # ──────────────────────────────────────────────
-# WHISPER TRANSCRIPTION
+# TRANSCRIPT CORRECTIONS
 # ──────────────────────────────────────────────
 
-def transcribe_audio(audio_bytes, filename):
+def get_transcript_corrections():
+    """Fetch all saved find/replace corrections from Supabase."""
+    try:
+        return supa("GET", "transcript_corrections?order=created_at.asc&limit=500")
+    except Exception:
+        return []
+
+def apply_transcript_corrections(transcript, corrections):
+    """Apply find/replace corrections to transcript before Claude analysis."""
+    if not corrections:
+        return transcript
+    for c in corrections:
+        find = c.get("find_text", "")
+        replace = c.get("replace_text", "")
+        if find:
+            transcript = re.sub(re.escape(find), replace, transcript, flags=re.IGNORECASE)
+    return transcript
+
+def build_keyterms(rep_names=None, corrections=None):
+    """Build keyterm list for Deepgram from rep names + corrections + known LGMS vocabulary."""
+    terms = set([
+        "Little Guys Movers", "Little Guys", "Full Value Protection", "FVP",
+        "confirmation call", "fuel charge", "declared value", "National Express",
+        "Rivermont", "moving boxes",
+    ])
+    # Add rep names
+    if rep_names:
+        for name in rep_names:
+            if name and name != "Unknown":
+                terms.add(name)
+    # Add replacement values from corrections dictionary
+    if corrections:
+        for c in corrections:
+            replace = c.get("replace_text", "")
+            if replace and len(replace) > 2:
+                terms.add(replace)
+    return list(terms)[:100]  # Deepgram max 100 keyterms
+
+# ──────────────────────────────────────────────
+# DEEPGRAM TRANSCRIPTION
+# ──────────────────────────────────────────────
+
+def transcribe_audio_deepgram(audio_bytes, filename, keyterms=None):
+    """Transcribe audio using Deepgram Nova-3 with diarization and keyterm prompting."""
+    if not DEEPGRAM_KEY:
+        raise Exception("DEEPGRAM_API_KEY not set")
+
+    # Build query params
+    params = {
+        "model": "nova-3",
+        "diarize": "true",
+        "punctuate": "true",
+        "smart_format": "true",
+        "numerals": "true",
+        "utterances": "true",
+    }
+    # Add keyterms (each as separate param)
+    keyterm_str = ""
+    if keyterms:
+        keyterm_str = "&" + "&".join(f"keyterm={urllib.parse.quote(k)}" for k in keyterms[:100])
+
+    query = urllib.parse.urlencode(params) + keyterm_str
+    url = f"https://api.deepgram.com/v1/listen?{query}"
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "mp3"
+    mime_map = {"mp3": "audio/mpeg", "mp4": "audio/mp4", "m4a": "audio/mp4",
+                "wav": "audio/wav", "ogg": "audio/ogg", "webm": "audio/webm",
+                "mpeg": "audio/mpeg", "mpga": "audio/mpeg"}
+    mime = mime_map.get(ext, "audio/mpeg")
+
+    req = urllib.request.Request(url, data=audio_bytes, method="POST")
+    req.add_header("Authorization", f"Token {DEEPGRAM_KEY}")
+    req.add_header("Content-Type", mime)
+
+    with urllib.request.urlopen(req, timeout=300) as r:
+        result = json.loads(r.read())
+
+    # Extract diarized transcript with speaker labels
+    utterances = result.get("results", {}).get("utterances", [])
+    if utterances:
+        lines = []
+        for u in utterances:
+            speaker = u.get("speaker", 0)
+            text = u.get("transcript", "").strip()
+            if text:
+                lines.append(f"Speaker {speaker}: {text}")
+        transcript = "\n".join(lines)
+        is_diarized = True
+    else:
+        # Fallback to plain transcript
+        channels = result.get("results", {}).get("channels", [])
+        if channels:
+            transcript = channels[0].get("alternatives", [{}])[0].get("transcript", "")
+        else:
+            transcript = ""
+        is_diarized = False
+
+    return transcript, is_diarized
+
+# Fallback Whisper transcription if Deepgram unavailable
+def transcribe_audio_whisper(audio_bytes, filename):
     if not OPENAI_KEY:
-        raise Exception("OPENAI_API_KEY not set")
+        raise Exception("Neither DEEPGRAM_API_KEY nor OPENAI_API_KEY is set")
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "mp3"
     mime_map = {"mp3": "audio/mpeg", "mp4": "audio/mp4", "m4a": "audio/mp4",
                 "wav": "audio/wav", "ogg": "audio/ogg", "webm": "audio/webm",
@@ -370,21 +537,30 @@ def transcribe_audio(audio_bytes, filename):
     ]
     body = b"\r\n".join(body_parts)
     req = urllib.request.Request(
-        "https://api.openai.com/v1/audio/transcriptions",
-        data=body,
+        "https://api.openai.com/v1/audio/transcriptions", data=body,
         headers={"Authorization": f"Bearer {OPENAI_KEY}", "Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=300) as r:
-        return r.read().decode("utf-8")
+        return r.read().decode("utf-8"), False
+
+def transcribe_audio(audio_bytes, filename, keyterms=None):
+    """Transcribe using Deepgram, fall back to Whisper if needed."""
+    if DEEPGRAM_KEY:
+        return transcribe_audio_deepgram(audio_bytes, filename, keyterms)
+    elif OPENAI_KEY:
+        print("  WARNING: Deepgram not configured, falling back to Whisper")
+        return transcribe_audio_whisper(audio_bytes, filename)
+    else:
+        raise Exception("No transcription API configured. Set DEEPGRAM_API_KEY.")
 
 # ──────────────────────────────────────────────
 # CLAUDE ANALYSIS
 # ──────────────────────────────────────────────
 
-def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6"):
+def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diarized=False):
     corrections = get_recent_corrections()
-    prompt = build_prompt(transcript, filename, corrections)
+    prompt = build_prompt(transcript, filename, corrections, is_diarized=is_diarized)
     req_body = json.dumps({
         "model": model,
         "max_tokens": 3000,
@@ -506,7 +682,10 @@ def _reanalyze_worker():
 
             try:
                 with _analysis_semaphore:
-                    result = run_claude_analysis(transcript, filename)
+                    # Apply corrections before analysis
+                    tx_corrections = get_transcript_corrections()
+                    clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
+                    result = run_claude_analysis(clean_transcript, filename)
 
                 call_date = parse_call_date_from_filename(filename)
                 update_data = {
@@ -529,6 +708,10 @@ def _reanalyze_worker():
                     "exclude_from_scoring": result.get("exclude_from_scoring", False),
                     "exclusion_reason": result.get("exclusion_reason", ""),
                     "call_type": result.get("call_type", "sales_estimate"),
+                    "move_category": result.get("move_category", "standard"),
+                    "loss_reason": result.get("loss_reason", ""),
+                    "soft_pipeline_reason": result.get("soft_pipeline_reason", ""),
+                    "evaluation_confidence": result.get("evaluation_confidence", 8),
                     "rapport_tone": result.get("scores", {}).get("rapport_tone", {}).get("score", 0),
                 }
                 if call_date:
@@ -587,6 +770,8 @@ class Handler(BaseHTTPRequestHandler):
             self._reanalyze_status()
         elif path == "/corrections":
             self._get_corrections()
+        elif path == "/transcript_corrections":
+            self._get_transcript_corrections_endpoint()
         elif path.startswith("/audio_url/"):
             self._get_audio_url()
         else:
@@ -624,6 +809,9 @@ class Handler(BaseHTTPRequestHandler):
             "/reps/bulk_rename": self._bulk_rename_rep,
             "/reanalyze/start": self._reanalyze_start,
             "/corrections/save": self._save_correction,
+            "/transcript_corrections/save": self._save_transcript_correction,
+            "/transcript_corrections/delete": self._delete_transcript_correction,
+            "/transcript_corrections/reapply": self._reapply_corrections,
         }
         fn = routes.get(path)
         if fn:
@@ -675,8 +863,8 @@ class Handler(BaseHTTPRequestHandler):
             self._ok({"duplicate": False})
 
     def _transcribe_and_analyze(self, body):
-        if not OPENAI_KEY:
-            self._err(500, "OPENAI_API_KEY not set"); return
+        if not (DEEPGRAM_KEY or OPENAI_KEY):
+            self._err(500, "No transcription API configured — set DEEPGRAM_API_KEY"); return
         if not API_KEY:
             self._err(500, "ANTHROPIC_API_KEY not set"); return
         if "application/json" not in self.headers.get("Content-Type", ""):
@@ -691,15 +879,30 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             with _analysis_semaphore:
-                print(f"  Transcribing {filename} ({len(audio_bytes)} bytes)...")
-                transcript = transcribe_audio(audio_bytes, filename)
+                # Build keyterms from rep names + corrections
+                try:
+                    rep_list = supa("GET", "reps?active=eq.true&select=full_name,nickname")
+                    rep_names = [r.get("full_name") for r in (rep_list or [])] + [r.get("nickname") for r in (rep_list or [])]
+                    tx_corrections = get_transcript_corrections()
+                    keyterms = build_keyterms(rep_names=rep_names, corrections=tx_corrections)
+                except Exception:
+                    keyterms = build_keyterms()
+                    tx_corrections = []
+
+                print(f"  Transcribing {filename} ({len(audio_bytes)} bytes) via {'Deepgram' if DEEPGRAM_KEY else 'Whisper'}...")
+                transcript, is_diarized = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
                 if not transcript or not transcript.strip():
                     self._err(400, "Transcription empty — audio may be silent"); return
-                print(f"  Transcription done: {len(transcript)} chars")
-                result = run_claude_analysis(transcript, filename)
+                print(f"  Transcription done: {len(transcript)} chars, diarized={is_diarized}")
 
-            result["transcript"] = transcript
+                # Apply corrections
+                clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
+
+                result = run_claude_analysis(clean_transcript, filename, is_diarized=is_diarized)
+
+            result["transcript"] = clean_transcript
             result["filename"] = filename
+            result["is_diarized"] = is_diarized
 
             # Upload audio to storage (best effort)
             try:
@@ -831,6 +1034,11 @@ class Handler(BaseHTTPRequestHandler):
                 "call_quality": call_quality,
                 "is_continuation": is_continuation,
                 "continuation_group_id": continuation_group_id,
+                "move_category": p.get("move_category", "standard"),
+                "loss_reason": p.get("loss_reason", ""),
+                "soft_pipeline_reason": p.get("soft_pipeline_reason", ""),
+                "evaluation_confidence": p.get("evaluation_confidence", 8),
+                "is_diarized": p.get("is_diarized", False),
             }
             result = supa("POST", "calls", record)
             self._ok(result)
@@ -907,7 +1115,84 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._err(500, str(e))
 
-    # ── SHARE ──
+    # ── TRANSCRIPT CORRECTIONS ──
+
+    def _get_transcript_corrections_endpoint(self):
+        try:
+            result = supa("GET", "transcript_corrections?order=created_at.asc&limit=500")
+            self._ok(result)
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _save_transcript_correction(self, body):
+        try:
+            p = json.loads(body)
+            find_text = p.get("find_text", "").strip()
+            replace_text = p.get("replace_text", "").strip()
+            if not find_text:
+                self._err(400, "find_text required"); return
+            # Update existing rule if same find_text exists
+            existing = supa("GET", f"transcript_corrections?find_text=ilike.{urllib.parse.quote(find_text)}&limit=1")
+            if existing:
+                supa("PATCH", f"transcript_corrections?id=eq.{existing[0]['id']}", {"replace_text": replace_text})
+                self._ok({"updated": True, "id": existing[0]["id"]})
+            else:
+                result = supa("POST", "transcript_corrections", {"find_text": find_text, "replace_text": replace_text})
+                self._ok(result)
+            # Also save updated transcript on the call if provided
+            call_id = p.get("call_id")
+            new_transcript = p.get("new_transcript")
+            if call_id and new_transcript:
+                supa("PATCH", f"calls?id=eq.{call_id}", {"transcript": new_transcript})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _delete_transcript_correction(self, body):
+        try:
+            p = json.loads(body)
+            supa("DELETE", f"transcript_corrections?id=eq.{p['id']}")
+            self._ok({"deleted": True})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _reapply_corrections(self, body):
+        """Re-apply transcript corrections to a single call and re-analyze."""
+        try:
+            p = json.loads(body)
+            call_id = p.get("call_id")
+            if not call_id:
+                self._err(400, "call_id required"); return
+            result = supa("GET", f"calls?id=eq.{call_id}&limit=1")
+            if not result:
+                self._err(404, "Call not found"); return
+            call = result[0]
+            transcript = call.get("transcript", "")
+            filename = call.get("filename", "call.txt")
+            if not transcript:
+                self._err(400, "No transcript"); return
+            tx_corrections = get_transcript_corrections()
+            clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
+            analysis = run_claude_analysis(clean_transcript, filename)
+            update_data = {
+                "transcript": clean_transcript,
+                "scores": analysis.get("scores", {}),
+                "checklist": analysis.get("checklist", {}),
+                "strengths": analysis.get("strengths", []),
+                "coaching_points": analysis.get("coaching_points", []),
+                "call_summary": analysis.get("call_summary", ""),
+                "keywords_detected": analysis.get("keywords_detected", []),
+                "keyword_positions": analysis.get("keyword_positions", {}),
+                "objections_detected": analysis.get("objections_detected", []),
+                "objection_positions": analysis.get("objection_positions", {}),
+                "move_category": analysis.get("move_category", "standard"),
+                "evaluation_confidence": analysis.get("evaluation_confidence", 8),
+                "loss_reason": analysis.get("loss_reason", ""),
+                "soft_pipeline_reason": analysis.get("soft_pipeline_reason", ""),
+            }
+            supa("PATCH", f"calls?id=eq.{call_id}", update_data)
+            self._ok({"reanalyzed": True, "call_id": call_id})
+        except Exception as e:
+            self._err(500, str(e))
 
     def _create_share(self, body):
         try:
@@ -1180,9 +1465,9 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
 
 if __name__ == "__main__":
     print("=" * 55)
-    print("  Little Guys Movers — Call Analyzer Server v8")
+    print("  Little Guys Movers — Call Analyzer Server v9")
     print("=" * 55)
-    missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","OPENAI_API_KEY"] if not os.environ.get(v)]
+    missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","DEEPGRAM_API_KEY"] if not os.environ.get(v)]
     if missing:
         print("\n  WARNING: Missing env vars: " + ", ".join(missing))
     else:
