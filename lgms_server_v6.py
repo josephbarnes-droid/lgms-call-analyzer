@@ -942,8 +942,11 @@ class Handler(BaseHTTPRequestHandler):
             # Upload audio to storage (best effort)
             try:
                 enforce_storage_cap()
-                supa_storage_upload("call-audio", filename, audio_bytes, "audio/mpeg")
-                result["audio_url"] = supa_storage_signed_url("call-audio", filename)
+                # Sanitize filename for storage — remove spaces and special chars
+                safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
+                supa_storage_upload("call-audio", safe_filename, audio_bytes, "audio/mpeg")
+                result["audio_url"] = supa_storage_signed_url("call-audio", safe_filename)
+                result["storage_filename"] = safe_filename
             except Exception as e:
                 log(f"  Audio storage warning: {e}")
                 result["audio_url"] = ""
@@ -1121,13 +1124,14 @@ class Handler(BaseHTTPRequestHandler):
     def _get_audio_url(self):
         try:
             call_id = self.path.split("/audio_url/")[1].split("?")[0]
-            result = supa("GET", f"calls?id=eq.{call_id}&select=filename&limit=1")
+            result = supa("GET", f"calls?id=eq.{call_id}&select=filename,storage_filename&limit=1")
             if not result:
                 self._err(404, "Call not found"); return
-            filename = result[0].get("filename", "")
-            if not filename:
+            # Use storage_filename if saved, otherwise sanitize the original filename
+            storage_filename = result[0].get("storage_filename") or re.sub(r'[^\w\-_\.]', '_', result[0].get("filename", ""))
+            if not storage_filename:
                 self._err(404, "No audio filename"); return
-            signed_url = supa_storage_signed_url("call-audio", filename, expires=3600)
+            signed_url = supa_storage_signed_url("call-audio", storage_filename, expires=3600)
             if not signed_url:
                 self._err(404, "Audio file not found in storage"); return
             self._ok({"url": signed_url})
