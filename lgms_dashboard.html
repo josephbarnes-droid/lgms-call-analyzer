@@ -112,8 +112,8 @@ html,body{height:100%;font-family:'Inter',sans-serif;font-size:15px;color:var(--
 .comp-bar{height:100%;border-radius:4px;transition:width .4s}
 .comp-steps{display:none;padding:8px 0 4px}
 .comp-steps.open{display:block}
-.comp-step{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 0}
-.comp-step-bar{width:70px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;flex-shrink:0}
+.comp-step{display:flex;align-items:center;gap:6px;font-size:11.5px;padding:2px 0}
+.comp-step-bar{width:55px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;flex-shrink:0}
 .comp-step-fill{height:100%;border-radius:2px}
 .comp-step-pct{font-size:10px;font-weight:600;min-width:28px;text-align:right}
 .lib-controls{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
@@ -302,7 +302,7 @@ const CK_GROUPS=[
 ];
 const SK=['info_sequence','price_delivery','fvp_pitch','closing_attempt','call_control','professionalism','rapport_tone','overall'];
 const SL=['Info Sequence','Price Delivery','FVP Pitch','Closing','Call Control','Professionalism','Rapport & Tone','Overall'];
-const KWS=['Full Value Protection','confirmation call','hourly','moving boxes','fuel','declared value','schedule','Little Guys'];
+const KWS=['Full Value Protection','confirmation call','hourly','moving boxes','fuel','declared value','Little Guys','spot available','get you on the board','first come first serve','no cancellation fee','save that for you','get you taken care of','get you on the calendar'];
 
 let allCalls=[],reps=[],sharedViews=[],corrections=[];
 let lbKey='overall',lbDir=-1,lbShowAll=false;
@@ -377,7 +377,6 @@ function g(id){return document.getElementById(id);}
 // ── OVERVIEW ──
 function renderOverview(){
   const fc=getFC(),sc=scc(fc);
-  const declines=allCalls.filter(c=>c.availability_decline).length;
   const turnedAway=allCalls.filter(c=>c.turned_away).length;
   const badQ=allCalls.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
   const conts=allCalls.filter(c=>c.is_continuation&&c.continuation_group_id).length;
@@ -387,7 +386,6 @@ function renderOverview(){
   const compPct=sc.length?Math.round(sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]).length,0)/(sc.length*CK.length)*100):0;
   const excl=fc.filter(c=>c.exclude_from_scoring).length;
   const attn=[
-    declines>0?`<div class="attn-card red" onclick="navFilter('decline')"><span class="ac-ico">🚫</span><div class="ac-num">${declines}</div><div class="ac-lbl">Availability Declines</div></div>`:'',
     turnedAway>0?`<div class="attn-card amber" onclick="navFilter('turned_away')"><span class="ac-ico">📵</span><div class="ac-num">${turnedAway}</div><div class="ac-lbl">Turned Away</div></div>`:'',
     badQ>0?`<div class="attn-card amber" onclick="navFilter('quality')"><span class="ac-ico">⚠️</span><div class="ac-num">${badQ}</div><div class="ac-lbl">Poor Audio / Disconnected</div></div>`:'',
     conts>0?`<div class="attn-card blue" onclick="navFilter('continuation')"><span class="ac-ico">🔗</span><div class="ac-num">${conts}</div><div class="ac-lbl">Continuation Calls</div></div>`:'',
@@ -413,7 +411,6 @@ function renderOverview(){
       <div class="mc blue" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'score_high',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Avg Rapport</div><div class="mc-val">${avg(sc,'rapport_tone')}</div><div class="mc-sub">out of 10</div></div>
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Compliance</div><div class="mc-val">${compPct}%</div><div class="mc-sub">22-step avg</div></div>
       <div class="mc ${br>=50?'green':'red'}" onclick="libFilters={rep:'',out:'booked',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Booking Rate</div><div class="mc-val">${br}%</div><div class="mc-sub">${booked} booked · ${softPipeline} pipeline</div></div>
-      <div class="mc red" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'decline',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Avail. Declines</div><div class="mc-val">${declines}</div><div class="mc-sub">customer declined</div></div>
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'turned_away',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Turned Away</div><div class="mc-val">${turnedAway}</div><div class="mc-sub">no LGMS availability</div></div>
     </div>
     <div class="grid-2">
@@ -449,7 +446,8 @@ function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
 function renderLB(){
   const sc=scc(getFC());
   const repNames=[...new Set(sc.map(c=>c.rep_name))].filter(r=>r&&sc.filter(c=>c.rep_name===r).length>=5);
-  const data=repNames.map(r=>{
+  const repNamesFiltered=repNames.filter(r=>sc.filter(c=>c.rep_name===r).length>=5);
+  const data=repNamesFiltered.map(r=>{
     const rc=sc.filter(c=>c.rep_name===r);
     const a=k=>rc.length?(rc.reduce((s,c)=>s+(c.scores?.[k]?.score||0),0)/rc.length):0;
     return{rep_name:r,overall:a('overall'),rapport_tone:a('rapport_tone'),price_delivery:a('price_delivery'),fvp_pitch:a('fvp_pitch'),closing_attempt:a('closing_attempt'),calls:rc.length};
@@ -489,7 +487,7 @@ function renderCompGroups(sc){
       const sp=Math.round(sc.filter(c=>c.checklist?.[k]).length/sc.length*100);
       const sc2=sp>=80?'#16a34a':sp>=50?'#d97706':'#dc2626';
       const idx=CK.indexOf(k);
-      return`<div class="comp-step"><span style="flex:1;font-size:11px">${CKFULL[idx]||k}</span><div class="comp-step-bar"><div class="comp-step-fill" style="width:${sp}%;background:${sc2}"></div></div><span class="comp-step-pct" style="color:${sc2}">${sp}%</span></div>`;
+      return`<div class="comp-step"><span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:180px">${CKFULL[idx]||k}</span><div class="comp-step-bar"><div class="comp-step-fill" style="width:${sp}%;background:${sc2}"></div></div><span class="comp-step-pct" style="color:${sc2}">${sp}%</span></div>`;
     }).join('');
     return`<div class="comp-group">
       <div class="comp-group-header" onclick="toggleCG(${gi})">
@@ -505,11 +503,11 @@ function renderCompGroups(sc){
 function toggleCG(i){const el=g('cg-'+i);if(el)el.classList.toggle('open');}
 function renderTalk(sc){
   const w=(sc||[]).filter(c=>c.talk_ratio_rep>0);const el=g('talk-viz');if(!el)return;
-  if(!w.length){el.innerHTML='<div style="color:var(--ink3);font-size:12px">No data yet</div>';return;}
+  if(!w.length){el.innerHTML='<div style="color:var(--tx3);font-size:13px">No data yet</div>';return;}
   const ar=Math.round(w.reduce((a,c)=>a+c.talk_ratio_rep,0)/w.length),ac=100-ar;
   el.innerHTML=`<div class="tr-bar" style="margin-bottom:9px"><div class="tr-rep" style="width:${ar}%">${ar}%</div><div class="tr-cust" style="width:${ac}%">${ac}%</div></div>
-    <div style="display:flex;gap:14px;font-size:11px;color:var(--ink3);margin-bottom:8px"><span style="color:var(--g)">■ Rep ${ar}%</span><span style="color:var(--blue)">■ Cust ${ac}%</span></div>
-    <div style="font-size:12px;font-weight:600;color:${ok?'#16a34a':'#d97706'}">${ok?'✓ On target':'⚠ Target: 40/60'}</div>`;
+    <div style="display:flex;gap:14px;font-size:12px;color:var(--tx3);margin-bottom:8px"><span style="color:var(--g)">■ Rep ${ar}%</span><span style="color:var(--blue)">■ Cust ${ac}%</span></div>
+    <div style="font-size:12px;color:var(--tx3)">Ideal: rep 40% · customer 60%</div>`;
 }
 function renderKW(sc){
   const cnt={};KWS.forEach(k=>cnt[k]=0);(sc||[]).forEach(c=>(c.keywords_detected||[]).forEach(k=>{if(cnt[k]!==undefined)cnt[k]++;}));
@@ -657,6 +655,22 @@ function buildRow(c){
         <div class="info-box"><div class="info-box-title">Strengths</div><ul class="info-list">${(c.strengths||[]).map(s=>`<li><span>💪</span>${esc(s)}</li>`).join('')||'<li style="color:var(--ink3)">None</li>'}</ul></div>
         <div class="info-box"><div class="info-box-title">Coaching Points</div><ul class="info-list">${(c.coaching_points||[]).map(p=>`<li><span>⚡</span>${esc(p)}</li>`).join('')||'<li style="color:var(--ink3)">None</li>'}</ul></div>
       </div></div>
+      ${!isExcl?`<div class="ds"><h4>Closing Analysis</h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:10px">
+          <div style="background:var(--bg2);border-radius:9px;padding:12px 14px;border:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Close Attempts</div>
+            <div style="font-size:26px;font-weight:800;color:${(c.close_attempts||0)>=2?'#66bb6a':(c.close_attempts||0)===1?'#ffb74d':'#ef5350'}">${c.close_attempts||0}</div>
+            <div style="font-size:11px;color:var(--tx3);margin-top:3px">${(c.close_attempts||0)===0?'Never attempted':(c.close_attempts||0)===1?'One attempt':`${c.close_attempts} attempts`}</div>
+          </div>
+          ${c.call_outcome==='soft_pipeline'&&c.pipeline_recovery_quality?`<div style="background:var(--bg2);border-radius:9px;padding:12px 14px;border:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Pipeline Recovery</div>
+            <div style="font-size:26px;font-weight:800;color:${scCol(c.pipeline_recovery_quality)}">${c.pipeline_recovery_quality}/10</div>
+            <div style="font-size:11px;color:var(--tx3);margin-top:3px">${c.pipeline_recovery_quality>=7?'Clear next step set':c.pipeline_recovery_quality>=4?'Some follow-up offered':'No next step — lead at risk'}</div>
+          </div>`:''}
+        </div>
+        ${(c.objections_overcome||[]).length?`<div style="margin-bottom:7px"><span style="font-size:10px;font-weight:700;color:#66bb6a;text-transform:uppercase;letter-spacing:.7px;margin-right:6px">Overcome:</span>${c.objections_overcome.map(o=>`<span style="background:rgba(76,175,80,.12);color:#66bb6a;padding:2px 9px;border-radius:10px;font-size:11.5px;margin-right:4px">${esc(o)}</span>`).join('')}</div>`:''}
+        ${(c.objections_abandoned||[]).length?`<div><span style="font-size:10px;font-weight:700;color:#ef5350;text-transform:uppercase;letter-spacing:.7px;margin-right:6px">Abandoned:</span>${c.objections_abandoned.map(o=>`<span style="background:rgba(239,83,80,.12);color:#ef9a9a;padding:2px 9px;border-radius:10px;font-size:11.5px;margin-right:4px">${esc(o)}</span>`).join('')}</div>`:''}
+      </div>`:''}
       <div class="ds"><h4>Keywords</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${(c.keywords_detected||[]).map(k=>{const pos=c.keyword_positions?.[k];return`<span class="tag" style="background:rgba(92,158,255,.1);color:var(--blue)" ${pos!==undefined?`onclick="jumpTx('${c.id}',${pos})"`:''}>${esc(k)}</span>`;}).join('')||'<span style="color:var(--ink4);font-size:12px">None</span>'}</div></div>
       ${(c.objections_detected||[]).length?`<div class="ds"><h4>Objections</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map(o=>`<span style="background:var(--rl);color:var(--red);padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600">${esc(o)}</span>`).join('')}</div></div>`:''}
       <div class="ds"><h4>Talk Ratio</h4><div class="tr-bar" style="max-width:360px"><div class="tr-rep" style="width:${c.talk_ratio_rep||40}%">${c.talk_ratio_rep||40}% Rep</div><div class="tr-cust" style="width:${c.talk_ratio_customer||60}%">${c.talk_ratio_customer||60}% Cust</div></div></div>
