@@ -48,7 +48,7 @@ _reanalyze_lock = threading.Lock()
 # ──────────────────────────────────────────────
 
 def build_prompt(transcript, filename, corrections=None, is_diarized=False):
-    """Build Claude prompt with move-type classification, updated scoring, NA checklist items."""
+    """Build Claude prompt v10 — closing focus, weighted scoring, objection tracking."""
 
     corrections_block = ""
     if corrections:
@@ -89,6 +89,10 @@ Also determine:
 - word_count: approximate word count
 - exclude_from_scoring: true if fewer than 80 words OR clearly not a sales call OR disconnected
 
+IMPORTANT: Even if exclude_from_scoring is true, still detect turned_away. A call where LGMS
+says "we don't have availability on that date" is a Turned Away call even if it's only 10 words.
+These short turned-away calls must still be captured.
+
 STEP 2 — DETECT REP NAME:
 - Look for rep introduction (e.g. "This is Britt", "Thank you for calling Little Guys this is Sarah")
 - If diarized transcript, look at Speaker 0's first lines
@@ -100,8 +104,7 @@ STEP 3 — CALL QUALITY:
 - "normal": otherwise
 
 STEP 4 — FLAGS:
-- availability_decline: CUSTOMER's date/situation doesn't work for them
-- turned_away: LGMS could NOT accommodate — rep said "we're booked", "no availability", "can't do that date"
+- turned_away: LGMS could NOT accommodate — rep said "we're booked", "we don't have availability", "we can't do that date", "we're full that day", "we're not available then". Capture even on very short calls.
 - onsite_suggested: onsite visit/estimate mentioned
 - is_continuation: "calling back about", "as we discussed", "following up", "spoke earlier"
 
@@ -110,9 +113,53 @@ STEP 5 — OUTCOME & PIPELINE:
 - Use "soft_pipeline" when customer is interested but not ready: needs partner approval, no exact date, needs to think, will call back
 - loss_reason (only if lost): "price_too_high" | "went_with_competitor" | "wrong_timing" | "no_availability" | "just_shopping" | "other" | ""
 - soft_pipeline_reason (only if soft_pipeline): "needs_partner" | "no_exact_date" | "needs_to_think" | "will_call_back" | "other" | ""
-- Did rep attempt to overcome objection before letting soft pipeline go? (affects closing_attempt score)
 
-STEP 6 — CHECKLIST (apply based on move_category):
+STEP 6 — CLOSING ANALYSIS (most important part of evaluation):
+
+LGMS reps are trained to actively close on every call. The goal is to book the move on the first call,
+not let the customer "call back." Every call should end with a clear close attempt or a clear next step.
+
+COUNT close_attempts: how many times did the rep explicitly try to book/schedule the move?
+- Each distinct ask counts: "Can I get you on the calendar?", "Let me go ahead and get you booked", "Shall I save that spot for you?" = 3 attempts
+- Repeating after an objection = additional attempt (good)
+- Never asking at all = 0 (very bad)
+
+CLOSING LANGUAGE to look for (these are strong signals of a good close):
+- "I have a spot available for you"
+- "let me get you on the board"
+- "let me get you on the schedule"
+- "first come first serve" (creates urgency)
+- "no cancellation fee" (removes objection barrier)
+- "save that for you" / "hold that for you"
+- "get you taken care of"
+- "get you on the calendar"
+- "can I go ahead and" / "shall I go ahead and"
+- "let me go ahead and book"
+
+OBJECTION HANDLING — for each objection detected, evaluate:
+- Did rep acknowledge the objection? (good)
+- Did rep provide a counter/solution? (better)
+- Did rep attempt to close again after the objection? (best)
+- Or did rep just say "ok, call us back"? (failure)
+
+Classify each objection as either overcome or abandoned:
+- overcome: rep countered and either booked or meaningfully advanced the conversation
+- abandoned: rep accepted the objection without any counter and let customer go
+
+IDEAL RESPONSES by objection type:
+- "Need to think about it" → good rep: "I totally understand — we do have availability on that date and there's no cancellation fee, so would it make sense to go ahead and hold that spot while you think it over?"
+- "Need to check with partner" → good rep: "Of course — while I have you, would it help to hold that spot? No cancellation fee, so there's no risk, and availability goes fast"
+- "Price too high" → good rep: "I hear you — what were you expecting? Let me see what I can do" then works through it
+- "Already have another quote" → good rep: "That's great — what are they quoting you? We're very competitive and I'd love to earn your business today"
+
+PIPELINE RECOVERY (soft_pipeline calls only):
+pipeline_recovery_quality 1-10:
+- 1-3: Rep just said "ok call us back" with no next step — lead will likely go cold
+- 4-6: Rep offered to send email estimate or gave some follow-up info
+- 7-8: Rep set a specific callback time or sent confirmation of next step
+- 9-10: Rep held a tentative spot, set specific callback, sent email — customer has a clear path to book
+
+STEP 7 — CHECKLIST (apply based on move_category):
 
 STANDARD MOVE — all 22 steps apply:
 1. got_move_date
@@ -159,54 +206,72 @@ STORAGE — reduced checklist:
 - Set to "na": got_home_type, did_full_inventory, asked_forgotten_items, asked_about_boxes, scheduled_onsite_attempt, offered_alternatives, led_estimate_process, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities
 
 CHECKLIST VALUES: true | false | "na"
-- true: step was completed
-- false: step was applicable and NOT completed (counts against compliance)
-- "na": step does not apply to this move type (excluded from compliance %)
 
-STEP 7 — SCORING (1-10, be honest and critical):
+STEP 8 — SCORING (1-10, be honest and critical):
 
-INFORMATION COMPLETENESS (renamed from info_sequence):
-- Score based on WHAT information was gathered, NOT the order it was gathered
-- A rep who gets all required info while having a natural conversation scores high
-- Penalize only if required information was NEVER obtained, not if the path was nonlinear
-- A rep who lets the customer talk and then smoothly circles back to get missing info scores well
+OVERALL SCORE — calculated weighted average (do not override with gut feel):
+- closing_attempt: 25% weight (most important)
+- price_delivery: 15% weight
+- fvp_pitch: 15% weight
+- rapport_tone: 15% weight
+- info_sequence: 10% weight
+- call_control: 10% weight
+- professionalism: 10% weight
+Calculate: overall = (closing*0.25 + price*0.15 + fvp*0.15 + rapport*0.15 + info*0.10 + control*0.10 + prof*0.10)
+Round to nearest integer.
 
-CALL CONTROL / LED ESTIMATE PROCESS:
-- Score on whether rep ULTIMATELY steered the call to all required destinations
-- Do NOT penalize for allowing natural conversation, rapport-building, or customer tangents
-- Penalize only if the rep lost control and never recovered key information
-- A rep who acknowledges a customer story and then smoothly returns to the estimate scores well
+CLOSING ATTEMPT (1-10) — most heavily weighted:
+- 1-2: Never attempted to close at all — just let customer hang up
+- 3-4: Weak close, no follow-through — accepted first objection without any counter
+- 5-6: Made one attempt but gave up too easily, or close was vague/passive
+- 7-8: Made clear close attempt, handled at least one objection with a counter
+- 9-10: Multiple close attempts, overcame objections with confidence and urgency, used no-cancellation-fee and availability language
+
+INFORMATION COMPLETENESS:
+- Score based on WHAT information was gathered, NOT the order
+- Penalize only if required information was NEVER obtained
+- Natural conversation that circles back to get info scores well
+
+CALL CONTROL:
+- Score on whether rep ULTIMATELY steered to all required info
+- Do NOT penalize for natural conversation or customer tangents
+- Penalize only if key info was never recovered
 
 FVP PITCH:
 - Standard, specialty, commercial, in_house: required
-- Unload only, storage: not required — score 0 only if it was a missed opportunity, otherwise N/A note
+- Unload only, storage: mark note as "not required for this move type"
 
 RAPPORT & TONE (1-10):
-- 1-3: Flat, bothered, disengaged; missed obvious rapport opportunities; customer seemed uncomfortable
-- 4-6: Polite but mechanical; some warmth but rapport opportunities missed or awkward
+- 1-3: Flat, bothered, disengaged; missed obvious rapport opportunities
+- 4-6: Polite but mechanical; some warmth but opportunities missed
 - 7-8: Warm and engaged; acknowledged customer's situation; customer felt heard
-- 9-10: Excellent — enthusiastic, genuine connection, customer felt this was the right company
+- 9-10: Excellent — enthusiastic, genuine connection
 
 CONFIDENCE SCORE:
-Rate your own confidence in this evaluation 1-10.
-- 10: Clear, complete transcript, straightforward call
+- 10: Clear complete transcript, straightforward call
 - 7-9: Good transcript, minor ambiguities
-- 4-6: Some audio issues or ambiguous moments affecting scoring
+- 4-6: Some audio issues or ambiguous moments
 - 1-3: Poor audio, very short, or highly ambiguous — manager should review
 
 TALK RATIO: Use speaker labels if diarized, otherwise estimate from line counts.
 
-KEYWORDS — check if rep said:
+KEYWORDS — check if rep said any of these:
 - "Full Value Protection" or "FVP"
 - "confirmation call"
 - "hourly" or "per hour"
 - "moving boxes"
 - "fuel" or "fuel charge"
 - "declared value"
-- "schedule" or "get you on the calendar"
 - "Little Guys" or "Little Guys Movers"
+- "spot available" or "have a spot"
+- "get you on the board" or "get you on the schedule" or "get you on the calendar"
+- "first come first serve"
+- "no cancellation fee"
+- "save that for you" or "hold that for you"
+- "get you taken care of"
+- "go ahead and book" or "go ahead and get you"
 
-Return CHARACTER POSITION of first occurrence in transcript for each keyword and objection found.
+Return CHARACTER POSITION of first occurrence for each keyword and objection found.
 
 OBJECTIONS: Price too high, Need to think about it, Already have another quote, Wrong timing, Need to check with partner, Other
 
@@ -219,7 +284,7 @@ Transcript:
 
 Respond ONLY with valid JSON, no markdown:
 
-{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","availability_decline":false,"turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
+{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"close_attempts":0,"objections_overcome":[],"objections_abandoned":[],"pipeline_recovery_quality":0,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
     return prompt
 
 # ──────────────────────────────────────────────
@@ -611,8 +676,26 @@ def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diar
     tb = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
     if not tb:
         raise Exception("No response from Claude")
-    raw = tb["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-    return json.loads(raw)
+    raw = tb["text"].strip()
+    # Strip markdown code fences if present
+    if raw.startswith("```"):
+        raw = re.sub(r'^```[a-z]*\n?', '', raw)
+        raw = re.sub(r'\n?```$', '', raw)
+        raw = raw.strip()
+    # Find the JSON object — extract from first { to last }
+    start = raw.find('{')
+    end = raw.rfind('}')
+    if start >= 0 and end > start:
+        raw = raw[start:end+1]
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        log(f"  JSON parse error: {e} — attempting repair")
+        # Try to repair common issues: trailing commas, control characters
+        raw = re.sub(r',\s*}', '}', raw)
+        raw = re.sub(r',\s*]', ']', raw)
+        raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
+        return json.loads(raw)
 
 # ──────────────────────────────────────────────
 # PDF EXPORT
@@ -747,6 +830,10 @@ def _reanalyze_worker():
                     "loss_reason": result.get("loss_reason", ""),
                     "soft_pipeline_reason": result.get("soft_pipeline_reason", ""),
                     "evaluation_confidence": result.get("evaluation_confidence", 8),
+                    "close_attempts": result.get("close_attempts", 0),
+                    "objections_overcome": result.get("objections_overcome", []),
+                    "objections_abandoned": result.get("objections_abandoned", []),
+                    "pipeline_recovery_quality": result.get("pipeline_recovery_quality", 0),
                     "rapport_tone": result.get("scores", {}).get("rapport_tone", {}).get("score", 0),
                 }
                 if call_date:
@@ -1077,6 +1164,10 @@ class Handler(BaseHTTPRequestHandler):
                 "soft_pipeline_reason": p.get("soft_pipeline_reason", ""),
                 "evaluation_confidence": p.get("evaluation_confidence", 8),
                 "is_diarized": p.get("is_diarized", False),
+                "close_attempts": p.get("close_attempts", 0),
+                "objections_overcome": p.get("objections_overcome", []),
+                "objections_abandoned": p.get("objections_abandoned", []),
+                "pipeline_recovery_quality": p.get("pipeline_recovery_quality", 0),
             }
             result = supa("POST", "calls", record)
             self._ok(result)
