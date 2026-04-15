@@ -1,5 +1,5 @@
 """
-Little Guys Movers - Call Analyzer Server v9
+Little Guys Movers - Call Analyzer Server v10
 =============================================
 Required environment variables:
   ANTHROPIC_API_KEY  - Anthropic API key
@@ -31,29 +31,38 @@ PORT         = int(os.environ.get("PORT", 8765))
 # Global semaphore — max 3 concurrent transcription/Claude calls
 _analysis_semaphore = threading.Semaphore(3)
 
+# Keyterm cache — rebuilt every 30 minutes
+_keyterm_cache = {"terms": [], "built_at": 0}
+_keyterm_lock = threading.Lock()
+
 # Background re-analyze job state
 _reanalyze_job = {
-    "status": "idle",   # idle | running | complete | error
-    "total": 0,
-    "processed": 0,
-    "current": "",
-    "errors": 0,
-    "started_at": None,
-    "finished_at": None,
+    "status": "idle",
+    "total": 0, "processed": 0, "current": "", "errors": 0,
+    "started_at": None, "finished_at": None,
 }
 _reanalyze_lock = threading.Lock()
+
+# Background batch upload job state
+_batch_job = {
+    "status": "idle",
+    "total": 0, "processed": 0, "skipped": 0, "errors": 0,
+    "current": "", "started_at": None, "finished_at": None,
+    "error_list": [],
+}
+_batch_lock = threading.Lock()
 
 # ──────────────────────────────────────────────
 # CLAUDE PROMPT
 # ──────────────────────────────────────────────
 
 def build_prompt(transcript, filename, corrections=None, is_diarized=False):
-    """Build Claude prompt v10 — closing focus, weighted scoring, objection tracking."""
+    """Build Claude prompt v10 — salesmanship, calibration examples, rapport opportunities, weighted scoring."""
 
     corrections_block = ""
     if corrections:
         examples = []
-        for c in corrections[:20]:
+        for c in corrections[:50]:
             note = c.get("manager_note", "")
             examples.append(
                 f"- {c['category']}: scored {c['original_score']} but correct score is {c['corrected_score']}"
@@ -71,6 +80,264 @@ TRANSCRIPT FORMAT: This transcript has speaker labels (Speaker 0, Speaker 1, etc
 - Use these labels to accurately determine talk ratio and who said what
 - Rep name detection: look for Speaker 0's introduction
 """
+
+    prompt = f"""You are a sales call evaluator for Little Guys Movers (LGMS).
+{corrections_block}{diarization_note}
+CALIBRATION EXAMPLES — use these to anchor your scoring to LGMS standards:
+
+EXCELLENT CALL (8/10 overall) — Alex, storage-to-apartment move:
+- Assumed the close: said "I can get started first thing tomorrow morning at 8 o'clock" and moved straight to scheduling without asking permission
+- FVP: included naturally in price breakdown with cost stated — score 9/10
+- Rapport: immediately acknowledged customer's stress about last-minute situation, warm and confident throughout — score 9/10
+- Closing: 10/10 — never asked "do you want to book?", just booked it
+- Salesmanship: mentioned "clothes in the dresser" tip naturally — score 7/10
+Key lesson: assume the close, move with confidence, acknowledge the customer's situation
+
+GOOD CALL (8/10 overall) — Dylan, large house move:
+- Thorough room-by-room inventory, asked all the right detail questions
+- FVP: mentioned $19,000 coverage and asked if adequate but never explained what it is — score 7/10
+- Closing: "I could have movers there as early as 8 a.m. next Thursday, if you wanted to get that set up" — offered but waited for confirmation rather than assuming — score 9/10
+- Salesmanship: 5/10 — missed obvious opportunities on large house move (clothes in dresser, disassembly, background checks)
+- Excellent expectation setting: explained email, attachments, day-of 7:45 call — score 9/10 professionalism
+Key lesson: thorough and professional but missed salesmanship and FVP explanation
+
+AVERAGE CALL (7/10 overall) — JD, studio apartment move:
+- Good inventory detail questions (headboard, platform type, mirror)
+- FVP: completely absent — never mentioned — score 1/10 (MAJOR miss)
+- Closing: "Do you want to go ahead and get this scheduled?" — question not assumption — score 6/10
+- Name came late: "I kind of dove right into it and didn't get your name"
+- Mentioned clothes in dresser but only at the very end as afterthought — score 4/10 salesmanship
+- Missed customer's anxiety about unknown floor situation — no reassurance given
+Key lesson: FVP miss drops overall significantly regardless of other strengths
+
+POOR CALL (4/10 overall) — James, small marketplace pickup:
+- Customer said "I'm going to try and find another option" after price
+- James said "completely understand" TWICE and let him walk — zero close attempt — score 1/10 closing
+- MISSED RAPPORT OPPORTUNITY: customer said "the guy that was supposed to help me decided to leave town unbeknownst to me" — James gave no acknowledgment. Should have said "oh that's rough, I'm glad you found us — we won't do that to you"
+- FVP: never mentioned — score 0/10
+- Salesmanship: nothing — score 2/10
+- Price delivered without any value framing first
+Key lesson: never let a customer walk without attempting to overcome the objection. Always acknowledge emotional moments.
+
+WHAT A 10/10 CALL LOOKS LIKE:
+- Rep introduces themselves and gets customer name within first 30 seconds
+- Acknowledges any stress or difficulty the customer mentions immediately and warmly
+- Controls the call with confidence while feeling natural and unhurried
+- Gets all required information for the move type
+- Delivers price confidently without being asked
+- Pitches FVP naturally, explains what it covers, states the cost
+- Uses multiple salesmanship phrases naturally woven into conversation
+- Assumes the close — moves to scheduling without asking permission
+- Overcomes any objection with specific counters (no cancellation fee, availability, value)
+- Sets clear expectations for confirmation and day-of communication
+- Customer feels like they made the right choice
+
+---
+
+STEP 1 — CLASSIFY CALL TYPE:
+- move_category: "standard" | "specialty" | "unload_only" | "in_house" | "commercial" | "storage" | "non_move"
+- call_type: "sales_estimate" | "follow_up" | "complaint" | "booking_confirmation" | "non_sales" | "too_short" | "other"
+- word_count: approximate
+- exclude_from_scoring: true if fewer than 80 words OR clearly not a sales call OR disconnected
+
+IMPORTANT: Even if exclude_from_scoring is true, still detect turned_away. A call where LGMS says "we don't have availability" is turned_away even if only 10 words long.
+
+STEP 2 — DETECT REP NAME:
+- Look for rep introduction or Speaker 0's first lines if diarized
+- Return FIRST NAME ONLY. Return "Unknown" if not found.
+
+STEP 3 — CALL QUALITY:
+- "disconnected": abrupt ending, "Hello? Hello?" patterns, very short
+- "poor_audio": heavy [inaudible] density (5+ occurrences), one-sided
+- "normal": otherwise
+
+STEP 4 — FLAGS:
+- turned_away: LGMS could NOT accommodate — "we're booked", "no availability", "can't do that date"
+- onsite_suggested: onsite visit/estimate mentioned
+- is_continuation: "calling back about", "as we discussed", "following up", "spoke earlier"
+
+STEP 5 — OUTCOME & PIPELINE:
+- call_outcome: "booked" | "estimate_sent" | "soft_pipeline" | "lost" | "unknown"
+- soft_pipeline: customer interested but not ready — needs partner, no exact date, needs to think, will call back
+- loss_reason (if lost): "price_too_high" | "went_with_competitor" | "wrong_timing" | "no_availability" | "just_shopping" | "other" | ""
+- soft_pipeline_reason (if soft_pipeline): "needs_partner" | "no_exact_date" | "needs_to_think" | "will_call_back" | "other" | ""
+
+STEP 6 — RAPPORT OPPORTUNITY ANALYSIS:
+Scan the transcript for moments where the customer shared something personal, stressful, or emotionally significant.
+For each such moment, evaluate:
+- Did the rep acknowledge it warmly? (good)
+- Did the rep use it to reinforce trust in LGMS? (better — e.g. "we won't do that to you", "we handle this all the time")
+- Did the rep completely ignore it and barrel through the script? (coaching point)
+
+Examples of rapport opportunities:
+- Customer mentions someone bailed on them or let them down → "I'm sorry to hear that, we won't do that to you"
+- Customer mentions a life event (divorce, new job, family change) → acknowledgment and empathy
+- Customer is clearly stressed or anxious → reassurance
+- Customer mentions bad experience with movers → "that won't happen with us, here's why"
+- Customer shares something personal (moving mom, first apartment, etc.) → genuine acknowledgment
+
+List missed_rapport_opportunities as specific moments: "Customer said [X], rep gave no acknowledgment"
+
+STEP 7 — CLOSING ANALYSIS:
+close_attempts: count how many times rep explicitly tried to book/schedule
+- Assuming the close counts: "Let me get you on the calendar for Saturday" = 1 attempt
+- Asking permission is weaker: "Do you want to go ahead and book?" = 0.5 but still counts
+- Never attempting = 0
+
+CLOSING LANGUAGE (strong signals):
+"I have a spot available for you", "let me get you on the board/schedule/calendar",
+"first come first serve", "no cancellation fee", "save that for you", "hold that for you",
+"get you taken care of", "can I go ahead and", "let me go ahead and book",
+"shall I go ahead and get that set up"
+
+OBJECTION HANDLING — for each objection:
+- overcome: rep countered with specific response and advanced conversation
+- abandoned: rep accepted without counter ("ok, call us back", "completely understand", "no problem")
+
+Ideal counters:
+- Price too high → "What were you expecting? Let me see what I can do" + work through it
+- Need to think → "I understand — no cancellation fee, so would it make sense to hold the spot while you decide?"
+- Need to check with partner → "Of course — no cancellation fee, want me to hold that while you check?"
+- Already have a quote → "What are they quoting you? We'd love to earn your business today"
+
+pipeline_recovery_quality (soft_pipeline only, 1-10):
+- 1-3: "ok call us back" — no next step, lead will go cold
+- 4-6: sent email estimate, gave some info
+- 7-8: set specific callback time or confirmed next step
+- 9-10: held tentative spot + specific callback + email — clear path to book
+
+STEP 8 — SALESMANSHIP:
+Detect whether rep used value proposition language. Score the CONCEPT not exact words.
+
+ALWAYS-RELEVANT (should say on most calls):
+- Background checked / screened movers
+- No day labor / professional employees
+- We show up / we don't miss appointments / we're reliable
+- We have the proper equipment / trucks / tools
+
+SITUATIONAL (only when applicable):
+- "You can leave your clothes in the dresser" (when bedroom furniture present)
+- "We disassemble and reassemble" (when furniture assembly needed)
+- "We can rearrange things" (in-house or customer mentions layout)
+- "We're careful with your belongings" / takes care with items
+
+Scoring:
+- 1-3: None of the above mentioned
+- 4-5: One always-relevant phrase used
+- 6-7: Two or more always-relevant phrases
+- 8-9: Always-relevant + appropriate situational phrases, woven naturally
+- 10: Multiple value props woven throughout conversation naturally
+
+Track value_props_used as list of concepts detected.
+
+STEP 9 — CHECKLIST (apply based on move_category):
+
+STANDARD MOVE — all 22 steps:
+1. got_move_date, 2. got_customer_name, 3. got_phone_number, 4. got_cities,
+5. got_home_type, 6. got_stairs_info, 7. did_full_inventory, 8. asked_forgotten_items,
+9. asked_about_boxes, 10. gave_price_on_call, 11. pitched_fvp,
+12. attempted_to_close, 13. offered_email_estimate, 14. mentioned_confirmations,
+15. thanked_customer, 16. asked_name_at_start, 17. led_estimate_process,
+18. scheduled_onsite_attempt (na unless triggered), 19. offered_alternatives (na unless triggered),
+20. took_rapport_opportunities, 21. completed_booking_wrapup, 22. captured_lead
+
+SPECIALTY: Apply: move_date, name, phone, cities, stairs, price, fvp, close, confirmations, thanks, name_at_start, lead. Set rest to "na".
+UNLOAD ONLY: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, lead. Set pitched_fvp and rest to "na".
+IN-HOUSE: Apply: move_date, name, phone, inventory, price, fvp, close, thanks, name_at_start, lead. Set cities/stairs/boxes and rest to "na".
+COMMERCIAL: Apply all standard steps. Set onsite/alternatives to "na" unless triggered.
+STORAGE: Apply: move_date, name, phone, cities, stairs, price, fvp, close, confirmations, thanks, name_at_start, lead. Set inventory/boxes and rest to "na".
+
+CHECKLIST VALUES: true | false | "na"
+
+STEP 10 — SCORING (1-10):
+
+OVERALL — calculate server-side using weighted formula. Set your overall score using this formula:
+overall = round(closing*0.25 + price*0.15 + fvp*0.15 + rapport*0.13 + salesmanship*0.10 + info*0.09 + control*0.09 + professionalism*0.08 + 0.5)
+Note: server will recalculate — your overall score is a sanity check only.
+
+CLOSING ATTEMPT (25% weight):
+- 1-2: Never attempted — let customer go without asking
+- 3-4: Weak attempt, accepted first objection without any counter
+- 5-6: One attempt, gave up too easily
+- 7-8: Clear attempt, handled at least one objection with counter
+- 9: Strong attempt, overcame objections, used urgency/no-cancel-fee language
+- 10: Multiple attempts, assumed close, overcame all objections confidently
+
+INFORMATION COMPLETENESS (9% weight):
+- Score on WHAT was gathered, NOT the order
+- Penalize only if required info was never obtained
+- Natural conversation that circles back scores well
+- Do NOT penalize for N/A checklist items
+
+CALL CONTROL (9% weight):
+- Score on whether rep ultimately steered to all required info
+- Do NOT penalize for natural conversation or customer tangents
+- Penalize only if key info was never recovered
+
+FVP PITCH (15% weight):
+- 0-2: Never mentioned (when required)
+- 3-5: Mentioned briefly, no explanation
+- 6: Mentioned, said can be removed or dismissed it
+- 7: Mentioned, included cost, moved on — standard
+- 8: Explained briefly what it covers, stated cost
+- 9-10: Explained thoroughly, adjusted coverage, handled objection
+- N/A for unload_only and storage moves
+
+RAPPORT & TONE (13% weight):
+- 1-3: Flat, bothered, missed obvious rapport opportunities, customer uncomfortable
+- 4-6: Polite but mechanical, some warmth but missed moments
+- 7-8: Warm, acknowledged customer's situation, customer felt heard
+- 9-10: Excellent — genuine connection, used customer's situation to build trust
+
+SALESMANSHIP (10% weight): see rubric above
+
+PROFESSIONALISM (8% weight):
+- Includes expectation setting, email explanation, day-of call mention, smooth handling of complications
+
+CONFIDENCE SCORE (1-10):
+- 10: Clear complete transcript
+- 7-9: Good, minor ambiguities
+- 4-6: Some audio issues
+- 1-3: Poor audio or very ambiguous
+
+TALK RATIO: use speaker labels if diarized, otherwise estimate.
+
+KEYWORDS — detect if rep said (concept not exact words):
+- "Full Value Protection" or "FVP"
+- "confirmation call"
+- "hourly" or "per hour"
+- "moving boxes"
+- "fuel" or "fuel charge"
+- "declared value"
+- "Little Guys" or "Little Guys Movers"
+- "spot available" or "have a spot"
+- "get you on the board/schedule/calendar"
+- "first come first serve"
+- "no cancellation fee"
+- "save/hold that for you"
+- "get you taken care of"
+- "go ahead and book/get you"
+- "background checked" or "background screened"
+- "no day labor"
+- "we show up" or "we don't miss"
+- "clothes in the dresser"
+- "disassemble" or "reassemble"
+
+Return CHARACTER POSITION of first occurrence for each keyword and objection.
+
+OBJECTIONS: Price too high, Need to think about it, Already have another quote, Wrong timing, Need to check with partner, Other
+
+SENTIMENT: positive / neutral / hesitant / negative
+
+Filename: {filename}
+
+Transcript:
+{transcript}
+
+Respond ONLY with valid JSON, no markdown:
+
+{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"close_attempts":1,"objections_overcome":[],"objections_abandoned":[],"pipeline_recovery_quality":0,"missed_rapport_opportunities":[],"value_props_used":[],"salesmanship_score":0,"audio_duration_estimate":0,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"salesmanship":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
+    return prompt
 
     prompt = f"""You are a sales call evaluator for Little Guys Movers (LGMS).
 {corrections_block}{diarization_note}
@@ -514,20 +781,41 @@ def build_keyterms(rep_names=None, corrections=None):
     terms = set([
         "Little Guys Movers", "Little Guys", "Full Value Protection", "FVP",
         "confirmation call", "fuel charge", "declared value", "National Express",
-        "Rivermont", "moving boxes",
+        "Rivermont", "moving boxes", "no cancellation fee", "first come first serve",
+        "background checked", "no day labor",
     ])
-    # Add rep names
     if rep_names:
         for name in rep_names:
             if name and name != "Unknown":
                 terms.add(name)
-    # Add replacement values from corrections dictionary
     if corrections:
         for c in corrections:
             replace = c.get("replace_text", "")
             if replace and len(replace) > 2:
                 terms.add(replace)
-    return list(terms)[:100]  # Deepgram max 100 keyterms
+    return list(terms)[:100]
+
+def get_cached_keyterms():
+    """Return cached keyterms, rebuilding if older than 30 minutes."""
+    global _keyterm_cache
+    with _keyterm_lock:
+        age = time.time() - _keyterm_cache["built_at"]
+        if age < 1800 and _keyterm_cache["terms"]:
+            return _keyterm_cache["terms"]
+    try:
+        rep_list = supa("GET", "reps?active=eq.true&select=full_name,nickname")
+        rep_names = []
+        for r in (rep_list or []):
+            if r.get("full_name"): rep_names.append(r["full_name"])
+            if r.get("nickname"): rep_names.append(r["nickname"])
+        tx_corrections = get_transcript_corrections()
+        terms = build_keyterms(rep_names=rep_names, corrections=tx_corrections)
+    except Exception:
+        terms = build_keyterms()
+    with _keyterm_lock:
+        _keyterm_cache = {"terms": terms, "built_at": time.time()}
+    log(f"  Keyterm cache rebuilt: {len(terms)} terms")
+    return terms
 
 # ──────────────────────────────────────────────
 # DEEPGRAM TRANSCRIPTION
@@ -658,12 +946,38 @@ def transcribe_audio(audio_bytes, filename, keyterms=None):
 # CLAUDE ANALYSIS
 # ──────────────────────────────────────────────
 
+def calculate_weighted_overall(scores):
+    """Calculate weighted overall score server-side — guaranteed accuracy."""
+    w = {
+        "closing_attempt": 0.25,
+        "price_delivery": 0.15,
+        "fvp_pitch": 0.15,
+        "rapport_tone": 0.13,
+        "salesmanship": 0.10,
+        "info_sequence": 0.09,
+        "call_control": 0.09,
+        "professionalism": 0.08,
+    }
+    total = 0.0
+    weight_used = 0.0
+    for key, weight in w.items():
+        s = scores.get(key, {})
+        score = s.get("score", 0) if isinstance(s, dict) else 0
+        if score > 0:
+            total += score * weight
+            weight_used += weight
+    if weight_used < 0.3:
+        return 0
+    # Normalize if some scores were 0/missing
+    normalized = total / weight_used if weight_used > 0 else 0
+    return min(10, max(1, round(normalized)))
+
 def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diarized=False):
     corrections = get_recent_corrections()
     prompt = build_prompt(transcript, filename, corrections, is_diarized=is_diarized)
     req_body = json.dumps({
         "model": model,
-        "max_tokens": 3000,
+        "max_tokens": 4096,
         "messages": [{"role": "user", "content": prompt}]
     }).encode()
     req = urllib.request.Request(
@@ -677,25 +991,39 @@ def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diar
     if not tb:
         raise Exception("No response from Claude")
     raw = tb["text"].strip()
-    # Strip markdown code fences if present
     if raw.startswith("```"):
         raw = re.sub(r'^```[a-z]*\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)
         raw = raw.strip()
-    # Find the JSON object — extract from first { to last }
     start = raw.find('{')
     end = raw.rfind('}')
     if start >= 0 and end > start:
         raw = raw[start:end+1]
     try:
-        return json.loads(raw)
+        result = json.loads(raw)
     except json.JSONDecodeError as e:
         log(f"  JSON parse error: {e} — attempting repair")
-        # Try to repair common issues: trailing commas, control characters
         raw = re.sub(r',\s*}', '}', raw)
         raw = re.sub(r',\s*]', ']', raw)
         raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
-        return json.loads(raw)
+        result = json.loads(raw)
+
+    # Calculate weighted overall server-side
+    scores = result.get("scores", {})
+    # Add salesmanship score to scores dict if returned separately
+    if "salesmanship_score" in result and "salesmanship" not in scores:
+        scores["salesmanship"] = {"score": result["salesmanship_score"], "note": ""}
+    weighted_overall = calculate_weighted_overall(scores)
+    if weighted_overall > 0:
+        scores["overall"] = {"score": weighted_overall, "note": "Weighted: closing 25%, price 15%, fvp 15%, rapport 13%, salesmanship 10%, info 9%, control 9%, prof 8%"}
+        result["scores"] = scores
+
+    # Save token counts for cost tracking
+    usage = resp.get("usage", {})
+    result["input_tokens"] = usage.get("input_tokens", 0)
+    result["output_tokens"] = usage.get("output_tokens", 0)
+
+    return result
 
 # ──────────────────────────────────────────────
 # PDF EXPORT
@@ -834,6 +1162,11 @@ def _reanalyze_worker():
                     "objections_overcome": result.get("objections_overcome", []),
                     "objections_abandoned": result.get("objections_abandoned", []),
                     "pipeline_recovery_quality": result.get("pipeline_recovery_quality", 0),
+                    "salesmanship_score": result.get("scores", {}).get("salesmanship", {}).get("score", 0) if isinstance(result.get("scores", {}).get("salesmanship"), dict) else 0,
+                    "value_props_used": result.get("value_props_used", []),
+                    "missed_rapport_opportunities": result.get("missed_rapport_opportunities", []),
+                    "input_tokens": result.get("input_tokens", 0),
+                    "output_tokens": result.get("output_tokens", 0),
                     "rapport_tone": result.get("scores", {}).get("rapport_tone", {}).get("score", 0),
                 }
                 if call_date:
@@ -865,6 +1198,210 @@ def _reanalyze_worker():
         log(f"  Re-analyze worker error: {e}")
 
 # ──────────────────────────────────────────────
+# BATCH UPLOAD WORKER
+# ──────────────────────────────────────────────
+
+def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
+    """Process one audio file — transcribe, analyze, save. Returns (saved_record, skip_reason)."""
+    # Check duplicate
+    try:
+        safe = filename.replace("'", "''")
+        existing = supa("GET", f"calls?filename=ilike.{urllib.parse.quote(safe)}&limit=1")
+        if existing:
+            return None, "duplicate"
+    except Exception:
+        pass
+
+    # Transcribe
+    transcript, is_diarized = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
+    if not transcript or not transcript.strip():
+        return None, "empty transcript"
+
+    # Apply corrections
+    clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
+
+    # Analyze
+    result = run_claude_analysis(clean_transcript, filename, is_diarized=is_diarized)
+    result["transcript"] = clean_transcript
+    result["filename"] = filename
+    result["is_diarized"] = is_diarized
+
+    # Upload audio to storage
+    try:
+        enforce_storage_cap()
+        safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
+        supa_storage_upload("call-audio", safe_filename, audio_bytes, "audio/mpeg")
+        result["audio_url"] = supa_storage_signed_url("call-audio", safe_filename)
+        result["storage_filename"] = safe_filename
+    except Exception as e:
+        log(f"  Audio storage warning for {filename}: {e}")
+        result["audio_url"] = ""
+        result["storage_filename"] = ""
+
+    # Save to database
+    call_date = parse_call_date_from_filename(filename)
+    rep_name_raw = result.get("rep_name_detected") or "Unknown"
+    try:
+        rep_list = supa("GET", "reps?active=eq.true")
+        matched_name, confidence = fuzzy_match_rep(rep_name_raw, rep_list)
+        rep_name = matched_name if confidence >= 0.90 else rep_name_raw
+    except Exception:
+        rep_name = rep_name_raw
+
+    call_quality = result.get("call_quality", "normal")
+    exclude = result.get("exclude_from_scoring", False)
+    exclusion_reason = result.get("exclusion_reason", "")
+    if call_quality == "disconnected" and not exclude:
+        exclude = True
+        exclusion_reason = "Disconnected/short call — auto excluded"
+
+    scores = result.get("scores", {})
+    record = {
+        "rep_name": rep_name,
+        "filename": filename,
+        "storage_filename": result.get("storage_filename", ""),
+        "transcript": clean_transcript,
+        "caller_name": result.get("caller_name", ""),
+        "call_purpose": result.get("call_purpose", ""),
+        "call_type": result.get("call_type", "sales_estimate"),
+        "move_type": result.get("move_type", ""),
+        "move_category": result.get("move_category", "standard"),
+        "call_outcome": result.get("call_outcome", "unknown"),
+        "loss_reason": result.get("loss_reason", ""),
+        "soft_pipeline_reason": result.get("soft_pipeline_reason", ""),
+        "word_count": result.get("word_count", 0),
+        "exclude_from_scoring": exclude,
+        "exclusion_reason": exclusion_reason,
+        "call_summary": result.get("call_summary", ""),
+        "key_details": result.get("key_details_captured", ""),
+        "talk_ratio_rep": result.get("talk_ratio_rep", 0),
+        "talk_ratio_customer": result.get("talk_ratio_customer", 0),
+        "keywords_detected": result.get("keywords_detected", []),
+        "keyword_positions": result.get("keyword_positions", {}),
+        "objections_detected": result.get("objections_detected", []),
+        "objection_positions": result.get("objection_positions", {}),
+        "customer_sentiment": result.get("customer_sentiment", "neutral"),
+        "scores": scores,
+        "checklist": result.get("checklist", {}),
+        "strengths": result.get("strengths", []),
+        "coaching_points": result.get("coaching_points", []),
+        "tags": [],
+        "manager_notes": "",
+        "score_overrides": {},
+        "call_date": call_date,
+        "audio_url": result.get("audio_url", ""),
+        "availability_decline": result.get("availability_decline", False),
+        "turned_away": result.get("turned_away", False),
+        "onsite_suggested": result.get("onsite_suggested", False),
+        "call_quality": call_quality,
+        "is_continuation": result.get("is_continuation", False),
+        "continuation_group_id": "",
+        "evaluation_confidence": result.get("evaluation_confidence", 8),
+        "is_diarized": is_diarized,
+        "close_attempts": result.get("close_attempts", 0),
+        "objections_overcome": result.get("objections_overcome", []),
+        "objections_abandoned": result.get("objections_abandoned", []),
+        "pipeline_recovery_quality": result.get("pipeline_recovery_quality", 0),
+        "salesmanship_score": scores.get("salesmanship", {}).get("score", 0) if isinstance(scores.get("salesmanship"), dict) else 0,
+        "value_props_used": result.get("value_props_used", []),
+        "missed_rapport_opportunities": result.get("missed_rapport_opportunities", []),
+        "input_tokens": result.get("input_tokens", 0),
+        "output_tokens": result.get("output_tokens", 0),
+    }
+    saved = supa("POST", "calls", record)
+    return saved, None
+
+def _batch_upload_worker(zip_bytes):
+    """Background worker — extract ZIP, process each audio file, save to DB."""
+    global _batch_job
+    try:
+        # Get cached keyterms and corrections once for the whole batch
+        keyterms = get_cached_keyterms()
+        tx_corrections = get_transcript_corrections()
+
+        # Extract audio files from ZIP
+        audio_exts = {".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".webm", ".mpeg", ".mpga"}
+        audio_files = []
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                for name in zf.namelist():
+                    if name.startswith("__") or name.startswith(".") or name.endswith("/"):
+                        continue
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext not in audio_exts:
+                        continue
+                    basename = os.path.basename(name)
+                    if not basename:
+                        continue
+                    audio_data = zf.read(name)
+                    if len(audio_data) > 25 * 1024 * 1024:
+                        with _batch_lock:
+                            _batch_job["skipped"] += 1
+                            _batch_job["error_list"].append(f"{basename} — too large (>25MB)")
+                        continue
+                    audio_files.append((basename, audio_data))
+        except zipfile.BadZipFile as e:
+            with _batch_lock:
+                _batch_job["status"] = "error"
+                _batch_job["current"] = f"Invalid ZIP: {e}"
+            return
+
+        total = len(audio_files)
+        with _batch_lock:
+            _batch_job["total"] = total
+
+        log(f"  Batch upload: {total} files extracted from ZIP")
+
+        # Process in batches of 3
+        for i in range(0, total, 3):
+            batch = audio_files[i:i+3]
+            threads = []
+            results = [None] * len(batch)
+
+            def process_file(idx, fname, fdata):
+                with _batch_lock:
+                    _batch_job["current"] = fname
+                try:
+                    with _analysis_semaphore:
+                        saved, skip_reason = _process_single_file(fdata, fname, keyterms, tx_corrections)
+                    if skip_reason:
+                        with _batch_lock:
+                            _batch_job["skipped"] += 1
+                            if skip_reason != "duplicate":
+                                _batch_job["error_list"].append(f"{fname} — {skip_reason}")
+                    else:
+                        with _batch_lock:
+                            _batch_job["processed"] += 1
+                except Exception as e:
+                    log(f"  Batch error for {fname}: {e}")
+                    with _batch_lock:
+                        _batch_job["errors"] += 1
+                        _batch_job["error_list"].append(f"{fname} — {str(e)[:80]}")
+                finally:
+                    with _batch_lock:
+                        if _batch_job["current"] == fname:
+                            _batch_job["current"] = ""
+
+            for j, (fname, fdata) in enumerate(batch):
+                t = threading.Thread(target=process_file, args=(j, fname, fdata), daemon=True)
+                threads.append(t)
+                t.start()
+            for t in threads:
+                t.join()
+
+        with _batch_lock:
+            _batch_job["status"] = "complete"
+            _batch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _batch_job["current"] = ""
+        log(f"  Batch upload complete: {_batch_job['processed']} processed, {_batch_job['skipped']} skipped, {_batch_job['errors']} errors")
+
+    except Exception as e:
+        with _batch_lock:
+            _batch_job["status"] = "error"
+            _batch_job["current"] = str(e)
+        log(f"  Batch upload worker error: {e}")
+
+# ──────────────────────────────────────────────
 # HTTP HANDLER
 # ──────────────────────────────────────────────
 
@@ -890,6 +1427,8 @@ class Handler(BaseHTTPRequestHandler):
             self._export_pdf_rep()
         elif path == "/reanalyze/status":
             self._reanalyze_status()
+        elif path == "/batch_upload/status":
+            self._batch_upload_status()
         elif path == "/corrections":
             self._get_corrections()
         elif path == "/transcript_corrections":
@@ -932,6 +1471,9 @@ class Handler(BaseHTTPRequestHandler):
             "/reanalyze/start": self._reanalyze_start,
             "/corrections/save": self._save_correction,
             "/transcript_corrections/save": self._save_transcript_correction,
+            "/transcript_corrections/delete": self._delete_transcript_correction,
+            "/transcript_corrections/reapply": self._reapply_corrections,
+            "/batch_upload/start": self._batch_upload_start,
             "/transcript_corrections/delete": self._delete_transcript_correction,
             "/transcript_corrections/reapply": self._reapply_corrections,
         }
@@ -1001,12 +1543,10 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             with _analysis_semaphore:
-                # Build keyterms from rep names + corrections
+                # Use cached keyterms — no Supabase query needed on every call
                 try:
-                    rep_list = supa("GET", "reps?active=eq.true&select=full_name,nickname")
-                    rep_names = [r.get("full_name") for r in (rep_list or [])] + [r.get("nickname") for r in (rep_list or [])]
+                    keyterms = get_cached_keyterms()
                     tx_corrections = get_transcript_corrections()
-                    keyterms = build_keyterms(rep_names=rep_names, corrections=tx_corrections)
                 except Exception:
                     keyterms = build_keyterms()
                     tx_corrections = []
@@ -1168,6 +1708,12 @@ class Handler(BaseHTTPRequestHandler):
                 "objections_overcome": p.get("objections_overcome", []),
                 "objections_abandoned": p.get("objections_abandoned", []),
                 "pipeline_recovery_quality": p.get("pipeline_recovery_quality", 0),
+                "salesmanship_score": p.get("salesmanship_score", 0),
+                "value_props_used": p.get("value_props_used", []),
+                "missed_rapport_opportunities": p.get("missed_rapport_opportunities", []),
+                "storage_filename": p.get("storage_filename", ""),
+                "input_tokens": p.get("input_tokens", 0),
+                "output_tokens": p.get("output_tokens", 0),
             }
             result = supa("POST", "calls", record)
             self._ok(result)
@@ -1484,6 +2030,64 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
     def _reanalyze_status(self):
         with _reanalyze_lock:
             status = dict(_reanalyze_job)
+        self._ok(status)
+
+    def _batch_upload_start(self, body):
+        """Accept raw ZIP bytes via multipart or base64 JSON, start background processing."""
+        global _batch_job
+        with _batch_lock:
+            if _batch_job["status"] == "running":
+                self._ok({"message": "Already running", "status": _batch_job}); return
+
+        content_type = self.headers.get("Content-Type", "")
+        try:
+            if "multipart/form-data" in content_type:
+                # Raw multipart upload — parse boundary
+                boundary = re.search(r'boundary=([^\s;]+)', content_type)
+                if not boundary:
+                    self._err(400, "Missing boundary in multipart"); return
+                bound = boundary.group(1).encode()
+                parts = body.split(b"--" + bound)
+                zip_bytes = None
+                for part in parts:
+                    if b'filename=' in part and b'.zip' in part.lower():
+                        # Find end of headers
+                        header_end = part.find(b"\r\n\r\n")
+                        if header_end >= 0:
+                            zip_bytes = part[header_end+4:].rstrip(b"\r\n--")
+                            break
+                if not zip_bytes:
+                    self._err(400, "No ZIP file found in upload"); return
+            else:
+                # JSON with base64
+                import base64
+                p = json.loads(body)
+                zip_bytes = base64.b64decode(p.get("zip", ""))
+
+            if len(zip_bytes) < 100:
+                self._err(400, "ZIP file too small or empty"); return
+
+        except Exception as e:
+            self._err(400, f"Failed to parse upload: {e}"); return
+
+        with _batch_lock:
+            _batch_job = {
+                "status": "running",
+                "total": 0, "processed": 0, "skipped": 0, "errors": 0,
+                "current": "Extracting ZIP...",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "finished_at": None,
+                "error_list": [],
+            }
+
+        t = threading.Thread(target=_batch_upload_worker, args=(zip_bytes,), daemon=True)
+        t.start()
+        log(f"  Batch upload started: {len(zip_bytes):,} bytes")
+        self._ok({"message": "Batch upload started", "status": _batch_job})
+
+    def _batch_upload_status(self):
+        with _batch_lock:
+            status = dict(_batch_job)
         self._ok(status)
 
     # ── EXPORT ──
