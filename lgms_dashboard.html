@@ -273,7 +273,7 @@ textarea.nt:focus{border-color:var(--g)}
     <div class="sb-sep"></div>
     <button class="sb-btn" onclick="nav('add')" id="nav-add"><span class="sb-ico">➕</span>Add Calls</button>
   </div>
-  <div class="sb-footer"><div class="sb-version">v9 · Call Intelligence</div></div>
+  <div class="sb-footer"><div class="sb-version">v10 · Call Intelligence</div></div>
 </nav>
 <div class="mobile-overlay" id="mob-overlay" onclick="closeMob()"></div>
 <div class="main">
@@ -300,8 +300,8 @@ const CK_GROUPS=[
   {name:'Rapport & Navigation',keys:['asked_name_at_start','led_estimate_process','scheduled_onsite_attempt','offered_alternatives','took_rapport_opportunities'],color:'#c0392b'},
   {name:'Admin & Lead',keys:['completed_booking_wrapup','captured_lead'],color:'#065f46'},
 ];
-const SK=['info_sequence','price_delivery','fvp_pitch','closing_attempt','call_control','professionalism','rapport_tone','overall'];
-const SL=['Info Sequence','Price Delivery','FVP Pitch','Closing','Call Control','Professionalism','Rapport & Tone','Overall'];
+const SK=['info_sequence','price_delivery','fvp_pitch','closing_attempt','call_control','professionalism','rapport_tone','salesmanship','overall'];
+const SL=['Info Sequence','Price Delivery','FVP Pitch','Closing','Call Control','Professionalism','Rapport & Tone','Salesmanship','Overall'];
 const KWS=['Full Value Protection','confirmation call','hourly','moving boxes','fuel','declared value','Little Guys','spot available','get you on the board','first come first serve','no cancellation fee','save that for you','get you taken care of','get you on the calendar'];
 
 let allCalls=[],reps=[],sharedViews=[],corrections=[];
@@ -331,6 +331,7 @@ async function init(){
   loadReps();loadSharedViews();loadCorrections();
   nav('overview');
   checkReanalStatus();
+  checkBulkStatus();
 }
 async function loadCalls(){try{const r=await fetch(API+'/calls');if(r.ok){let d=await r.json();if(SHARE_MODE&&SHARE_REP_IDS.length)d=d.filter(c=>SHARE_REP_IDS.includes(c.rep_name));allCalls=d;}}catch(e){}}
 async function loadReps(){try{const r=await fetch(API+'/reps');if(r.ok)reps=await r.json();}catch(e){}}
@@ -413,6 +414,10 @@ function renderOverview(){
       <div class="mc ${br>=50?'green':'red'}" onclick="libFilters={rep:'',out:'booked',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Booking Rate</div><div class="mc-val">${br}%</div><div class="mc-sub">${booked} booked · ${softPipeline} pipeline</div></div>
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'turned_away',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Turned Away</div><div class="mc-val">${turnedAway}</div><div class="mc-sub">no LGMS availability</div></div>
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-hdr"><h3>💰 Running Costs</h3><span class="bdg-blue bdg" id="cost-period">This month</span></div>
+      <div id="cost-calculator"></div>
+    </div>
     <div class="grid-2">
       <div class="card">
         <div class="card-hdr"><h3>Rep Leaderboard</h3><span class="bdg" id="lb-cnt"></span></div>
@@ -439,7 +444,7 @@ function renderOverview(){
       <div class="card"><div class="card-hdr"><h3>Keywords</h3></div><div id="kw-viz"></div></div>
       <div class="card"><div class="card-hdr"><h3>Objections</h3></div><div id="obj-viz"></div></div>
     </div>`);
-  renderLB();renderTrend(sc);renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);
+  renderLB();renderTrend(sc);renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);renderCostCalc(fc);
 }
 function navFilter(attn){libFilters.attn=attn;nav('library');}
 function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
@@ -615,7 +620,7 @@ function buildRow(c){
   const ckHtml=CK.map((k,i)=>`<div class="ck-item">${(()=>{const v=c.checklist?.[k];return v===true?'<span style="color:#66bb6a">✓</span>':v==='na'?'<span style="color:var(--tx4);font-size:10px">N/A</span>':'<span style="color:var(--tx4);opacity:.5">✗</span>';})()}</span> <span>${CKFULL[i]}</span></div>`).join('');
   const ovCnt=c.score_overrides&&Object.keys(c.score_overrides).length;
   const ovrHtml=`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-    <select id="ok-${c.id}"><option value="">Category…</option>${SK.map(k=>`<option value="${k}">${k.replace(/_/g,' ')}</option>`).join('')}</select>
+    <select id="ok-${c.id}"><option value="">Category…</option>${SK.map(k=>`<option value="${k}">${k.replace(/_/g,' ')}</option>`).join('')}<option value="__na__">Mark as N/A</option></select>
     <input type="number" min="1" max="10" placeholder="1-10" id="ov-${c.id}" style="width:64px;padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;outline:none" />
     <input type="text" placeholder="Reason (optional)" id="on-${c.id}" style="width:180px;font-size:12px;padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;outline:none;font-family:'Inter',sans-serif" />
     <button class="btn btn-s btn-sm" onclick="applyOv('${c.id}')">Apply</button>
@@ -673,7 +678,9 @@ function buildRow(c){
       </div>`:''}
       <div class="ds"><h4>Keywords</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${(c.keywords_detected||[]).map(k=>{const pos=c.keyword_positions?.[k];return`<span class="tag" style="background:rgba(92,158,255,.1);color:var(--blue)" ${pos!==undefined?`onclick="jumpTx('${c.id}',${pos})"`:''}>${esc(k)}</span>`;}).join('')||'<span style="color:var(--ink4);font-size:12px">None</span>'}</div></div>
       ${(c.objections_detected||[]).length?`<div class="ds"><h4>Objections</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map(o=>`<span style="background:var(--rl);color:var(--red);padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600">${esc(o)}</span>`).join('')}</div></div>`:''}
+      ${(c.missed_rapport_opportunities||[]).length?`<div class="ds"><h4>Missed Rapport Opportunities</h4><div style="display:flex;flex-direction:column;gap:5px">${c.missed_rapport_opportunities.map(m=>`<div style="background:rgba(255,183,77,.06);border-left:3px solid var(--amber);border-radius:0 9px 9px 0;padding:8px 12px;font-size:12.5px;color:var(--tx2)">⚠ ${esc(m)}</div>`).join('')}</div></div>`:''}
       <div class="ds"><h4>Talk Ratio</h4><div class="tr-bar" style="max-width:360px"><div class="tr-rep" style="width:${c.talk_ratio_rep||40}%">${c.talk_ratio_rep||40}% Rep</div><div class="tr-cust" style="width:${c.talk_ratio_customer||60}%">${c.talk_ratio_customer||60}% Cust</div></div></div>
+      ${(c.value_props_used||[]).length?`<div class="ds"><h4>Value Props Used</h4><div style="display:flex;flex-wrap:wrap;gap:6px">${c.value_props_used.map(v=>`<span style="background:rgba(76,175,80,.1);color:#66bb6a;padding:2px 9px;border-radius:10px;font-size:11.5px">${esc(v)}</span>`).join('')}</div></div>`:''}
       <div class="ds"><h4>Tags</h4><div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${(c.tags||[]).map(t=>`<span class="tag">${esc(t)} <span class="tag-rm" onclick="event.stopPropagation();rmTag('${c.id}','${esc(t)}')">✕</span></span>`).join('')}<input class="tag-inp" placeholder="+ tag" onkeydown="addTag(event,'${c.id}')" /></div></div>
       ${!SHARE_MODE?`
       <div class="ds"><h4>Manager Notes</h4><textarea class="nt" id="nt-${c.id}" placeholder="Add coaching notes…">${esc(c.manager_notes||'')}</textarea><button class="btn btn-s btn-sm" style="margin-top:6px" onclick="saveNotes('${c.id}')">Save notes</button></div>
@@ -769,9 +776,17 @@ async function addTag(e,id){if(e.key!=='Enter')return;const inp=e.target,tag=inp
 async function rmTag(id,tag){const c=allCalls.find(x=>x.id===id);if(!c)return;await updCall(id,{tags:(c.tags||[]).filter(t=>t!==tag)});}
 async function saveNotes(id){await updCall(id,{manager_notes:g('nt-'+id)?.value||''});}
 async function applyOv(id){
-  const k=g('ok-'+id)?.value,v=parseInt(g('ov-'+id)?.value),note=g('on-'+id)?.value||'';
-  if(!k||isNaN(v)||v<1||v>10){alert('Select a category and enter 1-10');return;}
-  const c=allCalls.find(x=>x.id===id);const orig=c?.scores?.[k]?.score||0;
+  const k=g('ok-'+id)?.value,note=g('on-'+id)?.value||'';
+  if(!k){alert('Select a category');return;}
+  const c=allCalls.find(x=>x.id===id);
+  if(k==='__na__'){
+    const cat=note||'general';
+    try{await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:cat,original_score:0,corrected_score:null,manager_note:'N/A for this move type'})});await loadCorrections();}catch(e){}
+    return;
+  }
+  const v=parseInt(g('ov-'+id)?.value);
+  if(isNaN(v)||v<1||v>10){alert('Select a category and enter 1-10');return;}
+  const orig=c?.scores?.[k]?.score||0;
   await updCall(id,{score_overrides:{...(c?.score_overrides||{}),[k]:v}});
   try{await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:k,original_score:orig,corrected_score:v,manager_note:note})});await loadCorrections();}catch(e){}
 }
@@ -785,8 +800,16 @@ async function updCall(id,data){
 }
 
 // ── REP PROFILES ──
-function renderProfiles(opts={}){
-  const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
+function renderProfiles(opts={}) {
+  // Build store list from reps table
+  const stores = [...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
+  const storeFilter = opts.store || '';
+  // Filter rep names by store if filter active
+  let repNames = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
+  if (storeFilter) {
+    const storeReps = new Set(reps.filter(r=>r.location===storeFilter).flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
+    repNames = repNames.filter(r => storeReps.has(r));
+  }
   const cards=repNames.map(r=>{
     const rc=allCalls.filter(c=>c.rep_name===r&&!c.exclude_from_scoring);
     const overall=rc.length?(rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length).toFixed(1):'—';
@@ -799,12 +822,23 @@ function renderProfiles(opts={}){
       <div class="rep-av">${ini(r)}</div>
       <div class="rep-name">${esc(r)}</div>
       <div class="rep-sub">${rc.length} scored call${rc.length!==1?'s':''}</div>
+      ${(() => { const dbRep = reps.find(x=>x.full_name===r||x.nickname===r); return dbRep?.location ? `<div style="font-size:10.5px;color:var(--tx4);margin-bottom:4px">📍 ${esc(dbRep.location)}</div>` : ''; })()}
       <div class="rep-score" style="color:${scCol(parseFloat(overall))}">${overall}</div>
       <div style="font-size:11px;color:var(--ink3)">Rapport: ${rapport}/10</div>
       <div class="rep-trend ${trend}">${trend==='up'?'↑ Improving':trend==='dn'?'↓ Declining':'→ Stable'}</div>
     </div>`;
   }).join('');
-  set('page',`<div class="rep-grid">${cards||'<div class="empty"><span class="empty-ico">👤</span><p>No rep data yet.</p></div>'}</div><div id="rep-detail"></div>`);
+  const storeOpts = stores.map(s=>`<option value="${s}"${storeFilter===s?' selected':''}>${s}</option>`).join('');
+  set('page',`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="font-size:14px;font-weight:700;color:var(--tx)">Rep Profiles</div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        ${stores.length?`<select class="fsel" onchange="renderProfiles({store:this.value})"><option value="">All locations</option>${storeOpts}</select>`:''}
+        ${storeFilter?`<span class="bdg" style="cursor:pointer" onclick="renderProfiles({})">✕ ${storeFilter}</span>`:''}
+      </div>
+    </div>
+    <div class="rep-grid">${cards||'<div class="empty"><span class="empty-ico">👤</span><p>No rep data yet.</p></div>'}</div>
+    <div id="rep-detail"></div>`);
   if(opts.rep)openRepProfile(opts.rep);
 }
 function openRepProfile(repName){
@@ -1003,6 +1037,7 @@ function renderAdd(){
       <div class="tab${addTab==='audio'?' active':''}" onclick="switchAddTab('audio')">🎙 Audio</div>
       <div class="tab${addTab==='paste'?' active':''}" onclick="switchAddTab('paste')">📋 Paste Transcript</div>
       <div class="tab${addTab==='file'?' active':''}" onclick="switchAddTab('file')">📄 Upload .txt</div>
+      <div class="tab${addTab==='bulk'?' active':''}" onclick="switchAddTab('bulk')">📦 Bulk ZIP Upload</div>
     </div>
     <div id="add-audio" style="display:${addTab==='audio'?'block':'none'}">
       <div style="background:var(--gl);border:1.5px solid var(--g2);border-radius:9px;padding:10px 14px;font-size:12px;color:var(--gd);margin-bottom:14px;font-weight:500">🎙 Drop multiple files or a ZIP. Processed 3 at a time. Duplicates skipped automatically.</div>
@@ -1022,6 +1057,24 @@ function renderAdd(){
       <div id="paste-msg"></div>
       <div style="text-align:right;margin-top:10px"><button class="btn btn-p" id="paste-btn" onclick="submitPaste()">Analyze & Save</button></div>
     </div>
+    <div id="add-bulk" style="display:${addTab==='bulk'?'block':'none'}">
+      <div style="background:rgba(76,175,80,.06);border:1px solid rgba(76,175,80,.15);border-radius:10px;padding:11px 14px;font-size:12.5px;color:var(--tx2);margin-bottom:16px;line-height:1.6">
+        📦 Upload a ZIP file containing MP3s. Processing runs entirely in the background — you can close this tab and come back. All files are deduplicated automatically.
+      </div>
+      <div class="drop-zone" id="bulk-drop" onclick="g('bulk-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleBulkDrop(event)">
+        <span class="dz-ico">📦</span><div class="dz-title">Drop a Vonage ZIP here</div><div class="dz-sub">All MP3s inside will be queued automatically</div>
+      </div>
+      <input type="file" id="bulk-input" accept=".zip,application/zip" style="display:none" onchange="handleBulkSelect(this.files[0])" />
+      <div id="bulk-file-info" style="display:none;margin-top:12px;padding:10px 14px;background:var(--bg2);border-radius:10px;border:1px solid var(--border);font-size:13px;color:var(--tx2)"></div>
+      <div id="bulk-progress" style="display:none;margin-top:12px">
+        <div class="prog"><div class="prog-fill" id="bulk-prog-bar" style="width:0%"></div></div>
+        <div class="prog-label" id="bulk-prog-text" style="margin-top:6px">Waiting…</div>
+      </div>
+      <div id="bulk-msg"></div>
+      <div style="margin-top:16px;text-align:right">
+        <button class="btn btn-p" id="bulk-btn" onclick="startBulkUpload()" disabled>Start Background Upload</button>
+      </div>
+    </div>
     <div id="add-file" style="display:${addTab==='file'?'block':'none'}">
       <div class="fg"><label>Rep Name</label><input type="text" id="file-rep" placeholder="Will auto-detect" /></div>
       <div class="fg"><label>Call Outcome</label><select id="file-out"><option value="unknown">Let AI decide</option><option value="booked">Booked</option><option value="estimate_sent">Estimate sent</option><option value="lost">Lost</option></select></div>
@@ -1031,7 +1084,7 @@ function renderAdd(){
     </div>
   </div></div>`);
 }
-function switchAddTab(t){addTab=t;['audio','paste','file'].forEach(x=>{const el=g('add-'+x);if(el)el.style.display=x===t?'block':'none';});document.querySelectorAll('.tab').forEach((el,i)=>{el.classList.toggle('active',['audio','paste','file'][i]===t);});}
+function switchAddTab(t){addTab=t;['audio','paste','file','bulk'].forEach(x=>{const el=g('add-'+x);if(el)el.style.display=x===t?'block':'none';});document.querySelectorAll('.tab').forEach((el,i)=>{el.classList.toggle('active',['audio','paste','file','bulk'][i]===t);});}
 function handleDrop(e){e.preventDefault();g('audio-drop').classList.remove('drag');handleFilesWithZip([...e.dataTransfer.files]);}
 function handleSelect(files){handleFilesWithZip([...files]);}
 async function handleFilesWithZip(files){
@@ -1345,6 +1398,163 @@ async function deleteTxRule(id) {
     txCorrections = txCorrections.filter(r => r.id !== id);
     renderTxCorrections();
   } catch(e) { alert(e.message); }
+}
+
+
+// ── BULK ZIP UPLOAD ──
+let bulkZipFile = null;
+let bulkPoller = null;
+
+function handleBulkDrop(e) {
+  e.preventDefault();
+  g('bulk-drop').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) handleBulkSelect(f);
+}
+
+function handleBulkSelect(f) {
+  if (!f || (!f.name.endsWith('.zip') && f.type !== 'application/zip')) {
+    g('bulk-msg').innerHTML = '<div class="msg-err">Please select a ZIP file</div>';
+    return;
+  }
+  bulkZipFile = f;
+  const info = g('bulk-file-info');
+  info.style.display = 'block';
+  info.innerHTML = `📦 <strong>${f.name}</strong> — ${(f.size/1024/1024).toFixed(1)}MB<br><span style="color:var(--tx3);font-size:12px">Estimated time: ~${Math.round(f.size/1024/1024/1.8)} min at 3 calls/batch</span>`;
+  g('bulk-btn').disabled = false;
+  g('bulk-msg').innerHTML = '';
+}
+
+async function startBulkUpload() {
+  if (!bulkZipFile) return;
+  const btn = g('bulk-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Uploading…';
+  g('bulk-progress').style.display = 'block';
+  g('bulk-prog-text').textContent = 'Sending ZIP to server…';
+  try {
+    // Read file as base64 and send as JSON
+    const b64 = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = () => res(reader.result.split(',')[1]);
+      reader.onerror = () => rej(new Error('Read failed'));
+      reader.readAsDataURL(bulkZipFile);
+    });
+    const r = await fetch(API + '/batch_upload/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({zip: b64})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Upload failed');
+    g('bulk-msg').innerHTML = '<div class="msg-ok">✓ Upload started! Processing in background — you can navigate away.</div>';
+    btn.innerHTML = '<span class="spin"></span> Processing in background…';
+    startBulkPoller();
+  } catch(e) {
+    g('bulk-msg').innerHTML = `<div class="msg-err">⚠ ${e.message}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = 'Start Background Upload';
+  }
+}
+
+function startBulkPoller() {
+  if (bulkPoller) clearInterval(bulkPoller);
+  bulkPoller = setInterval(async () => {
+    try {
+      const r = await fetch(API + '/batch_upload/status');
+      const d = await r.json();
+      const bar = g('bulk-prog-bar');
+      const txt = g('bulk-prog-text');
+      if (d.total > 0 && bar) bar.style.width = Math.round((d.processed + d.skipped + d.errors) / d.total * 100) + '%';
+      if (txt) txt.textContent = d.status === 'running'
+        ? `Processing ${d.processed + d.skipped + d.errors}/${d.total}: ${d.current || '…'} (${d.processed} saved, ${d.skipped} skipped, ${d.errors} errors)`
+        : d.status === 'complete'
+        ? `✓ Done! ${d.processed} calls added, ${d.skipped} skipped, ${d.errors} errors`
+        : `Status: ${d.status}`;
+      if (d.status === 'complete' || d.status === 'error') {
+        clearInterval(bulkPoller); bulkPoller = null;
+        const btn = g('bulk-btn');
+        if (btn) { btn.disabled = false; btn.innerHTML = 'Start Background Upload'; }
+        if (bar) bar.style.width = '100%';
+        await loadCalls();
+        if (currentPage === 'overview') renderOverview();
+        else if (currentPage === 'library') renderCallList();
+        if (d.error_list?.length) {
+          const msg = g('bulk-msg');
+          if (msg) msg.innerHTML += `<div style="margin-top:8px;font-size:11.5px;color:var(--tx3)">${d.error_list.slice(0,10).map(e=>`<div>• ${e}</div>`).join('')}${d.error_list.length>10?`<div>…and ${d.error_list.length-10} more</div>`:''}</div>`;
+        }
+      }
+    } catch(e) {}
+  }, 3000);
+}
+
+// Check bulk status on page load
+async function checkBulkStatus() {
+  try {
+    const r = await fetch(API + '/batch_upload/status');
+    const d = await r.json();
+    if (d.status === 'running') {
+      g('bulk-progress').style.display = 'block';
+      startBulkPoller();
+    }
+  } catch(e) {}
+}
+
+
+// ── COST CALCULATOR ──
+function renderCostCalc(fc) {
+  const el = g('cost-calculator'); if (!el) return;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthCalls = (fc || allCalls).filter(c => new Date(c.created_at) >= monthStart);
+  const allTimeCalls = allCalls;
+
+  // Cost estimates
+  const DEEPGRAM_PER_MIN = 0.0043;
+  const CLAUDE_PER_CALL = 0.023;
+  const RENDER_MONTHLY = 25.00; // Starter=$7, Standard=$25
+
+  function calcCosts(calls) {
+    const deepgramMins = calls.reduce((a,c) => a + ((c.word_count||0) / 150), 0);
+    const deepgramCost = deepgramMins * DEEPGRAM_PER_MIN;
+    const claudeCost = calls.length * CLAUDE_PER_CALL;
+    return { deepgram: deepgramCost, claude: claudeCost, total: deepgramCost + claudeCost, calls: calls.length, mins: deepgramMins };
+  }
+
+  const month = calcCosts(monthCalls);
+  const allTime = calcCosts(allTimeCalls);
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  const dayOfMonth = now.getDate();
+  const projected = month.total / dayOfMonth * daysInMonth;
+  const perCall = allTimeCalls.length ? allTime.total / allTimeCalls.length : 0;
+
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
+    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
+      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">This Month</div>
+      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${(month.total + RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--tx3);margin-top:4px">${month.calls} calls · ${Math.round(month.mins)} min audio</div>
+    </div>
+    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
+      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Projected Monthly</div>
+      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${(projected + RENDER_MONTHLY).toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--tx3);margin-top:4px">incl. $${RENDER_MONTHLY} Render</div>
+    </div>
+    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
+      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Per Call</div>
+      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${perCall.toFixed(3)}</div>
+      <div style="font-size:11px;color:var(--tx3);margin-top:4px">avg all time</div>
+    </div>
+    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
+      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">All Time</div>
+      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${allTime.total.toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--tx3);margin-top:4px">${allTimeCalls.length} calls analyzed</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--tx3)">
+    <span>Deepgram: $${month.deepgram.toFixed(3)}/mo est.</span>
+    <span>Claude: $${month.claude.toFixed(2)}/mo est.</span>
+    <span>Render: $${RENDER_MONTHLY}/mo flat</span>
+  </div>`;
 }
 
 function exportCSV(){window.open(API+'/export/csv','_blank');}
