@@ -614,7 +614,7 @@ def supa_storage_signed_url(bucket, path, expires=86400):
         result = json.loads(r.read())
     signed = result.get("signedURL", "")
     if signed and not signed.startswith("http"):
-        signed = f"{SUPABASE_URL}/storage/v1{signed}"
+        signed = f"{SUPABASE_URL}{signed}"
     return signed
 
 def supa_storage_list(bucket):
@@ -1474,8 +1474,6 @@ class Handler(BaseHTTPRequestHandler):
             "/transcript_corrections/delete": self._delete_transcript_correction,
             "/transcript_corrections/reapply": self._reapply_corrections,
             "/batch_upload/start": self._batch_upload_start,
-            "/transcript_corrections/delete": self._delete_transcript_correction,
-            "/transcript_corrections/reapply": self._reapply_corrections,
         }
         fn = routes.get(path)
         if fn:
@@ -1577,6 +1575,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 log(f"  Audio storage warning: {e}")
                 result["audio_url"] = ""
+                result["storage_filename"] = ""
 
             self._ok(result)
         except urllib.error.HTTPError as e:
