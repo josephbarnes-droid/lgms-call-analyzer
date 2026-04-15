@@ -176,6 +176,15 @@ textarea.nt{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-
 textarea.nt:focus{border-color:var(--g)}
 .excl-banner{background:#fffbf2;border:1.5px solid #f5d070;border-radius:9px;padding:9px 13px;font-size:12px;color:var(--amber);margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .txb{background:var(--surface);border-radius:9px;padding:14px;font-size:11px;font-family:'JetBrains Mono',monospace;line-height:2;max-height:300px;overflow-y:auto;white-space:pre-wrap;border:1px solid var(--border2)}
+.tx-kw{background:rgba(92,158,255,.18);color:var(--blue);border-radius:3px;padding:1px 3px;cursor:pointer;transition:background .15s}
+.tx-kw:hover{background:rgba(92,158,255,.35)}
+.tx-kw.active{background:rgba(92,158,255,.45);outline:2px solid var(--blue)}
+.tx-obj{background:rgba(255,183,77,.15);color:var(--amber);border-radius:3px;padding:1px 3px;cursor:pointer;transition:background .15s}
+.tx-obj:hover{background:rgba(255,183,77,.3)}
+.tx-obj.active{background:rgba(255,183,77,.4);outline:2px solid var(--amber)}
+.tx-obj-abandoned{background:rgba(239,83,80,.2);color:#ef9a9a;border-radius:3px;padding:1px 3px;cursor:pointer;transition:background .15s}
+.tx-obj-abandoned:hover{background:rgba(239,83,80,.35)}
+.tx-obj-abandoned.active{background:rgba(239,83,80,.45);outline:2px solid var(--red)}
 .rep-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px}
 .rep-card{background:var(--card);border-radius:var(--rl2);padding:18px;box-shadow:var(--sh);border:1.5px solid var(--border2);cursor:pointer;transition:all .2s}
 .rep-card:hover{border-color:var(--g);box-shadow:var(--sh2);transform:translateY(-2px)}
@@ -268,8 +277,10 @@ textarea.nt:focus{border-color:var(--g)}
     <button class="sb-btn" onclick="nav('management')" id="nav-management"><span class="sb-ico">⚙️</span>Rep Management</button>
     <button class="sb-btn" onclick="nav('shared')" id="nav-shared"><span class="sb-ico">📤</span>Shared Views</button>
     <button class="sb-btn" onclick="nav('corrections')" id="nav-corrections"><span class="sb-ico">✏️</span>Correction Log</button>
-    <button class="sb-btn" onclick="nav('tx_corrections')" id="nav-tx_corrections"><span class="sb-ico">🔤</span>Transcript Rules</button>
     <button class="sb-btn" onclick="nav('txcorrections')" id="nav-txcorrections"><span class="sb-ico">🔤</span>Transcript Rules</button>
+    <div class="sb-sep"></div>
+    <button class="sb-btn" onclick="nav('costs')" id="nav-costs"><span class="sb-ico">💰</span>Running Costs</button>
+    <button class="sb-btn" onclick="nav('compare')" id="nav-compare"><span class="sb-ico">⚖️</span>Rep Comparison</button>
     <div class="sb-sep"></div>
     <button class="sb-btn" onclick="nav('add')" id="nav-add"><span class="sb-ico">➕</span>Add Calls</button>
   </div>
@@ -324,7 +335,7 @@ async function init(){
   if(SHARE_MODE){
     g('share-banner').style.display='flex';
     g('share-banner-label').textContent=SHARE_LABEL||'Shared View';
-    ['sb-g2','nav-management','nav-shared','nav-corrections','nav-txcorrections','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
+    ['sb-g2','nav-management','nav-shared','nav-corrections','nav-txcorrections','nav-costs','nav-compare','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
     g('tb-right').innerHTML='';
   }
   await loadCalls();
@@ -342,11 +353,11 @@ function nav(page,opts={}){
   currentPage=page;
   document.querySelectorAll('.sb-btn').forEach(el=>el.classList.remove('active'));
   const btn=g('nav-'+page);if(btn)btn.classList.add('active');
-  const titles={overview:'Overview',library:'Call Library',profiles:'Rep Profiles',management:'Rep Management',shared:'Shared Views',corrections:'Correction Log',txcorrections:'Transcript Rules',add:'Add Calls'};
+  const titles={overview:'Overview',library:'Call Library',profiles:'Rep Profiles',management:'Rep Management',shared:'Shared Views',corrections:'Correction Log',txcorrections:'Transcript Rules',costs:'Running Costs',compare:'Rep Comparison',add:'Add Calls'};
   g('tb-title').textContent=opts.title||titles[page]||page;
   if(!SHARE_MODE)g('tb-right').innerHTML=page==='add'?'':`<button class="btn btn-g btn-sm" onclick="exportCSV()">↓ CSV</button><button class="btn btn-p btn-sm" onclick="nav('add')">+ Add Calls</button>`;
   closeMob();
-  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,tx_corrections:renderTxCorrections,add:renderAdd})[page]?.(opts);
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,txcorrections:renderTxCorrections,costs:renderCosts,compare:renderCompare,add:renderAdd})[page]?.(opts);
 }
 function openMob(){g('sidebar').classList.add('mobile-open');g('mob-overlay').classList.add('on');}
 function closeMob(){g('sidebar').classList.remove('mobile-open');g('mob-overlay').classList.remove('on');}
@@ -360,7 +371,6 @@ function getFC(attn=''){
     if(attn==='onsite'&&!c.onsite_suggested)return false;
     if(attn==='turned_away'&&!c.turned_away)return false;
     if(attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
-    if(attn==='continuation'&&!(c.is_continuation&&c.continuation_group_id))return false;
     return true;
   });
 }
@@ -380,7 +390,6 @@ function renderOverview(){
   const fc=getFC(),sc=scc(fc);
   const turnedAway=allCalls.filter(c=>c.turned_away).length;
   const badQ=allCalls.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
-  const conts=allCalls.filter(c=>c.is_continuation&&c.continuation_group_id).length;
   const booked=sc.filter(c=>c.call_outcome==='booked').length;
   const softPipeline=sc.filter(c=>c.call_outcome==='soft_pipeline').length;
   const br=sc.length?Math.round(booked/sc.length*100):0;
@@ -389,7 +398,6 @@ function renderOverview(){
   const attn=[
     turnedAway>0?`<div class="attn-card amber" onclick="navFilter('turned_away')"><span class="ac-ico">📵</span><div class="ac-num">${turnedAway}</div><div class="ac-lbl">Turned Away</div></div>`:'',
     badQ>0?`<div class="attn-card amber" onclick="navFilter('quality')"><span class="ac-ico">⚠️</span><div class="ac-num">${badQ}</div><div class="ac-lbl">Poor Audio / Disconnected</div></div>`:'',
-    conts>0?`<div class="attn-card blue" onclick="navFilter('continuation')"><span class="ac-ico">🔗</span><div class="ac-num">${conts}</div><div class="ac-lbl">Continuation Calls</div></div>`:'',
   ].filter(Boolean).join('');
   set('page',`
     ${attn?`<div style="margin-bottom:6px"><div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px">⚠ Needs Attention</div><div class="attn-grid">${attn}</div></div>`:''}
@@ -413,10 +421,6 @@ function renderOverview(){
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Compliance</div><div class="mc-val">${compPct}%</div><div class="mc-sub">22-step avg</div></div>
       <div class="mc ${br>=50?'green':'red'}" onclick="libFilters={rep:'',out:'booked',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Booking Rate</div><div class="mc-val">${br}%</div><div class="mc-sub">${booked} booked · ${softPipeline} pipeline</div></div>
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'turned_away',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Turned Away</div><div class="mc-val">${turnedAway}</div><div class="mc-sub">no LGMS availability</div></div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-hdr"><h3>💰 Running Costs</h3><span class="bdg-blue bdg" id="cost-period">This month</span></div>
-      <div id="cost-calculator"></div>
     </div>
     <div class="grid-2">
       <div class="card">
@@ -444,7 +448,7 @@ function renderOverview(){
       <div class="card"><div class="card-hdr"><h3>Keywords</h3></div><div id="kw-viz"></div></div>
       <div class="card"><div class="card-hdr"><h3>Objections</h3></div><div id="obj-viz"></div></div>
     </div>`);
-  renderLB();renderTrend(sc);renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);renderCostCalc(fc);
+  renderLB();renderTrend(sc);renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);
 }
 function navFilter(attn){libFilters.attn=attn;nav('library');}
 function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
@@ -561,6 +565,7 @@ function renderLibrary(opts={}){
         <option value="oldest"${libFilters.sort==='oldest'?' selected':''}>Oldest first</option>
         <option value="score_high"${libFilters.sort==='score_high'?' selected':''}>Highest score</option>
         <option value="score_low"${libFilters.sort==='score_low'?' selected':''}>Lowest score</option>
+        <option value="location"${libFilters.sort==='location'?' selected':''}>By location</option>
       </select>
       <button class="btn btn-g btn-sm" onclick="clearLibF()">Clear</button>
     </div>
@@ -570,7 +575,7 @@ function renderLibrary(opts={}){
       ${libFilters.attn?`<span class="bdg-amber bdg" style="cursor:pointer" onclick="libFilters.attn='';renderCallList()">✕ ${libFilters.attn.replace('_',' ')} filter</span>`:''}
       ${libFilters.obj?`<span class="bdg" style="background:rgba(239,83,80,.12);color:#ef9a9a;cursor:pointer" onclick="libFilters.obj='';renderCallList()">✕ objection: ${esc(libFilters.obj)}</span>`:''}
       ${libFilters.kw?`<span class="bdg-blue bdg" style="cursor:pointer" onclick="libFilters.kw='';renderCallList()">✕ keyword: ${esc(libFilters.kw)}</span>`:''}
-      ${!SHARE_MODE?`<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-g btn-sm" onclick="toggleSelAll()">☐ Select all</button></span>`:''}
+      ${!SHARE_MODE?`<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-g btn-sm" onclick="toggleSelAll()">☐ Select all</button>${libFilters.showExcl?`<button class="btn btn-d btn-sm" onclick="bulkDelExcluded()">🗑 Delete All Excluded</button>`:''}</span>`:''}
     </div>
     ${!SHARE_MODE?`<div class="bulk-bar" id="bulk-bar"><span id="bulk-cnt">0 selected</span><button class="btn btn-d btn-sm" onclick="bulkDel()">🗑 Delete</button><button class="btn btn-g btn-sm" onclick="clearSel()">Cancel</button></div>`:''}
     <div id="call-list"></div>
@@ -596,7 +601,6 @@ function renderCallList(){
     if(libFilters.attn==='onsite'&&!c.onsite_suggested)return false;
     if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
     if(libFilters.attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
-    if(libFilters.attn==='continuation'&&!(c.is_continuation&&c.continuation_group_id))return false;
     if(q){const hay=[c.rep_name,c.caller_name,c.call_purpose,c.call_summary,c.transcript].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   });
@@ -604,6 +608,10 @@ function renderCallList(){
   else if(libFilters.sort==='oldest')list.sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
   else if(libFilters.sort==='score_high')list.sort((a,b)=>(b.scores?.overall?.score||0)-(a.scores?.overall?.score||0));
   else if(libFilters.sort==='score_low')list.sort((a,b)=>(a.scores?.overall?.score||0)-(b.scores?.overall?.score||0));
+  else if(libFilters.sort==='location'){
+    const repLocMap={};reps.forEach(r=>{if(r.location){if(r.full_name)repLocMap[r.full_name]=r.location;if(r.nickname)repLocMap[r.nickname]=r.location;}});
+    list.sort((a,b)=>{const la=repLocMap[a.rep_name]||'zzz',lb=repLocMap[b.rep_name]||'zzz';return la.localeCompare(lb)||a.rep_name.localeCompare(b.rep_name)||new Date(b.call_date||b.created_at)-new Date(a.call_date||a.created_at);});
+  }
   const cnt=g('lib-cnt');if(cnt)cnt.textContent=`${list.length} call${list.length!==1?'s':''}`;
   const el=g('call-list');if(!el)return;
   el.innerHTML=list.length?list.map(c=>buildRow(c)).join(''):`<div class="empty"><span class="empty-ico">📞</span><p>No calls match filters.</p></div>`;
@@ -638,7 +646,6 @@ function buildRow(c){
         <span class="op ${oClass}">${oLabel}</span>
         ${c.move_category&&c.move_category!=='standard'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(206,147,216,.12);color:var(--purple)">${c.move_category.replace('_',' ')}</span>`:''}
         ${c.call_quality&&c.call_quality!=='normal'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">${c.call_quality==='disconnected'?'📵':'⚠'} ${c.call_quality}</span>`:''}
-        ${c.is_continuation?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--bl);color:var(--blue)">🔗</span>':''}
         ${c.availability_decline?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">🚫</span>':''}
         ${c.turned_away?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--al);color:var(--amber)">📵 Turned Away</span>':''}
         <span class="sdot ${sClass}"></span>
@@ -676,8 +683,8 @@ function buildRow(c){
         ${(c.objections_overcome||[]).length?`<div style="margin-bottom:7px"><span style="font-size:10px;font-weight:700;color:#66bb6a;text-transform:uppercase;letter-spacing:.7px;margin-right:6px">Overcome:</span>${c.objections_overcome.map(o=>`<span style="background:rgba(76,175,80,.12);color:#66bb6a;padding:2px 9px;border-radius:10px;font-size:11.5px;margin-right:4px">${esc(o)}</span>`).join('')}</div>`:''}
         ${(c.objections_abandoned||[]).length?`<div><span style="font-size:10px;font-weight:700;color:#ef5350;text-transform:uppercase;letter-spacing:.7px;margin-right:6px">Abandoned:</span>${c.objections_abandoned.map(o=>`<span style="background:rgba(239,83,80,.12);color:#ef9a9a;padding:2px 9px;border-radius:10px;font-size:11.5px;margin-right:4px">${esc(o)}</span>`).join('')}</div>`:''}
       </div>`:''}
-      <div class="ds"><h4>Keywords</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${(c.keywords_detected||[]).map(k=>{const pos=c.keyword_positions?.[k];return`<span class="tag" style="background:rgba(92,158,255,.1);color:var(--blue)" ${pos!==undefined?`onclick="jumpTx('${c.id}',${pos})"`:''}>${esc(k)}</span>`;}).join('')||'<span style="color:var(--ink4);font-size:12px">None</span>'}</div></div>
-      ${(c.objections_detected||[]).length?`<div class="ds"><h4>Objections</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map(o=>`<span style="background:var(--rl);color:var(--red);padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600">${esc(o)}</span>`).join('')}</div></div>`:''}
+      <div class="ds"><h4>Keywords</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${(c.keywords_detected||[]).map((k,i)=>{const pos=c.keyword_positions?.[k];const spanId=`txs-${c.id}-kw-${i}`;return`<span class="tag" style="background:rgba(92,158,255,.1);color:var(--blue);cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="jumpTx(event,'${spanId}')"`:''}>${esc(k)}</span>`;}).join('')||'<span style="color:var(--ink4);font-size:12px">None</span>'}</div></div>
+      ${(c.objections_detected||[]).length?`<div class="ds"><h4>Objections</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map((o,i)=>{const pos=c.objection_positions?.[o];const spanId=`txs-${c.id}-obj-${i}`;const isAbn=(c.objections_abandoned||[]).includes(o);return`<span style="background:${isAbn?'rgba(239,83,80,.2)':'var(--rl)'};color:${isAbn?'#ef9a9a':'var(--red)'};padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="jumpTx(event,'${spanId}')"`:''}>${esc(o)}${isAbn?' ⚠':''}</span>`;}).join('')}</div></div>`:''}
       ${(c.missed_rapport_opportunities||[]).length?`<div class="ds"><h4>Missed Rapport Opportunities</h4><div style="display:flex;flex-direction:column;gap:5px">${c.missed_rapport_opportunities.map(m=>`<div style="background:rgba(255,183,77,.06);border-left:3px solid var(--amber);border-radius:0 9px 9px 0;padding:8px 12px;font-size:12.5px;color:var(--tx2)">⚠ ${esc(m)}</div>`).join('')}</div></div>`:''}
       <div class="ds"><h4>Talk Ratio</h4><div class="tr-bar" style="max-width:360px"><div class="tr-rep" style="width:${c.talk_ratio_rep||40}%">${c.talk_ratio_rep||40}% Rep</div><div class="tr-cust" style="width:${c.talk_ratio_customer||60}%">${c.talk_ratio_customer||60}% Cust</div></div></div>
       ${(c.value_props_used||[]).length?`<div class="ds"><h4>Value Props Used</h4><div style="display:flex;flex-wrap:wrap;gap:6px">${c.value_props_used.map(v=>`<span style="background:rgba(76,175,80,.1);color:#66bb6a;padding:2px 9px;border-radius:10px;font-size:11.5px">${esc(v)}</span>`).join('')}</div></div>`:''}
@@ -693,7 +700,7 @@ function buildRow(c){
         <button class="btn btn-g btn-sm" onclick="openEditTranscript('${c.id}')">✏ Edit Transcript</button>
         <button class="btn btn-g btn-sm" onclick="reapplyCorrections('${c.id}',this)">↻ Re-analyze</button>
       </div>
-      ${c.transcript?`<div class="ds"><h4>Transcript <span style="font-weight:400;color:var(--tx4);text-transform:none;letter-spacing:0">— click words to fix, then save correction rule</span></h4><div class="txb" id="tx-${c.id}" contenteditable="${SHARE_MODE?'false':'true'}" oninput="markTxEdited('${c.id}')" spellcheck="false">${esc(c.transcript)}</div>${!SHARE_MODE?`<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><input type="text" placeholder="Incorrect phrase" id="tx-find-${c.id}" class="ovr-inp" style="width:180px" /><span style="color:var(--tx3)">→</span><input type="text" placeholder="Correct phrase" id="tx-replace-${c.id}" class="ovr-inp" style="width:180px" /><button class="btn btn-s btn-sm" onclick="saveTranscriptCorrection('${c.id}')">Save rule</button><button class="btn btn-s btn-sm" onclick="reapplyCorrections('${c.id}')">↺ Re-analyze</button></div>`:''}</div>`:''}
+      ${c.transcript?`<div class="ds"><h4>Transcript <span style="font-weight:400;color:var(--tx4);text-transform:none;letter-spacing:0">— click keywords/objections above to jump & highlight</span></h4><div class="txb" id="tx-${c.id}">${buildTxHtml(c)}</div></div>`:''}
       ${!SHARE_MODE?`<div style="text-align:right;margin-top:10px"><button class="btn btn-d btn-sm" onclick="delCall('${c.id}')">🗑 Delete</button></div>`:''}
     </div>
   </div>`;
@@ -753,16 +760,71 @@ async function reapplyCorrections(callId){
   }catch(e){alert('Failed: '+e.message);}finally{btn.disabled=false;btn.innerHTML='↺ Re-analyze';}
 }
 
-function jumpTx(callId,charPos){
-  const row=g('row-'+callId);if(row&&!row.classList.contains('open'))row.classList.add('open');
+function buildTxHtml(c){
+  if(!c.transcript)return'';
+  const tx=c.transcript;
+  const abandoned=new Set(c.objections_abandoned||[]);
+  // Build a map of character position → {type, label, spanId}
+  // type: 'kw' | 'obj' | 'obj-abandoned'
+  const marks=[];
+  (c.keywords_detected||[]).forEach((k,i)=>{
+    const pos=c.keyword_positions?.[k];
+    if(pos==null)return;
+    // Find actual phrase in transcript near pos (case-insensitive)
+    const search=k.toLowerCase();
+    const start=tx.toLowerCase().indexOf(search,Math.max(0,pos-30));
+    if(start<0)return;
+    marks.push({start,end:start+k.length,cls:'tx-kw',id:`txs-${c.id}-kw-${i}`,label:k});
+  });
+  (c.objections_detected||[]).forEach((o,i)=>{
+    const pos=c.objection_positions?.[o];
+    if(pos==null)return;
+    const search=o.toLowerCase();
+    const start=tx.toLowerCase().indexOf(search,Math.max(0,pos-30));
+    if(start<0)return;
+    const cls=abandoned.has(o)?'tx-obj-abandoned':'tx-obj';
+    marks.push({start,end:start+o.length,cls,id:`txs-${c.id}-obj-${i}`,label:o});
+  });
+  // Also auto-highlight abandoned objections even if no position — search full text
+  abandoned.forEach((o,i)=>{
+    const alreadyMarked=marks.some(m=>m.label===o);
+    if(alreadyMarked)return;
+    const search=o.toLowerCase();
+    const start=tx.toLowerCase().indexOf(search);
+    if(start<0)return;
+    marks.push({start,end:start+o.length,cls:'tx-obj-abandoned',id:`txs-${c.id}-abn-${i}`,label:o});
+  });
+  if(!marks.length)return escHtml(tx);
+  // Sort by start pos, remove overlaps
+  marks.sort((a,b)=>a.start-b.start);
+  const filtered=[];let cursor=0;
+  marks.forEach(m=>{if(m.start>=cursor){filtered.push(m);cursor=m.end;}});
+  // Build HTML
+  let html='';let pos=0;
+  filtered.forEach(m=>{
+    if(m.start>pos)html+=escHtml(tx.slice(pos,m.start));
+    html+=`<span class="${m.cls}" id="${m.id}" onclick="jumpTx(event,'${m.id}')">${escHtml(tx.slice(m.start,m.end))}</span>`;
+    pos=m.end;
+  });
+  if(pos<tx.length)html+=escHtml(tx.slice(pos));
+  return html;
+}
+function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function jumpTx(evt,spanId){
+  // Find which call this belongs to
+  const span=document.getElementById(spanId);if(!span)return;
+  const txBox=span.closest('.txb');if(!txBox)return;
+  // Open row if closed
+  const row=txBox.closest('.crow');if(row&&!row.classList.contains('open'))row.classList.add('open');
+  // Clear any previously active spans in this box
+  txBox.querySelectorAll('.tx-kw.active,.tx-obj.active,.tx-obj-abandoned.active').forEach(el=>el.classList.remove('active'));
+  span.classList.add('active');
+  // Scroll
   setTimeout(()=>{
-    const tx=g('tx-'+callId);if(!tx)return;
-    const charsPerLine=80,lineH=23;
-    tx.scrollTop=Math.max(0,Math.floor(charPos/charsPerLine)*lineH-60);
-    tx.style.outline='2px solid var(--g)';tx.style.boxShadow='0 0 12px rgba(76,175,80,.2)';
-    setTimeout(()=>{tx.style.outline='';tx.style.boxShadow='';},2500);
-    tx.scrollIntoView({behavior:'smooth',block:'nearest'});
-  },150);
+    span.scrollIntoView({behavior:'smooth',block:'center'});
+    setTimeout(()=>span.classList.remove('active'),2500);
+  },row&&!row.classList.contains('open')?200:50);
 }
 function toggleRow(id){const r=g('row-'+id);if(r)r.classList.toggle('open');}
 function toggleSel(id){if(selected.has(id))selected.delete(id);else selected.add(id);updateBB();const r=g('row-'+id);if(r){const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=selected.has(id);}}
@@ -770,6 +832,16 @@ function updateBB(){const b=g('bulk-bar');if(!b)return;const n=selected.size;b.c
 function clearSel(){selected.clear();updateBB();renderCallList();}
 function toggleSelAll(){const rows=document.querySelectorAll('#call-list .crow');const ids=[...rows].map(el=>el.id.replace('row-',''));const allSel=ids.every(id=>selected.has(id));if(allSel)ids.forEach(id=>selected.delete(id));else ids.forEach(id=>selected.add(id));updateBB();renderCallList();}
 async function bulkDel(){const n=selected.size;if(!n||!confirm(`Delete ${n} call${n!==1?'s':''}?`))return;try{await fetch(API+'/bulk_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...selected]})});allCalls=allCalls.filter(c=>!selected.has(c.id));selected.clear();renderCallList();}catch(e){alert(e.message);}}
+async function bulkDelExcluded(){
+  const ids=allCalls.filter(c=>c.exclude_from_scoring).map(c=>c.id);
+  if(!ids.length){alert('No excluded calls to delete.');return;}
+  if(!confirm(`Permanently delete ${ids.length} excluded call${ids.length!==1?'s':''}? This cannot be undone.`))return;
+  try{
+    await fetch(API+'/bulk_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+    allCalls=allCalls.filter(c=>!c.exclude_from_scoring);
+    selected.clear();renderCallList();
+  }catch(e){alert(e.message);}
+}
 async function delCall(id){if(!confirm('Delete?'))return;try{await fetch(API+'/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});allCalls=allCalls.filter(c=>c.id!==id);selected.delete(id);renderCallList();}catch(e){alert(e.message);}}
 async function toggleExcl(id,val){await updCall(id,{exclude_from_scoring:val,exclusion_reason:val?'Manually excluded':''});}
 async function addTag(e,id){if(e.key!=='Enter')return;const inp=e.target,tag=inp.value.trim();if(!tag)return;const c=allCalls.find(x=>x.id===id);if(!c)return;await updCall(id,{tags:[...(c.tags||[]),tag]});inp.value='';}
@@ -1555,6 +1627,169 @@ function renderCostCalc(fc) {
     <span>Claude: $${month.claude.toFixed(2)}/mo est.</span>
     <span>Render: $${RENDER_MONTHLY}/mo flat</span>
   </div>`;
+}
+
+// ── RUNNING COSTS PAGE ──
+function renderCosts(){
+  const now=new Date();
+  const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
+  const monthCalls=allCalls.filter(c=>new Date(c.created_at)>=monthStart);
+  const DEEPGRAM_PER_MIN=0.0043,CLAUDE_PER_CALL=0.023,RENDER_MONTHLY=25.00;
+  function calcCosts(calls){
+    const mins=calls.reduce((a,c)=>a+((c.word_count||0)/150),0);
+    const deepgram=mins*DEEPGRAM_PER_MIN,claude=calls.length*CLAUDE_PER_CALL;
+    return{deepgram,claude,total:deepgram+claude,calls:calls.length,mins};
+  }
+  const month=calcCosts(monthCalls),allTime=calcCosts(allCalls);
+  const daysInMonth=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  const dayOfMonth=now.getDate();
+  const projected=dayOfMonth>0?(month.total/dayOfMonth*daysInMonth):0;
+  const perCall=allCalls.length?allTime.total/allCalls.length:0;
+  // Per-rep costs this month
+  const repCosts={};monthCalls.forEach(c=>{
+    const r=c.rep_name||'Unknown';
+    if(!repCosts[r])repCosts[r]={calls:0,mins:0};
+    repCosts[r].calls++;repCosts[r].mins+=(c.word_count||0)/150;
+  });
+  const repRows=Object.entries(repCosts).sort((a,b)=>b[1].calls-a[1].calls).map(([r,d])=>{
+    const cost=d.mins*DEEPGRAM_PER_MIN+d.calls*CLAUDE_PER_CALL;
+    return`<tr><td style="font-weight:600">${esc(r)}</td><td>${d.calls}</td><td>${Math.round(d.mins)} min</td><td>$${cost.toFixed(2)}</td></tr>`;
+  }).join('');
+  set('page',`
+    <div class="metric-grid" style="margin-bottom:20px">
+      <div class="mc blue"><div class="mc-label">This Month</div><div class="mc-val">$${(month.total+RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2)}</div><div class="mc-sub">${month.calls} calls · ${Math.round(month.mins)} min audio</div></div>
+      <div class="mc blue"><div class="mc-label">Projected Monthly</div><div class="mc-val">$${(projected+RENDER_MONTHLY).toFixed(2)}</div><div class="mc-sub">incl. $${RENDER_MONTHLY} Render</div></div>
+      <div class="mc amber"><div class="mc-label">Per Call Avg</div><div class="mc-val">$${perCall.toFixed(3)}</div><div class="mc-sub">all time average</div></div>
+      <div class="mc green"><div class="mc-label">All Time</div><div class="mc-val">$${allTime.total.toFixed(2)}</div><div class="mc-sub">${allCalls.length} calls analyzed</div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-hdr"><h3>This Month Breakdown</h3></div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${[['Deepgram (transcription)','$'+month.deepgram.toFixed(3),'$0.0043/min'],['Claude (analysis)','$'+month.claude.toFixed(2),'$0.023/call'],['Render (hosting)','$'+(RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2),'$25/mo flat'],['Total','$'+(month.total+RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2),'']].map(([label,val,note])=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg2);border-radius:9px;border:1px solid var(--border)">
+            <div><div style="font-size:12.5px;font-weight:600">${label}</div>${note?`<div style="font-size:11px;color:var(--ink3)">${note}</div>`:''}</div>
+            <div style="font-size:18px;font-weight:700;color:var(--g)">${val}</div>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hdr"><h3>Cost by Rep — This Month</h3></div>
+        ${repRows?`<table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr>
+            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Rep</th>
+            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Calls</th>
+            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Audio</th>
+            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Cost</th>
+          </tr></thead>
+          <tbody>${repRows}</tbody>
+        </table>`:'<div class="empty"><p>No calls this month</p></div>'}
+      </div>
+    </div>`);
+}
+
+// ── REP COMPARISON PAGE ──
+let compareRepA='',compareRepB='';
+function renderCompare(opts={}){
+  if(opts.repA)compareRepA=opts.repA;
+  if(opts.repB)compareRepB=opts.repB;
+  const repNames=[...new Set(allCalls.filter(c=>!c.exclude_from_scoring).map(c=>c.rep_name))].filter(Boolean).sort();
+  const repOpts=r=>repNames.map(n=>`<option value="${esc(n)}"${n===r?' selected':''}>${esc(n)}</option>`).join('');
+  const teamSc=scc(getFC());
+  function repStats(name){
+    if(!name)return null;
+    const sc=allCalls.filter(c=>c.rep_name===name&&!c.exclude_from_scoring);
+    if(!sc.length)return null;
+    const avgK=k=>sc.length?(sc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/sc.length):0;
+    const ckPcts=CK.map(k=>sc.length?Math.round(sc.filter(c=>c.checklist?.[k]).length/sc.length*100):0);
+    const booked=sc.filter(c=>c.call_outcome==='booked').length;
+    const br=Math.round(booked/sc.length*100);
+    const coachMap={};sc.forEach(c=>(c.coaching_points||[]).forEach(p=>{coachMap[p]=(coachMap[p]||0)+1;}));
+    const topCoach=Object.entries(coachMap).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([p])=>p);
+    const sorted=[...sc].sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
+    return{sc,scores:SK.map(k=>({k,avg:avgK(k)})),ckPcts,br,topCoach,sorted};
+  }
+  const A=repStats(compareRepA),B=repStats(compareRepB);
+  const teamAvgK=k=>teamSc.length?(teamSc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/teamSc.length):0;
+  function scoreGrid(){
+    if(!A&&!B)return'';
+    return`<div class="card" style="margin-bottom:16px">
+      <div class="card-hdr"><h3>Score Comparison</h3><span class="bdg">vs team avg</span></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr>
+          <th style="padding:9px 12px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">Category</th>
+          ${A?`<th style="padding:9px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepA)}</th>`:''}
+          ${B?`<th style="padding:9px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepB)}</th>`:''}
+          <th style="padding:9px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">Team Avg</th>
+        </tr></thead>
+        <tbody>${SK.map((k,i)=>{
+          const ta=teamAvgK(k);
+          const av=A?A.scores[i].avg:null;
+          const bv=B?B.scores[i].avg:null;
+          const winner=av!==null&&bv!==null?(av>bv?'A':bv>av?'B':'tie'):null;
+          return`<tr>
+            <td style="padding:10px 12px;border-bottom:1px solid var(--border2);font-size:12px;font-weight:600">${SL[i]}</td>
+            ${A?`<td style="padding:10px 12px;border-bottom:1px solid var(--border2);text-align:center">${chip(av.toFixed(1))}${winner==='A'?'<span style="color:#16a34a;font-size:10px;margin-left:4px">▲</span>':''}</td>`:''}
+            ${B?`<td style="padding:10px 12px;border-bottom:1px solid var(--border2);text-align:center">${chip(bv.toFixed(1))}${winner==='B'?'<span style="color:#16a34a;font-size:10px;margin-left:4px">▲</span>':''}</td>`:''}
+            <td style="padding:10px 12px;border-bottom:1px solid var(--border2);text-align:center;color:var(--ink3);font-size:12px">${ta.toFixed(1)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }
+  function complianceGrid(){
+    if(!A&&!B)return'';
+    return`<div class="card" style="margin-bottom:16px">
+      <div class="card-hdr"><h3>22-Step Compliance</h3></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">
+        <thead><tr>
+          <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">Step</th>
+          ${A?`<th style="padding:7px 10px;text-align:center;font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepA)}</th>`:''}
+          ${B?`<th style="padding:7px 10px;text-align:center;font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepB)}</th>`:''}
+        </tr></thead>
+        <tbody>${CK.map((k,i)=>{
+          const ap=A?A.ckPcts[i]:null;
+          const bp=B?B.ckPcts[i]:null;
+          const mkBar=p=>{const col=p>=80?'#16a34a':p>=50?'#d97706':'#dc2626';return`<div style="display:flex;align-items:center;gap:6px;justify-content:center"><div style="width:60px;height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${p}%;height:100%;background:${col};border-radius:3px"></div></div><span style="font-size:10.5px;font-weight:700;color:${col};min-width:28px">${p}%</span></div>`;};
+          return`<tr>
+            <td style="padding:7px 10px;border-bottom:1px solid var(--border2);color:var(--ink2)">${CKFULL[i]}</td>
+            ${A?`<td style="padding:7px 10px;border-bottom:1px solid var(--border2)">${mkBar(ap)}</td>`:''}
+            ${B?`<td style="padding:7px 10px;border-bottom:1px solid var(--border2)">${mkBar(bp)}</td>`:''}
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }
+  function coachGrid(){
+    if(!A&&!B)return'';
+    return`<div class="grid-2" style="margin-bottom:16px">
+      ${A?`<div class="card"><div class="card-hdr"><h3 style="color:var(--blue)">${esc(compareRepA)} — Coaching Focus</h3></div><ul class="info-list">${A.topCoach.map(p=>`<li><span>⚡</span>${esc(p)}</li>`).join('')||'<li style="color:var(--ink3)">Not enough data</li>'}</ul></div>`:''}
+      ${B?`<div class="card"><div class="card-hdr"><h3 style="color:var(--amber)">${esc(compareRepB)} — Coaching Focus</h3></div><ul class="info-list">${B.topCoach.map(p=>`<li><span>⚡</span>${esc(p)}</li>`).join('')||'<li style="color:var(--ink3)">Not enough data</li>'}</ul></div>`:''}
+    </div>`;
+  }
+  set('page',`
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-hdr"><h3>Select Reps to Compare</h3></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:180px">
+          <div style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Rep A</div>
+          <select class="fsel" style="width:100%" onchange="compareRepA=this.value;renderCompare()"><option value="">— select rep —</option>${repOpts(compareRepA)}</select>
+        </div>
+        <div style="font-size:20px;color:var(--ink3);padding-bottom:8px">⚖️</div>
+        <div style="flex:1;min-width:180px">
+          <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Rep B</div>
+          <select class="fsel" style="width:100%" onchange="compareRepB=this.value;renderCompare()"><option value="">— select rep —</option>${repOpts(compareRepB)}</select>
+        </div>
+        ${A&&B?`<div style="display:flex;gap:16px;padding-bottom:8px;flex-shrink:0">
+          <div style="text-align:center"><div style="font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${esc(compareRepA)}</div><div style="font-size:22px;font-weight:800;color:${scCol(A.scores[8].avg)}">${A.scores[8].avg.toFixed(1)}</div><div style="font-size:11px;color:var(--ink3)">${A.sc.length} calls</div></div>
+          <div style="text-align:center"><div style="font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${esc(compareRepB)}</div><div style="font-size:22px;font-weight:800;color:${scCol(B.scores[8].avg)}">${B.scores[8].avg.toFixed(1)}</div><div style="font-size:11px;color:var(--ink3)">${B.sc.length} calls</div></div>
+        </div>`:''}
+      </div>
+    </div>
+    ${(!compareRepA&&!compareRepB)?`<div class="empty"><span class="empty-ico">⚖️</span><p>Select two reps above to compare their performance side by side.</p></div>`:''}
+    ${scoreGrid()}
+    ${complianceGrid()}
+    ${coachGrid()}`);
 }
 
 function exportCSV(){window.open(API+'/export/csv','_blank');}
