@@ -245,6 +245,12 @@ textarea.nt:focus{border-color:var(--g)}
 .corr-item{padding:10px 0;border-bottom:1px solid var(--border2);font-size:12px}
 .corr-item:last-child{border-bottom:none}
 .share-banner{background:var(--gd);color:#fff;padding:10px 22px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.status-bar{height:32px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 22px;gap:12px;flex-shrink:0;font-size:11.5px;color:var(--ink3);transition:background .3s,border-color .3s}
+.status-bar.warn{background:rgba(255,183,77,.08);border-bottom-color:rgba(255,183,77,.3)}
+.status-bar.warn .sb-msg{color:var(--amber)}
+.sb-msg{flex:1}
+.loc-pill{display:inline-flex;align-items:center;gap:5px;background:rgba(255,183,77,.15);color:var(--amber);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;cursor:pointer;border:1px solid rgba(255,183,77,.3);transition:background .15s}
+.loc-pill:hover{background:rgba(255,183,77,.25)}
 .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:199}
 .mobile-overlay.on{display:block}
 @media(max-width:800px){
@@ -284,7 +290,7 @@ textarea.nt:focus{border-color:var(--g)}
     <div class="sb-sep"></div>
     <button class="sb-btn" onclick="nav('add')" id="nav-add"><span class="sb-ico">➕</span>Add Calls</button>
   </div>
-  <div class="sb-footer"><div class="sb-version">v10 · Call Intelligence</div></div>
+  <div class="sb-footer"><div class="sb-version">v11 · Call Intelligence</div></div>
 </nav>
 <div class="mobile-overlay" id="mob-overlay" onclick="closeMob()"></div>
 <div class="main">
@@ -292,10 +298,18 @@ textarea.nt:focus{border-color:var(--g)}
     <button class="hamburger" onclick="openMob()">☰</button>
     <div class="tb-title" id="tb-title">Overview</div>
     <div class="tb-right" id="tb-right">
+      <select id="loc-filter" class="fsel" style="font-size:11.5px;padding:5px 9px" onchange="setLocationFilter(this.value)">
+        <option value="">All Locations</option>
+      </select>
       <button class="btn btn-g btn-sm" onclick="exportCSV()">↓ CSV</button>
       <button class="btn btn-p btn-sm" onclick="nav('add')">+ Add Calls</button>
     </div>
   </header>
+  <div id="status-bar" class="status-bar">
+    <span class="sb-msg" id="sb-msg">Loading…</span>
+    <span id="loc-indicator"></span>
+    <button class="btn btn-g btn-sm" style="padding:3px 9px;font-size:11px" onclick="refreshData()">↺ Refresh</button>
+  </div>
   <div class="page" id="page"></div>
 </div>
 </div>
@@ -323,9 +337,11 @@ let addTab='audio';
 let currentPage='overview';
 let trendChart=null,repTrendChart=null;
 let shareType='location';
-let reanalyzePoller=null;
+let reanalyzePoller=null,statusPoller=null;
 let libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};
 let dateFilter=30;
+let locationFilter='';
+let dataLoadedAt=null;
 
 const SHARE_MODE=!!(window.SHARE_TOKEN);
 const SHARE_REP_IDS=window.SHARE_REP_IDS||[];
@@ -337,14 +353,77 @@ async function init(){
     g('share-banner-label').textContent=SHARE_LABEL||'Shared View';
     ['sb-g2','nav-management','nav-shared','nav-corrections','nav-txcorrections','nav-costs','nav-compare','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
     g('tb-right').innerHTML='';
+    g('status-bar').style.display='none';
   }
   await loadCalls();
-  loadReps();loadSharedViews();loadCorrections();
+  await loadReps();
+  loadSharedViews();loadCorrections();
+  populateLocFilter();
   nav('overview');
   checkReanalStatus();
   checkBulkStatus();
+  startStatusPoller();
 }
-async function loadCalls(){try{const r=await fetch(API+'/calls');if(r.ok){let d=await r.json();if(SHARE_MODE&&SHARE_REP_IDS.length)d=d.filter(c=>SHARE_REP_IDS.includes(c.rep_name));allCalls=d;}}catch(e){}}
+async function loadCalls(){
+  try{const r=await fetch(API+'/calls');if(r.ok){let d=await r.json();if(SHARE_MODE&&SHARE_REP_IDS.length)d=d.filter(c=>SHARE_REP_IDS.includes(c.rep_name));allCalls=d;dataLoadedAt=new Date();updateStatusBar();}}catch(e){}
+}
+async function refreshData(){
+  g('sb-msg').textContent='Refreshing…';
+  await loadCalls();
+  await loadReps();
+  populateLocFilter();
+  // Re-render current page
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,costs:renderCosts,compare:renderCompare})[currentPage]?.();
+}
+function populateLocFilter(){
+  const sel=g('loc-filter');if(!sel)return;
+  const locs=[...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
+  const cur=locationFilter;
+  sel.innerHTML=`<option value="">All Locations</option>`+locs.map(l=>`<option value="${esc(l)}"${l===cur?' selected':''}>${esc(l)}</option>`).join('');
+}
+function setLocationFilter(val){
+  locationFilter=val;
+  updateLocIndicator();
+  // Re-render current page with new filter
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,costs:renderCosts})[currentPage]?.();
+}
+function updateLocIndicator(){
+  const el=g('loc-indicator');if(!el)return;
+  el.innerHTML=locationFilter?`<span class="loc-pill" onclick="setLocationFilter('');g('loc-filter').value=''">📍 ${esc(locationFilter)} ✕</span>`:'';
+}
+
+// ── STATUS BAR ──
+function updateStatusBar(){
+  const bar=g('status-bar'),msg=g('sb-msg');if(!bar||!msg)return;
+  const job=window._lastJobStatus||{status:'idle'};
+  const batchJob=window._lastBatchStatus||{status:'idle'};
+  const jobRunning=job.status==='running'||batchJob.status==='running';
+  bar.classList.toggle('warn',jobRunning);
+  if(jobRunning){
+    const jobDesc=job.status==='running'?`Bulk re-analyze running (${job.processed||0}/${job.total||'?'} calls)`:batchJob.status==='running'?`Bulk upload running (${batchJob.processed||0}/${batchJob.total||'?'} files)`:'';
+    msg.innerHTML=`⚠ ${jobDesc} — avoid deleting or editing calls until complete`;
+  } else if(dataLoadedAt){
+    const mins=Math.floor((new Date()-dataLoadedAt)/60000);
+    msg.textContent=mins<1?'Data just loaded':`Data loaded ${mins} min ago`;
+  }
+  updateLocIndicator();
+}
+function startStatusPoller(){
+  if(statusPoller)clearInterval(statusPoller);
+  statusPoller=setInterval(async()=>{
+    try{
+      const [rr,br]=await Promise.all([fetch(API+'/reanalyze/status'),fetch(API+'/batch_upload/status')]);
+      const rd=await rr.json(),bd=await br.json();
+      const wasRunning=(window._lastJobStatus?.status==='running')||(window._lastBatchStatus?.status==='running');
+      window._lastJobStatus=rd;window._lastBatchStatus=bd;
+      const nowDone=(wasRunning)&&(rd.status!=='running'&&bd.status!=='running');
+      updateStatusBar();
+      if(nowDone){await loadCalls();({overview:renderOverview,library:renderLibrary,profiles:renderProfiles})[currentPage]?.();}
+    }catch(e){}
+  },30000);
+  // Also update the "X mins ago" display every minute
+  setInterval(updateStatusBar,60000);
+}
 async function loadReps(){try{const r=await fetch(API+'/reps');if(r.ok)reps=await r.json();}catch(e){}}
 async function loadSharedViews(){try{const r=await fetch(API+'/shared_views');if(r.ok)sharedViews=await r.json();}catch(e){}}
 async function loadCorrections(){try{const r=await fetch(API+'/corrections');if(r.ok)corrections=await r.json();}catch(e){}}
@@ -355,7 +434,8 @@ function nav(page,opts={}){
   const btn=g('nav-'+page);if(btn)btn.classList.add('active');
   const titles={overview:'Overview',library:'Call Library',profiles:'Rep Profiles',management:'Rep Management',shared:'Shared Views',corrections:'Correction Log',txcorrections:'Transcript Rules',costs:'Running Costs',compare:'Rep Comparison',add:'Add Calls'};
   g('tb-title').textContent=opts.title||titles[page]||page;
-  if(!SHARE_MODE)g('tb-right').innerHTML=page==='add'?'':`<button class="btn btn-g btn-sm" onclick="exportCSV()">↓ CSV</button><button class="btn btn-p btn-sm" onclick="nav('add')">+ Add Calls</button>`;
+  // Only rebuild tb-right in share mode (location dropdown lives there in normal mode, managed via HTML)
+  if(SHARE_MODE)g('tb-right').innerHTML='';
   closeMob();
   ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,txcorrections:renderTxCorrections,costs:renderCosts,compare:renderCompare,add:renderAdd})[page]?.(opts);
 }
@@ -364,9 +444,12 @@ function closeMob(){g('sidebar').classList.remove('mobile-open');g('mob-overlay'
 
 function getFC(attn=''){
   const now=new Date(),cutoff=dateFilter>0?new Date(now-dateFilter*86400000):null;
+  // Build rep→location map from reps table
+  const repLocMap={};reps.forEach(r=>{if(r.location){if(r.full_name)repLocMap[r.full_name]=r.location;if(r.nickname)repLocMap[r.nickname]=r.location;}});
   return allCalls.filter(c=>{
     const dt=new Date(c.call_date||c.created_at);
     if(cutoff&&dt<cutoff)return false;
+    if(locationFilter&&repLocMap[c.rep_name]!==locationFilter)return false;
     if(attn==='decline'&&!c.availability_decline)return false;
     if(attn==='onsite'&&!c.onsite_suggested)return false;
     if(attn==='turned_away'&&!c.turned_away)return false;
@@ -388,8 +471,8 @@ function g(id){return document.getElementById(id);}
 // ── OVERVIEW ──
 function renderOverview(){
   const fc=getFC(),sc=scc(fc);
-  const turnedAway=allCalls.filter(c=>c.turned_away).length;
-  const badQ=allCalls.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
+  const turnedAway=fc.filter(c=>c.turned_away).length;
+  const badQ=fc.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
   const booked=sc.filter(c=>c.call_outcome==='booked').length;
   const softPipeline=sc.filter(c=>c.call_outcome==='soft_pipeline').length;
   const br=sc.length?Math.round(booked/sc.length*100):0;
@@ -585,7 +668,8 @@ function renderLibrary(opts={}){
 function clearLibF(){libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};renderLibrary();}
 function renderCallList(){
   const q=libFilters.search.toLowerCase();
-  let list=allCalls.filter(c=>{
+  const base=getFC();
+  let list=base.filter(c=>{
     if(!libFilters.showExcl&&c.exclude_from_scoring)return false;
     if(libFilters.rep&&c.rep_name!==libFilters.rep)return false;
     if(libFilters.out&&c.call_outcome!==libFilters.out)return false;
@@ -833,9 +917,10 @@ function clearSel(){selected.clear();updateBB();renderCallList();}
 function toggleSelAll(){const rows=document.querySelectorAll('#call-list .crow');const ids=[...rows].map(el=>el.id.replace('row-',''));const allSel=ids.every(id=>selected.has(id));if(allSel)ids.forEach(id=>selected.delete(id));else ids.forEach(id=>selected.add(id));updateBB();renderCallList();}
 async function bulkDel(){const n=selected.size;if(!n||!confirm(`Delete ${n} call${n!==1?'s':''}?`))return;try{await fetch(API+'/bulk_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...selected]})});allCalls=allCalls.filter(c=>!selected.has(c.id));selected.clear();renderCallList();}catch(e){alert(e.message);}}
 async function bulkDelExcluded(){
-  const ids=allCalls.filter(c=>c.exclude_from_scoring).map(c=>c.id);
+  const base=locationFilter?getFC():allCalls;
+  const ids=base.filter(c=>c.exclude_from_scoring).map(c=>c.id);
   if(!ids.length){alert('No excluded calls to delete.');return;}
-  if(!confirm(`Permanently delete ${ids.length} excluded call${ids.length!==1?'s':''}? This cannot be undone.`))return;
+  if(!confirm(`Permanently delete ${ids.length} excluded call${ids.length!==1?'s':''}${locationFilter?` in ${locationFilter}`:''}? This cannot be undone.`))return;
   try{
     await fetch(API+'/bulk_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
     allCalls=allCalls.filter(c=>!c.exclude_from_scoring);
@@ -875,7 +960,8 @@ async function updCall(id,data){
 function renderProfiles(opts={}) {
   // Build store list from reps table
   const stores = [...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
-  const storeFilter = opts.store || '';
+  // If global location filter is active, use it; otherwise use local store filter
+  const storeFilter = locationFilter || opts.store || '';
   // Filter rep names by store if filter active
   let repNames = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
   if (storeFilter) {
@@ -903,10 +989,10 @@ function renderProfiles(opts={}) {
   const storeOpts = stores.map(s=>`<option value="${s}"${storeFilter===s?' selected':''}>${s}</option>`).join('');
   set('page',`
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-      <div style="font-size:14px;font-weight:700;color:var(--tx)">Rep Profiles</div>
+      <div style="font-size:14px;font-weight:700;color:var(--tx)">Rep Profiles${locationFilter?` — ${esc(locationFilter)}`:''}</div>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-        ${stores.length?`<select class="fsel" onchange="renderProfiles({store:this.value})"><option value="">All locations</option>${storeOpts}</select>`:''}
-        ${storeFilter?`<span class="bdg" style="cursor:pointer" onclick="renderProfiles({})">✕ ${storeFilter}</span>`:''}
+        ${(!locationFilter&&stores.length)?`<select class="fsel" onchange="renderProfiles({store:this.value})"><option value="">All locations</option>${storeOpts}</select>`:''}
+        ${(!locationFilter&&storeFilter)?`<span class="bdg" style="cursor:pointer" onclick="renderProfiles({})">✕ ${storeFilter}</span>`:''}
       </div>
     </div>
     <div class="rep-grid">${cards||'<div class="empty"><span class="empty-ico">👤</span><p>No rep data yet.</p></div>'}</div>
@@ -963,7 +1049,7 @@ function renderManagement(){
     const sc2=allCalls.filter(c=>c.rep_name===r&&!c.exclude_from_scoring);
     const avgO=sc2.length?(sc2.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/sc2.length).toFixed(1):'—';
     const dbRep=reps.find(rep=>rep.full_name===r||rep.nickname===r);
-    return`<tr><td style="font-weight:600">${esc(r)}</td><td>${dbRep?.location?`<span class="loc-tag">${esc(dbRep.location)}</span>`:'<span style="color:var(--ink3)">—</span>'}</td><td>${cnt}</td><td>${chip(avgO)}</td><td><span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:2px 8px;border-radius:10px">Active</span></td><td><button class="btn btn-g btn-xs" onclick="openRenameModal('${esc(r)}')">Rename</button></td></tr>`;
+    return`<tr><td style="font-weight:600">${esc(r)}</td><td>${dbRep?.location?`<span class="loc-tag">${esc(dbRep.location)}</span>`:'<span style="color:var(--ink3)">—</span>'}</td><td>${cnt}</td><td>${chip(avgO)}</td><td><span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:2px 8px;border-radius:10px">Active</span></td><td style="display:flex;gap:4px"><button class="btn btn-g btn-xs" onclick="openRenameModal('${esc(r)}')">Rename</button><button class="btn btn-g btn-xs" onclick="openEditLocModal('${esc(r)}','${esc(dbRep?.id||'')}','${esc(dbRep?.location||'')}')">📍 Location</button></td></tr>`;
   }).join('');
   const job=window._lastJobStatus||{status:'idle'};
   let reanalyzeHtml='';
@@ -1003,6 +1089,17 @@ function renderManagement(){
       <div class="fg"><label>Location tag</label><input type="text" id="new-rep-loc" placeholder="e.g. FAY, FC, NWA" /></div>
       <div id="add-rep-msg"></div>
       <div class="modal-btns"><button class="btn btn-g" onclick="g('add-rep-modal').style.display='none'">Cancel</button><button class="btn btn-p" onclick="doAddRep()">Add Rep</button></div>
+    </div></div>
+    <div class="modal-bg" id="edit-loc-modal" style="display:none"><div class="modal-box"><h2>Edit Location</h2>
+      <div class="fg"><label>Rep</label><input type="text" id="edit-loc-rep" readonly style="background:var(--surface)" /></div>
+      <div class="fg"><label>Location</label>
+        <input type="text" id="edit-loc-val" placeholder="e.g. Fayetteville, Fort Collins…" list="loc-datalist" />
+        <datalist id="loc-datalist"></datalist>
+        <div style="font-size:11px;color:var(--ink3);margin-top:5px">Type a new location or pick an existing one.</div>
+      </div>
+      <input type="hidden" id="edit-loc-repid" />
+      <div id="edit-loc-msg"></div>
+      <div class="modal-btns"><button class="btn btn-g" onclick="g('edit-loc-modal').style.display='none'">Cancel</button><button class="btn btn-p" onclick="doEditLoc()">Save Location</button></div>
     </div></div>`);
 }
 function openRenameModal(name){g('rename-old').value=name;g('rename-new').value='';g('rename-msg').innerHTML='';g('rename-modal').style.display='flex';}
@@ -1014,7 +1111,38 @@ async function doRename(){
 }
 async function doAddRep(){
   const name=g('new-rep-name').value.trim();if(!name){g('add-rep-msg').innerHTML='<div class="msg-err">Name required</div>';return;}
-  try{await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:name,nickname:g('new-rep-nick').value.trim(),location:g('new-rep-loc').value.trim()})});await loadReps();g('add-rep-msg').innerHTML='<div class="msg-ok">✓ Added</div>';setTimeout(()=>{g('add-rep-modal').style.display='none';renderManagement();},1000);}catch(e){g('add-rep-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+  try{await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:name,nickname:g('new-rep-nick').value.trim(),location:g('new-rep-loc').value.trim()})});await loadReps();populateLocFilter();g('add-rep-msg').innerHTML='<div class="msg-ok">✓ Added</div>';setTimeout(()=>{g('add-rep-modal').style.display='none';renderManagement();},1000);}catch(e){g('add-rep-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+function openEditLocModal(repName,repId,currentLoc){
+  g('edit-loc-rep').value=repName;
+  g('edit-loc-val').value=currentLoc||'';
+  g('edit-loc-repid').value=repId;
+  g('edit-loc-msg').innerHTML='';
+  // Populate datalist with existing locations
+  const locs=[...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
+  const dl=g('loc-datalist');if(dl)dl.innerHTML=locs.map(l=>`<option value="${esc(l)}">`).join('');
+  // If rep has no DB record yet, handle gracefully
+  if(!repId){
+    g('edit-loc-msg').innerHTML='<div class="msg-err">Rep must be added to the roster first (use + Add Rep)</div>';
+    g('edit-loc-modal').querySelector('.btn-p').disabled=true;
+  } else {
+    g('edit-loc-modal').querySelector('.btn-p').disabled=false;
+  }
+  g('edit-loc-modal').style.display='flex';
+}
+async function doEditLoc(){
+  const repId=g('edit-loc-repid').value;
+  const loc=g('edit-loc-val').value.trim();
+  if(!repId){g('edit-loc-msg').innerHTML='<div class="msg-err">No rep record found — add this rep to the roster first</div>';return;}
+  try{
+    await fetch(API+'/reps/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:repId,location:loc})});
+    // Update local reps array
+    const idx=reps.findIndex(r=>r.id===repId);
+    if(idx>=0)reps[idx].location=loc;
+    populateLocFilter();
+    g('edit-loc-msg').innerHTML='<div class="msg-ok">✓ Location updated</div>';
+    setTimeout(()=>{g('edit-loc-modal').style.display='none';renderManagement();},1000);
+  }catch(e){g('edit-loc-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
 }
 async function runDedup(){
   const btn=g('dedup-btn'),res=g('dedup-results');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Analyzing…';
@@ -1633,18 +1761,20 @@ function renderCostCalc(fc) {
 function renderCosts(){
   const now=new Date();
   const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
-  const monthCalls=allCalls.filter(c=>new Date(c.created_at)>=monthStart);
+  const fc=getFC();
+  const monthCalls=fc.filter(c=>new Date(c.created_at)>=monthStart);
+  const allTimeCalls=locationFilter?fc:allCalls;
   const DEEPGRAM_PER_MIN=0.0043,CLAUDE_PER_CALL=0.023,RENDER_MONTHLY=25.00;
   function calcCosts(calls){
     const mins=calls.reduce((a,c)=>a+((c.word_count||0)/150),0);
     const deepgram=mins*DEEPGRAM_PER_MIN,claude=calls.length*CLAUDE_PER_CALL;
     return{deepgram,claude,total:deepgram+claude,calls:calls.length,mins};
   }
-  const month=calcCosts(monthCalls),allTime=calcCosts(allCalls);
+  const month=calcCosts(monthCalls),allTime=calcCosts(allTimeCalls);
   const daysInMonth=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
   const dayOfMonth=now.getDate();
   const projected=dayOfMonth>0?(month.total/dayOfMonth*daysInMonth):0;
-  const perCall=allCalls.length?allTime.total/allCalls.length:0;
+  const perCall=allTimeCalls.length?allTime.total/allTimeCalls.length:0;
   // Per-rep costs this month
   const repCosts={};monthCalls.forEach(c=>{
     const r=c.rep_name||'Unknown';
@@ -1660,7 +1790,7 @@ function renderCosts(){
       <div class="mc blue"><div class="mc-label">This Month</div><div class="mc-val">$${(month.total+RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2)}</div><div class="mc-sub">${month.calls} calls · ${Math.round(month.mins)} min audio</div></div>
       <div class="mc blue"><div class="mc-label">Projected Monthly</div><div class="mc-val">$${(projected+RENDER_MONTHLY).toFixed(2)}</div><div class="mc-sub">incl. $${RENDER_MONTHLY} Render</div></div>
       <div class="mc amber"><div class="mc-label">Per Call Avg</div><div class="mc-val">$${perCall.toFixed(3)}</div><div class="mc-sub">all time average</div></div>
-      <div class="mc green"><div class="mc-label">All Time</div><div class="mc-val">$${allTime.total.toFixed(2)}</div><div class="mc-sub">${allCalls.length} calls analyzed</div></div>
+      <div class="mc green"><div class="mc-label">All Time</div><div class="mc-val">$${allTime.total.toFixed(2)}</div><div class="mc-sub">${allTimeCalls.length} calls analyzed</div></div>
     </div>
     <div class="grid-2">
       <div class="card">
