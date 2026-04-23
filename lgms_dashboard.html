@@ -1095,6 +1095,7 @@ function renderManagement(){
       <div class="fg"><label>Location</label>
         <input type="text" id="edit-loc-val" placeholder="e.g. Fayetteville, Fort Collins…" list="loc-datalist" />
         <datalist id="loc-datalist"></datalist>
+        <div id="loc-similarity-warn" style="display:none;margin-top:6px;background:rgba(255,183,77,.08);border:1px solid rgba(255,183,77,.3);border-radius:8px;padding:7px 11px;font-size:12px;color:var(--amber)"></div>
         <div style="font-size:11px;color:var(--ink3);margin-top:5px">Type a new location or pick an existing one.</div>
       </div>
       <input type="hidden" id="edit-loc-repid" />
@@ -1116,33 +1117,64 @@ async function doAddRep(){
 function openEditLocModal(repName,repId,currentLoc){
   g('edit-loc-rep').value=repName;
   g('edit-loc-val').value=currentLoc||'';
-  g('edit-loc-repid').value=repId;
+  g('edit-loc-repid').value=repId||'';
   g('edit-loc-msg').innerHTML='';
   // Populate datalist with existing locations
   const locs=[...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
   const dl=g('loc-datalist');if(dl)dl.innerHTML=locs.map(l=>`<option value="${esc(l)}">`).join('');
-  // If rep has no DB record yet, handle gracefully
+  // If no DB record, show info note but still allow saving (will auto-create)
   if(!repId){
-    g('edit-loc-msg').innerHTML='<div class="msg-err">Rep must be added to the roster first (use + Add Rep)</div>';
-    g('edit-loc-modal').querySelector('.btn-p').disabled=true;
-  } else {
-    g('edit-loc-modal').querySelector('.btn-p').disabled=false;
+    g('edit-loc-msg').innerHTML='<div style="background:rgba(92,158,255,.08);border:1px solid rgba(92,158,255,.2);border-radius:9px;padding:8px 12px;font-size:12px;color:var(--blue)">ℹ This rep will be added to the roster automatically when you save.</div>';
   }
+  g('edit-loc-modal').querySelector('.btn-p').disabled=false;
+  // Add live similarity warning on input
+  const inp=g('edit-loc-val');
+  inp.oninput=function(){
+    const val=this.value.trim().toLowerCase();
+    if(!val)return;
+    // Exact match — no warning needed
+    if(locs.some(l=>l.toLowerCase()===val))return;
+    // Find similar existing locations (one contains the other)
+    const similar=locs.filter(l=>{
+      const lc=l.toLowerCase();
+      return lc!==val&&(lc.includes(val)||val.includes(lc));
+    });
+    const warn=g('loc-similarity-warn');
+    if(similar.length&&warn){
+      warn.innerHTML=`⚠ Similar location already exists: <strong>${esc(similar[0])}</strong> — did you mean that? Pick it from the list to keep locations consistent.`;
+      warn.style.display='block';
+    } else if(warn){
+      warn.style.display='none';
+    }
+  };
   g('edit-loc-modal').style.display='flex';
 }
 async function doEditLoc(){
   const repId=g('edit-loc-repid').value;
+  const repName=g('edit-loc-rep').value;
   const loc=g('edit-loc-val').value.trim();
-  if(!repId){g('edit-loc-msg').innerHTML='<div class="msg-err">No rep record found — add this rep to the roster first</div>';return;}
+  const btn=g('edit-loc-modal').querySelector('.btn-p');
+  btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Saving…';
   try{
-    await fetch(API+'/reps/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:repId,location:loc})});
-    // Update local reps array
-    const idx=reps.findIndex(r=>r.id===repId);
-    if(idx>=0)reps[idx].location=loc;
+    if(repId){
+      // Existing rep — just update location
+      await fetch(API+'/reps/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:repId,location:loc})});
+      const idx=reps.findIndex(r=>r.id===repId);
+      if(idx>=0)reps[idx].location=loc;
+    } else {
+      // No DB record — create rep with location
+      const r=await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:repName,nickname:'',location:loc})});
+      const saved=await r.json();
+      if(!r.ok)throw new Error(saved.error||'Failed to create rep');
+      await loadReps();
+    }
     populateLocFilter();
-    g('edit-loc-msg').innerHTML='<div class="msg-ok">✓ Location updated</div>';
-    setTimeout(()=>{g('edit-loc-modal').style.display='none';renderManagement();},1000);
-  }catch(e){g('edit-loc-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+    g('edit-loc-msg').innerHTML='<div class="msg-ok">✓ Location saved</div>';
+    setTimeout(()=>{g('edit-loc-modal').style.display='none';btn.disabled=false;btn.innerHTML='Save Location';renderManagement();},1000);
+  }catch(e){
+    g('edit-loc-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;
+    btn.disabled=false;btn.innerHTML='Save Location';
+  }
 }
 async function runDedup(){
   const btn=g('dedup-btn'),res=g('dedup-results');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Analyzing…';
@@ -1222,11 +1254,13 @@ function copyToClip(url){navigator.clipboard?.writeText(url).then(()=>{alert('Co
 
 // ── CORRECTIONS ──
 function renderCorrections(){
-  set('page',`<div class="card">
+  loadCorrections().then(()=>{
+    set('page',`<div class="card">
     <div class="card-hdr"><h3>Correction Log</h3><span class="bdg">${corrections.length} corrections</span></div>
     <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Score corrections are automatically included in future Claude analysis calls as calibration examples.</p>
     ${corrections.length?corrections.map(c=>`<div class="corr-item"><div><span style="font-weight:700">${c.category?.replace(/_/g,' ')||'unknown'}</span> <span style="color:var(--red)">${c.original_score}</span> <span style="color:var(--g)">→ ${c.corrected_score}</span> <span style="color:var(--ink3);font-size:11px;margin-left:8px">${fmt(c.created_at)}</span>${c.used_in_prompt?'<span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:1px 6px;border-radius:8px;margin-left:6px">Active</span>':''}</div>${c.manager_note?`<div style="color:var(--ink3);margin-top:2px;font-size:11px">${esc(c.manager_note)}</div>`:''}</div>`).join(''):`<div class="empty"><span class="empty-ico">✏️</span><p>No corrections yet. Use score override in any call to log a correction.</p></div>`}
   </div>`);
+  });
 }
 
 // ── ADD CALLS ──
