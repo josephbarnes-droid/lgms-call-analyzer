@@ -290,7 +290,7 @@ textarea.nt:focus{border-color:var(--g)}
     <div class="sb-sep"></div>
     <button class="sb-btn" onclick="nav('add')" id="nav-add"><span class="sb-ico">➕</span>Add Calls</button>
   </div>
-  <div class="sb-footer"><div class="sb-version">v11 · Call Intelligence</div></div>
+  <div class="sb-footer"><div class="sb-version">v12 · Call Intelligence</div></div>
 </nav>
 <div class="mobile-overlay" id="mob-overlay" onclick="closeMob()"></div>
 <div class="main">
@@ -315,18 +315,18 @@ textarea.nt:focus{border-color:var(--g)}
 </div>
 <script>
 const API='';
-const CK=['got_move_date','got_customer_name','got_phone_number','got_cities','got_home_type','got_stairs_info','did_full_inventory','asked_forgotten_items','asked_about_boxes','gave_price_on_call','pitched_fvp','attempted_to_close','offered_email_estimate','mentioned_confirmations','thanked_customer','asked_name_at_start','led_estimate_process','scheduled_onsite_attempt','offered_alternatives','took_rapport_opportunities','completed_booking_wrapup','captured_lead'];
-const CKFULL=['Move date','Customer name','Phone number','Cities/locations','Home type (load & unload)','Stairs info','Full room-by-room inventory','Forgotten items asked','Moving boxes asked','Gave price on call','FVP pitched','Attempted to close','Offered email estimate','Mentioned confirmation calls','Thanked customer','Asked customer name at start','Led estimate process (Navigator)','Attempted to schedule onsite','Offered alternatives for difficult moves','Took rapport opportunities','Completed booking wrap-up','Lead captured'];
+const CK=['got_move_date','got_customer_name','got_phone_number','got_cities','got_home_type','got_stairs_info','did_full_inventory','asked_forgotten_items','asked_about_boxes','gave_price_on_call','attempted_to_close','offered_email_estimate','mentioned_confirmations','thanked_customer','asked_name_at_start','led_estimate_process','got_email','scheduled_onsite_attempt','offered_alternatives','took_rapport_opportunities','completed_booking_wrapup','captured_lead'];
+const CKFULL=['Move date','Customer name','Phone number (asked/confirmed)','Cities/locations','Home type (load & unload)','Stairs info','Full room-by-room inventory','Forgotten items asked','Moving boxes asked','Gave price on call','Attempted to close','Offered email estimate','Mentioned confirmation calls','Thanked customer','Asked/confirmed customer name','Led estimate process (Navigator)','Got email (asked/confirmed)','Attempted to schedule onsite','Offered alternatives for difficult moves','Took rapport opportunities','Completed booking wrap-up','Lead captured'];
 const CK_GROUPS=[
   {name:'Information Gathering',keys:['got_move_date','got_customer_name','got_phone_number','got_cities','got_home_type','got_stairs_info'],color:'#3461c1'},
   {name:'Inventory & Details',keys:['did_full_inventory','asked_forgotten_items','asked_about_boxes'],color:'#6b21a8'},
-  {name:'Pricing & FVP',keys:['gave_price_on_call','pitched_fvp'],color:'#b86800'},
-  {name:'Closing & Follow-up',keys:['attempted_to_close','offered_email_estimate','mentioned_confirmations','thanked_customer'],color:'#4a7c3f'},
+  {name:'Pricing & Close',keys:['gave_price_on_call','attempted_to_close'],color:'#b86800'},
+  {name:'Follow-up & Wrap-up',keys:['offered_email_estimate','mentioned_confirmations','got_email','thanked_customer'],color:'#4a7c3f'},
   {name:'Rapport & Navigation',keys:['asked_name_at_start','led_estimate_process','scheduled_onsite_attempt','offered_alternatives','took_rapport_opportunities'],color:'#c0392b'},
   {name:'Admin & Lead',keys:['completed_booking_wrapup','captured_lead'],color:'#065f46'},
 ];
-const SK=['info_sequence','price_delivery','fvp_pitch','closing_attempt','call_control','professionalism','rapport_tone','salesmanship','overall'];
-const SL=['Info Sequence','Price Delivery','FVP Pitch','Closing','Call Control','Professionalism','Rapport & Tone','Salesmanship','Overall'];
+const SK=['information_control','price_delivery','closing_attempt','professionalism','rapport_tone','salesmanship','overall'];
+const SL=['Info & Control','Price Delivery','Closing','Professionalism','Rapport & Tone','Salesmanship','Overall'];
 const KWS=['Full Value Protection','confirmation call','hourly','moving boxes','fuel','declared value','Little Guys','spot available','get you on the board','first come first serve','no cancellation fee','save that for you','get you taken care of','get you on the calendar'];
 
 let allCalls=[],reps=[],sharedViews=[],corrections=[];
@@ -459,6 +459,16 @@ function getFC(attn=''){
 }
 function scc(src){return(src||getFC()).filter(c=>!c.exclude_from_scoring);}
 function avg(arr,k){const v=(arr||[]).map(c=>c.scores?.[k]?.score||0).filter(v=>v>0);return v.length?(v.reduce((a,b)=>a+b,0)/v.length).toFixed(1):'—';}
+function getScore(c,k){
+  // information_control: use new key, fall back to average of old keys for pre-v12 calls
+  if(k==='information_control'){
+    const v=c.scores?.information_control?.score;
+    if(v>0)return v;
+    const old=((c.scores?.info_sequence?.score||0)+(c.scores?.call_control?.score||0))/2;
+    return old||0;
+  }
+  return c.scores?.[k]?.score||c.score_overrides?.[k]||0;
+}
 function scCol(s){const n=parseFloat(s);if(isNaN(n))return'#6a8f6c';return n>=8?'#66bb6a':n>=5?'#ffb74d':'#ef5350';}
 function chip(s){const n=parseFloat(s);if(isNaN(n)||s==='—')return'<span class="chip chip-n">—</span>';const c=n>=8?'chip-g':n>=5?'chip-y':'chip-r';return`<span class="chip ${c}">${typeof s==='number'?n.toFixed(1):s}</span>`;}
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -505,22 +515,16 @@ function renderOverview(){
       <div class="mc ${br>=50?'green':'red'}" onclick="libFilters={rep:'',out:'booked',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Booking Rate</div><div class="mc-val">${br}%</div><div class="mc-sub">${booked} booked · ${softPipeline} pipeline</div></div>
       <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'turned_away',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Turned Away</div><div class="mc-val">${turnedAway}</div><div class="mc-sub">no LGMS availability</div></div>
     </div>
-    <div class="grid-2">
-      <div class="card">
+    <div class="card" style="margin-bottom:16px">
         <div class="card-hdr"><h3>Rep Leaderboard</h3><span class="bdg" id="lb-cnt"></span></div>
         <div style="overflow-x:auto">
           <table class="lb"><thead><tr>
             <th>#</th><th onclick="sortLB('rep_name')">Rep</th><th onclick="sortLB('overall')">Overall ↕</th>
             <th onclick="sortLB('rapport_tone')">Rapport</th><th onclick="sortLB('price_delivery')">Price</th>
-            <th onclick="sortLB('fvp_pitch')">FVP</th><th onclick="sortLB('closing_attempt')">Closing</th><th onclick="sortLB('calls')">Calls</th>
+            <th onclick="sortLB('salesmanship')">Sales</th><th onclick="sortLB('closing_attempt')">Closing</th><th onclick="sortLB('calls')">Calls</th>
           </tr></thead><tbody id="lb-body"></tbody></table>
           <div class="lb-expand" id="lb-expand" onclick="lbShowAll=!lbShowAll;renderLB()"></div>
         </div>
-      </div>
-      <div class="card">
-        <div class="card-hdr"><h3>Score Trends</h3><span class="bdg-blue bdg">Call date</span></div>
-        <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
-      </div>
     </div>
     <div class="card">
       <div class="card-hdr"><h3>Process Compliance by Group</h3><span style="font-size:11px;color:var(--ink3)">Click to expand steps</span></div>
@@ -531,7 +535,7 @@ function renderOverview(){
       <div class="card"><div class="card-hdr"><h3>Keywords</h3></div><div id="kw-viz"></div></div>
       <div class="card"><div class="card-hdr"><h3>Objections</h3></div><div id="obj-viz"></div></div>
     </div>`);
-  renderLB();renderTrend(sc);renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);
+  renderLB();renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);
 }
 function navFilter(attn){libFilters.attn=attn;nav('library');}
 function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
@@ -542,7 +546,14 @@ function renderLB(){
   const data=repNamesFiltered.map(r=>{
     const rc=sc.filter(c=>c.rep_name===r);
     const a=k=>rc.length?(rc.reduce((s,c)=>s+(c.scores?.[k]?.score||0),0)/rc.length):0;
-    return{rep_name:r,overall:a('overall'),rapport_tone:a('rapport_tone'),price_delivery:a('price_delivery'),fvp_pitch:a('fvp_pitch'),closing_attempt:a('closing_attempt'),calls:rc.length};
+    // Fallback for old calls: average info_sequence + call_control if information_control missing
+    const ic=rc.length?(rc.reduce((s,c)=>{
+      const v=c.scores?.information_control?.score;
+      if(v>0)return s+v;
+      const old=((c.scores?.info_sequence?.score||0)+(c.scores?.call_control?.score||0))/2;
+      return s+old;
+    },0)/rc.length):0;
+    return{rep_name:r,overall:a('overall'),rapport_tone:a('rapport_tone'),price_delivery:a('price_delivery'),salesmanship:a('salesmanship'),closing_attempt:a('closing_attempt'),information_control:ic,calls:rc.length};
   });
   data.sort((a,b)=>lbKey==='rep_name'?a.rep_name.localeCompare(b.rep_name)*lbDir:(b[lbKey]-a[lbKey])*-lbDir);
   const cnt=g('lb-cnt');if(cnt)cnt.textContent=`${data.length} rep${data.length!==1?'s':''}`;
@@ -556,7 +567,7 @@ function renderLB(){
       <td><span class="lb-name" onclick="nav('profiles',{rep:'${esc(d.rep_name)}'})">${d.rep_name}</span></td>
       <td><span onclick="libFilters.rep='${esc(d.rep_name)}';nav('library')" style="cursor:pointer">${chip(d.overall.toFixed(1))}</span></td>
       <td>${chip(d.rapport_tone.toFixed(1))}</td><td>${chip(d.price_delivery.toFixed(1))}</td>
-      <td>${chip(d.fvp_pitch.toFixed(1))}</td><td>${chip(d.closing_attempt.toFixed(1))}</td>
+      <td>${chip(d.salesmanship.toFixed(1))}</td><td>${chip(d.closing_attempt.toFixed(1))}</td>
       <td style="color:var(--ink3);font-size:11px">${d.calls}</td></tr>`;
   }).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--ink3);padding:16px">No scored calls</td></tr>';
 }
@@ -729,6 +740,8 @@ function buildRow(c){
       <div class="cr-right">
         <span class="op ${oClass}">${oLabel}</span>
         ${c.move_category&&c.move_category!=='standard'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(206,147,216,.12);color:var(--purple)">${c.move_category.replace('_',' ')}</span>`:''}
+        ${c.pricing_model&&c.pricing_model!=='unknown'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:${c.pricing_model==='pointed'?'rgba(76,175,80,.12)':'rgba(92,158,255,.12)'};color:${c.pricing_model==='pointed'?'var(--g)':'var(--blue)'}">${c.pricing_model==='pointed'?'📋 Pointed':'⏱ Hourly'}</span>`:''}
+        ${c.move_timeline&&c.move_timeline!=='unknown'?`<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:var(--gl);color:var(--ink2)">${{'exact_date':'📅 Exact date','this_week':'🔥 This week','two_to_four_weeks':'📆 2-4 wks','one_to_three_months':'🗓 1-3 mo','three_plus_months':'🗓 3+ mo'}[c.move_timeline]||''}</span>`:''}
         ${c.call_quality&&c.call_quality!=='normal'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">${c.call_quality==='disconnected'?'📵':'⚠'} ${c.call_quality}</span>`:''}
         ${c.availability_decline?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">🚫</span>':''}
         ${c.turned_away?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--al);color:var(--amber)">📵 Turned Away</span>':''}
@@ -952,7 +965,19 @@ async function updCall(id,data){
   try{
     await fetch(API+'/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...data})});
     const i=allCalls.findIndex(c=>c.id===id);if(i>=0)allCalls[i]={...allCalls[i],...data};
-    if(currentPage==='library')renderCallList();else if(currentPage==='overview')renderOverview();
+    // In-place update: rebuild just this row if it exists in the DOM, otherwise full re-render
+    const row=g('row-'+id);
+    if(row&&currentPage==='library'){
+      const wasOpen=row.classList.contains('open');
+      const newHtml=buildRow(allCalls[i]);
+      const tmp=document.createElement('div');tmp.innerHTML=newHtml;
+      const newRow=tmp.firstElementChild;
+      if(wasOpen)newRow.classList.add('open');
+      row.replaceWith(newRow);
+      updateBB();
+    } else if(currentPage==='overview'){
+      renderOverview();
+    }
   }catch(e){alert('Save failed: '+e.message);}
 }
 
@@ -1042,23 +1067,80 @@ function openRepProfile(repName){
 }
 
 // ── MANAGEMENT ──
+let expandedRep=null;
 function renderManagement(){
   const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
+  // Also show unmatched reps — in calls but no roster record
+  const rosterNames=new Set(reps.flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
+  const unmatched=repNames.filter(r=>!rosterNames.has(r));
   const rows=repNames.map(r=>{
     const cnt=allCalls.filter(c=>c.rep_name===r).length;
     const sc2=allCalls.filter(c=>c.rep_name===r&&!c.exclude_from_scoring);
     const avgO=sc2.length?(sc2.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/sc2.length).toFixed(1):'—';
     const dbRep=reps.find(rep=>rep.full_name===r||rep.nickname===r);
-    return`<tr><td style="font-weight:600">${esc(r)}</td><td>${dbRep?.location?`<span class="loc-tag">${esc(dbRep.location)}</span>`:'<span style="color:var(--ink3)">—</span>'}</td><td>${cnt}</td><td>${chip(avgO)}</td><td><span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:2px 8px;border-radius:10px">Active</span></td><td style="display:flex;gap:4px"><button class="btn btn-g btn-xs" onclick="openRenameModal('${esc(r)}')">Rename</button><button class="btn btn-g btn-xs" onclick="openEditLocModal('${esc(r)}','${esc(dbRep?.id||'')}','${esc(dbRep?.location||'')}')">📍 Location</button></td></tr>`;
+    const isExpanded=expandedRep===r;
+    const locs=[...new Set(reps.map(rr=>rr.location).filter(Boolean))].sort();
+    const locOpts=locs.map(l=>`<option value="${esc(l)}"${l===dbRep?.location?' selected':''}>${esc(l)}</option>`).join('');
+    const otherReps=repNames.filter(x=>x!==r).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    const expandPanel=isExpanded?`<tr id="panel-${esc(r)}"><td colspan="6" style="padding:0;background:var(--bg2)">
+      <div style="padding:16px 18px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Rename</div>
+          <div style="display:flex;gap:6px"><input type="text" id="ren-${esc(r)}" class="ovr-inp" placeholder="New name" style="flex:1" /><button class="btn btn-p btn-xs" onclick="doInlineRename('${esc(r)}')">Save</button></div>
+          <div id="ren-msg-${esc(r)}" style="font-size:11px;margin-top:4px"></div>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Location</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="text" id="loc-${esc(r)}" class="ovr-inp" value="${esc(dbRep?.location||'')}" placeholder="e.g. Fayetteville" list="loc-dl-${esc(r)}" style="flex:1" />
+            <datalist id="loc-dl-${esc(r)}">${locOpts}</datalist>
+            <button class="btn btn-p btn-xs" onclick="doInlineLoc('${esc(r)}','${esc(dbRep?.id||'')}')">Save</button>
+          </div>
+          <div id="loc-msg-${esc(r)}" style="font-size:11px;margin-top:4px"></div>
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Merge Into</div>
+          <div style="display:flex;gap:6px">
+            <select id="merge-${esc(r)}" class="fsel" style="flex:1;font-size:12px;padding:6px 8px"><option value="">— select rep —</option>${otherReps}</select>
+            <button class="btn btn-d btn-xs" onclick="doInlineMerge('${esc(r)}')">Merge</button>
+          </div>
+          <div style="font-size:10px;color:var(--ink3);margin-top:4px">Moves all ${cnt} calls to selected rep</div>
+        </div>
+      </div>
+    </td></tr>`:'';
+    return`<tr style="cursor:pointer" onclick="expandedRep=expandedRep==='${esc(r)}'?null:'${esc(r)}';renderManagement()">
+      <td style="font-weight:600">${esc(r)}${isExpanded?' ▲':' ▾'}</td>
+      <td>${dbRep?.location?`<span class="loc-tag">${esc(dbRep.location)}</span>`:'<span style="color:var(--amber);font-size:11px">⚠ unset</span>'}</td>
+      <td>${cnt}</td><td>${chip(avgO)}</td>
+      <td><span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:2px 8px;border-radius:10px">Active</span></td>
+      <td onclick="event.stopPropagation()"><button class="btn btn-g btn-xs" onclick="libFilters.rep='${esc(r)}';nav('library')">View calls</button></td>
+    </tr>${expandPanel}`;
   }).join('');
   const job=window._lastJobStatus||{status:'idle'};
   let reanalyzeHtml='';
   if(job.status==='running'){const pct=job.total?Math.round(job.processed/job.total*100):0;reanalyzeHtml=`<div style="background:var(--surface);border-radius:9px;padding:14px;margin-top:12px;border:1px solid var(--border2)"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${pct}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`;}
   else if(job.status==='complete')reanalyzeHtml=`<div class="msg-ok" style="margin-top:10px">✓ Done! ${job.processed} calls re-analyzed.</div>`;
+  const unmatchedHtml=unmatched.length?`<div class="card" style="margin-bottom:16px">
+    <div class="card-hdr"><h3>⚠ Unmatched Reps</h3><span class="bdg-amber bdg">${unmatched.length} names</span></div>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">These names appear in calls but have no roster record. They may be customers misidentified as reps, or reps not yet added.</p>
+    ${unmatched.map(r=>{
+      const cnt=allCalls.filter(c=>c.rep_name===r).length;
+      const otherReps=repNames.filter(x=>x!==r).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+      return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);flex-wrap:wrap">
+        <span style="font-weight:600;flex:1">${esc(r)}</span>
+        <span style="font-size:11px;color:var(--ink3)">${cnt} call${cnt!==1?'s':''}</span>
+        <button class="btn btn-p btn-xs" onclick="createRepFromName('${esc(r)}')">+ Add to roster</button>
+        <select id="um-merge-${esc(r)}" class="fsel" style="font-size:11px;padding:4px 7px"><option value="">Merge into…</option>${otherReps}</select>
+        <button class="btn btn-g btn-xs" onclick="doUnmatchedMerge('${esc(r)}')">Merge</button>
+      </div>`;
+    }).join('')}
+  </div>`:'';
   set('page',`
+    ${unmatchedHtml}
     <div class="grid-2">
       <div class="card">
         <div class="card-hdr"><h3>Rep Roster</h3><button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button></div>
+        <p style="font-size:11.5px;color:var(--ink3);margin-bottom:10px">Click a rep to expand editing options.</p>
         <table class="rmgmt-table"><thead><tr><th>Name</th><th>Location</th><th>Calls</th><th>Avg Score</th><th>Status</th><th></th></tr></thead>
         <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody></table>
       </div>
@@ -1077,104 +1159,77 @@ function renderManagement(){
         </div>
       </div>
     </div>
-    <div class="modal-bg" id="rename-modal" style="display:none"><div class="modal-box"><h2>Rename Rep</h2>
-      <div class="fg"><label>Current name</label><input type="text" id="rename-old" readonly style="background:var(--surface)" /></div>
-      <div class="fg"><label>New name</label><input type="text" id="rename-new" placeholder="Enter new name" /></div>
-      <div id="rename-msg"></div>
-      <div class="modal-btns"><button class="btn btn-g" onclick="g('rename-modal').style.display='none'">Cancel</button><button class="btn btn-p" onclick="doRename()">Rename</button></div>
-    </div></div>
     <div class="modal-bg" id="add-rep-modal" style="display:none"><div class="modal-box"><h2>Add Rep</h2>
       <div class="fg"><label>Full name *</label><input type="text" id="new-rep-name" placeholder="e.g. Caleb" /></div>
       <div class="fg"><label>Nickname</label><input type="text" id="new-rep-nick" placeholder="e.g. C" /></div>
-      <div class="fg"><label>Location tag</label><input type="text" id="new-rep-loc" placeholder="e.g. FAY, FC, NWA" /></div>
+      <div class="fg"><label>Location tag</label><input type="text" id="new-rep-loc" placeholder="e.g. Fayetteville" /></div>
       <div id="add-rep-msg"></div>
       <div class="modal-btns"><button class="btn btn-g" onclick="g('add-rep-modal').style.display='none'">Cancel</button><button class="btn btn-p" onclick="doAddRep()">Add Rep</button></div>
-    </div></div>
-    <div class="modal-bg" id="edit-loc-modal" style="display:none"><div class="modal-box"><h2>Edit Location</h2>
-      <div class="fg"><label>Rep</label><input type="text" id="edit-loc-rep" readonly style="background:var(--surface)" /></div>
-      <div class="fg"><label>Location</label>
-        <input type="text" id="edit-loc-val" placeholder="e.g. Fayetteville, Fort Collins…" list="loc-datalist" />
-        <datalist id="loc-datalist"></datalist>
-        <div id="loc-similarity-warn" style="display:none;margin-top:6px;background:rgba(255,183,77,.08);border:1px solid rgba(255,183,77,.3);border-radius:8px;padding:7px 11px;font-size:12px;color:var(--amber)"></div>
-        <div style="font-size:11px;color:var(--ink3);margin-top:5px">Type a new location or pick an existing one.</div>
-      </div>
-      <input type="hidden" id="edit-loc-repid" />
-      <div id="edit-loc-msg"></div>
-      <div class="modal-btns"><button class="btn btn-g" onclick="g('edit-loc-modal').style.display='none'">Cancel</button><button class="btn btn-p" onclick="doEditLoc()">Save Location</button></div>
     </div></div>`);
 }
-function openRenameModal(name){g('rename-old').value=name;g('rename-new').value='';g('rename-msg').innerHTML='';g('rename-modal').style.display='flex';}
-function openAddRepModal(){g('new-rep-name').value='';g('new-rep-nick').value='';g('new-rep-loc').value='';g('add-rep-msg').innerHTML='';g('add-rep-modal').style.display='flex';}
-async function doRename(){
-  const old=g('rename-old').value,n=g('rename-new').value.trim();
-  if(!n){g('rename-msg').innerHTML='<div class="msg-err">Enter a new name</div>';return;}
-  try{const r=await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:old,new_name:n})});const res=await r.json();if(!r.ok)throw new Error(res.error);allCalls.forEach(c=>{if(c.rep_name===old)c.rep_name=n;});g('rename-msg').innerHTML=`<div class="msg-ok">✓ Renamed ${res.renamed} calls</div>`;setTimeout(()=>{g('rename-modal').style.display='none';renderManagement();},1200);}catch(e){g('rename-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+
+async function doInlineRename(repName){
+  const el=g('ren-'+repName),msg=g('ren-msg-'+repName);
+  const n=el?.value?.trim();if(!n){if(msg)msg.innerHTML='<span style="color:var(--red)">Enter a new name</span>';return;}
+  try{
+    const r=await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:repName,new_name:n})});
+    const res=await r.json();if(!r.ok)throw new Error(res.error);
+    allCalls.forEach(c=>{if(c.rep_name===repName)c.rep_name=n;});
+    if(msg)msg.innerHTML=`<span style="color:var(--g)">✓ Renamed ${res.renamed} calls</span>`;
+    expandedRep=n;setTimeout(()=>renderManagement(),1200);
+  }catch(e){if(msg)msg.innerHTML=`<span style="color:var(--red)">${e.message}</span>`;}
 }
-async function doAddRep(){
-  const name=g('new-rep-name').value.trim();if(!name){g('add-rep-msg').innerHTML='<div class="msg-err">Name required</div>';return;}
-  try{await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:name,nickname:g('new-rep-nick').value.trim(),location:g('new-rep-loc').value.trim()})});await loadReps();populateLocFilter();g('add-rep-msg').innerHTML='<div class="msg-ok">✓ Added</div>';setTimeout(()=>{g('add-rep-modal').style.display='none';renderManagement();},1000);}catch(e){g('add-rep-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
-}
-function openEditLocModal(repName,repId,currentLoc){
-  g('edit-loc-rep').value=repName;
-  g('edit-loc-val').value=currentLoc||'';
-  g('edit-loc-repid').value=repId||'';
-  g('edit-loc-msg').innerHTML='';
-  // Populate datalist with existing locations
-  const locs=[...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
-  const dl=g('loc-datalist');if(dl)dl.innerHTML=locs.map(l=>`<option value="${esc(l)}">`).join('');
-  // If no DB record, show info note but still allow saving (will auto-create)
-  if(!repId){
-    g('edit-loc-msg').innerHTML='<div style="background:rgba(92,158,255,.08);border:1px solid rgba(92,158,255,.2);border-radius:9px;padding:8px 12px;font-size:12px;color:var(--blue)">ℹ This rep will be added to the roster automatically when you save.</div>';
-  }
-  g('edit-loc-modal').querySelector('.btn-p').disabled=false;
-  // Add live similarity warning on input
-  const inp=g('edit-loc-val');
-  inp.oninput=function(){
-    const val=this.value.trim().toLowerCase();
-    if(!val)return;
-    // Exact match — no warning needed
-    if(locs.some(l=>l.toLowerCase()===val))return;
-    // Find similar existing locations (one contains the other)
-    const similar=locs.filter(l=>{
-      const lc=l.toLowerCase();
-      return lc!==val&&(lc.includes(val)||val.includes(lc));
-    });
-    const warn=g('loc-similarity-warn');
-    if(similar.length&&warn){
-      warn.innerHTML=`⚠ Similar location already exists: <strong>${esc(similar[0])}</strong> — did you mean that? Pick it from the list to keep locations consistent.`;
-      warn.style.display='block';
-    } else if(warn){
-      warn.style.display='none';
-    }
-  };
-  g('edit-loc-modal').style.display='flex';
-}
-async function doEditLoc(){
-  const repId=g('edit-loc-repid').value;
-  const repName=g('edit-loc-rep').value;
-  const loc=g('edit-loc-val').value.trim();
-  const btn=g('edit-loc-modal').querySelector('.btn-p');
-  btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Saving…';
+async function doInlineLoc(repName,repId){
+  const el=g('loc-'+repName),msg=g('loc-msg-'+repName);
+  const loc=el?.value?.trim()||'';
   try{
     if(repId){
-      // Existing rep — just update location
       await fetch(API+'/reps/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:repId,location:loc})});
-      const idx=reps.findIndex(r=>r.id===repId);
-      if(idx>=0)reps[idx].location=loc;
+      const idx=reps.findIndex(r=>r.id===repId);if(idx>=0)reps[idx].location=loc;
     } else {
-      // No DB record — create rep with location
       const r=await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:repName,nickname:'',location:loc})});
-      const saved=await r.json();
-      if(!r.ok)throw new Error(saved.error||'Failed to create rep');
+      const saved=await r.json();if(!r.ok)throw new Error(saved.error||'Failed');
       await loadReps();
     }
     populateLocFilter();
-    g('edit-loc-msg').innerHTML='<div class="msg-ok">✓ Location saved</div>';
-    setTimeout(()=>{g('edit-loc-modal').style.display='none';btn.disabled=false;btn.innerHTML='Save Location';renderManagement();},1000);
-  }catch(e){
-    g('edit-loc-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;
-    btn.disabled=false;btn.innerHTML='Save Location';
-  }
+    if(msg)msg.innerHTML=`<span style="color:var(--g)">✓ Saved</span>`;
+    setTimeout(()=>renderManagement(),1000);
+  }catch(e){if(msg)msg.innerHTML=`<span style="color:var(--red)">${e.message}</span>`;}
+}
+async function doInlineMerge(repName){
+  const sel=g('merge-'+repName);
+  const target=sel?.value;
+  if(!target){alert('Select a rep to merge into');return;}
+  const cnt=allCalls.filter(c=>c.rep_name===repName).length;
+  if(!confirm(`Merge all ${cnt} calls from "${repName}" into "${target}"? This cannot be undone.`))return;
+  try{
+    await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:repName,new_name:target})});
+    allCalls.forEach(c=>{if(c.rep_name===repName)c.rep_name=target;});
+    expandedRep=null;renderManagement();
+  }catch(e){alert(e.message);}
+}
+async function createRepFromName(repName){
+  try{
+    await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:repName,nickname:'',location:''})});
+    await loadReps();renderManagement();
+  }catch(e){alert(e.message);}
+}
+async function doUnmatchedMerge(repName){
+  const sel=g('um-merge-'+repName);
+  const target=sel?.value;
+  if(!target){alert('Select a rep to merge into');return;}
+  const cnt=allCalls.filter(c=>c.rep_name===repName).length;
+  if(!confirm(`Merge all ${cnt} calls from "${repName}" into "${target}"?`))return;
+  try{
+    await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:repName,new_name:target})});
+    allCalls.forEach(c=>{if(c.rep_name===repName)c.rep_name=target;});
+    renderManagement();
+  }catch(e){alert(e.message);}
+}
+function openAddRepModal(){g('new-rep-name').value='';g('new-rep-nick').value='';g('new-rep-loc').value='';g('add-rep-msg').innerHTML='';g('add-rep-modal').style.display='flex';}
+async function doAddRep(){
+  const name=g('new-rep-name').value.trim();if(!name){g('add-rep-msg').innerHTML='<div class="msg-err">Name required</div>';return;}
+  try{await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:name,nickname:g('new-rep-nick').value.trim(),location:g('new-rep-loc').value.trim()})});await loadReps();populateLocFilter();g('add-rep-msg').innerHTML='<div class="msg-ok">✓ Added</div>';setTimeout(()=>{g('add-rep-modal').style.display='none';renderManagement();},1000);}catch(e){g('add-rep-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
 }
 async function runDedup(){
   const btn=g('dedup-btn'),res=g('dedup-results');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Analyzing…';
