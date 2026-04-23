@@ -57,7 +57,7 @@ _batch_lock = threading.Lock()
 # ──────────────────────────────────────────────
 
 def build_prompt(transcript, filename, corrections=None, is_diarized=False):
-    """Build Claude prompt v10 — salesmanship, calibration examples, rapport opportunities, weighted scoring."""
+    """Build Claude prompt v12 — new scoring formula, hourly/pointed, timeline-weighted closing, improved rep detection."""
 
     corrections_block = ""
     if corrections:
@@ -78,44 +78,39 @@ TRANSCRIPT FORMAT: This transcript has speaker labels (Speaker 0, Speaker 1, etc
 - Speaker 0 is typically the rep (answers the phone, introduces themselves first)
 - Speaker 1 is typically the customer
 - Use these labels to accurately determine talk ratio and who said what
-- Rep name detection: look for Speaker 0's introduction
+- Rep name detection: look for Speaker 0's introduction context only
 """
 
     prompt = f"""You are a sales call evaluator for Little Guys Movers (LGMS).
 {corrections_block}{diarization_note}
-CALIBRATION EXAMPLES — use these to anchor your scoring to LGMS standards:
+CALIBRATION EXAMPLES — anchor your scoring to these LGMS standards:
 
-EXCELLENT CALL (8/10 overall) — Alex, storage-to-apartment move:
-- Assumed the close: said "I can get started first thing tomorrow morning at 8 o'clock" and moved straight to scheduling without asking permission
-- FVP: included naturally in price breakdown with cost stated — score 9/10
-- Rapport: immediately acknowledged customer's stress about last-minute situation, warm and confident throughout — score 9/10
-- Closing: 10/10 — never asked "do you want to book?", just booked it
-- Salesmanship: mentioned "clothes in the dresser" tip naturally — score 7/10
+EXCELLENT CALL (9/10 overall) — Alex, storage-to-apartment move:
+- Assumed the close: "I can get started first thing tomorrow morning at 8 o'clock" — moved straight to scheduling
+- Rapport: immediately acknowledged customer's stress about last-minute situation, warm and confident — 9/10
+- Closing: 10/10 — never asked "do you want to book?", just booked it (assumed close = minimum 7 base)
+- Salesmanship: mentioned "clothes in the dresser" naturally, background checked movers — 8/10
+- Price: delivered confidently with pointed flat-rate framing — 8/10
 Key lesson: assume the close, move with confidence, acknowledge the customer's situation
 
 GOOD CALL (8/10 overall) — Dylan, large house move:
-- Thorough room-by-room inventory, asked all the right detail questions
-- FVP: mentioned $19,000 coverage and asked if adequate but never explained what it is — score 7/10
-- Closing: "I could have movers there as early as 8 a.m. next Thursday, if you wanted to get that set up" — offered but waited for confirmation rather than assuming — score 9/10
-- Salesmanship: 5/10 — missed obvious opportunities on large house move (clothes in dresser, disassembly, background checks)
-- Excellent expectation setting: explained email, attachments, day-of 7:45 call — score 9/10 professionalism
-Key lesson: thorough and professional but missed salesmanship and FVP explanation
+- Thorough room-by-room inventory, all right detail questions
+- Closing: "I could have movers there as early as 8 a.m. next Thursday, if you wanted to get that set up" — offered but waited for confirmation — 8/10
+- Salesmanship: 5/10 — missed obvious opportunities (clothes in dresser, disassembly, background checks)
+- Excellent expectation setting: explained email, attachments, day-of 7:45 call — 9/10 professionalism
+Key lesson: thorough and professional but missed salesmanship
 
-AVERAGE CALL (7/10 overall) — JD, studio apartment move:
-- Good inventory detail questions (headboard, platform type, mirror)
-- FVP: completely absent — never mentioned — score 1/10 (MAJOR miss)
-- Closing: "Do you want to go ahead and get this scheduled?" — question not assumption — score 6/10
-- Name came late: "I kind of dove right into it and didn't get your name"
-- Mentioned clothes in dresser but only at the very end as afterthought — score 4/10 salesmanship
+AVERAGE CALL (6/10 overall) — JD, studio apartment move:
+- Good inventory detail questions
+- Closing: "Do you want to go ahead and get this scheduled?" — question not assumption — 6/10
+- Salesmanship: mentioned clothes in dresser but only as afterthought at end — 4/10
 - Missed customer's anxiety about unknown floor situation — no reassurance given
-Key lesson: FVP miss drops overall significantly regardless of other strengths
+Key lesson: closing as a question instead of assumption costs points; missed rapport hurts salesmanship
 
 POOR CALL (4/10 overall) — James, small marketplace pickup:
-- Customer said "I'm going to try and find another option" after price
-- James said "completely understand" TWICE and let him walk — zero close attempt — score 1/10 closing
-- MISSED RAPPORT OPPORTUNITY: customer said "the guy that was supposed to help me decided to leave town unbeknownst to me" — James gave no acknowledgment. Should have said "oh that's rough, I'm glad you found us — we won't do that to you"
-- FVP: never mentioned — score 0/10
-- Salesmanship: nothing — score 2/10
+- Customer said "I'm going to try and find another option" — James said "completely understand" TWICE and let him walk — 1/10 closing
+- MISSED RAPPORT: customer said "the guy that was supposed to help me decided to leave town" — James gave no acknowledgment
+- Salesmanship: nothing — 2/10
 - Price delivered without any value framing first
 Key lesson: never let a customer walk without attempting to overcome the objection. Always acknowledge emotional moments.
 
@@ -124,27 +119,31 @@ WHAT A 10/10 CALL LOOKS LIKE:
 - Acknowledges any stress or difficulty the customer mentions immediately and warmly
 - Controls the call with confidence while feeling natural and unhurried
 - Gets all required information for the move type
-- Delivers price confidently without being asked
-- Pitches FVP naturally, explains what it covers, states the cost
-- Uses multiple salesmanship phrases naturally woven into conversation
+- Delivers price confidently with value framing first
+- Uses multiple salesmanship phrases naturally throughout
 - Assumes the close — moves to scheduling without asking permission
-- Overcomes any objection with specific counters (no cancellation fee, availability, value)
+- Overcomes any objection with specific counters (FCFS, no deposit, availability, value)
 - Sets clear expectations for confirmation and day-of communication
 - Customer feels like they made the right choice
 
 ---
 
-STEP 1 — CLASSIFY CALL TYPE:
+STEP 1 — CLASSIFY CALL:
 - move_category: "standard" | "specialty" | "unload_only" | "in_house" | "commercial" | "storage" | "non_move"
 - call_type: "sales_estimate" | "follow_up" | "complaint" | "booking_confirmation" | "non_sales" | "too_short" | "other"
 - word_count: approximate
 - exclude_from_scoring: true if fewer than 80 words OR clearly not a sales call OR disconnected
-
-IMPORTANT: Even if exclude_from_scoring is true, still detect turned_away. A call where LGMS says "we don't have availability" is turned_away even if only 10 words long.
+IMPORTANT: Even if excluded, still detect turned_away.
 
 STEP 2 — DETECT REP NAME:
-- Look for rep introduction or Speaker 0's first lines if diarized
-- Return FIRST NAME ONLY. Return "Unknown" if not found.
+The rep ANSWERS the call — they do not initiate it.
+- The rep typically says "Thank you for calling Little Guys, this is [name]" or similar greeting
+- If diarized, Speaker 0 is almost always the rep — look for their greeting/introduction
+- Rep name is a FIRST NAME spoken in an introduction/greeting context
+- If a name appears later but NOT in an introduction, it is likely the customer
+- Cross-reference against context: if the detected name sounds like it came from the customer side, return "Unknown"
+- PREFER returning "Unknown" over a wrong guess — a wrong name creates phantom reps
+Return FIRST NAME ONLY. Return "Unknown" if not confident.
 
 STEP 3 — CALL QUALITY:
 - "disconnected": abrupt ending, "Hello? Hello?" patterns, very short
@@ -154,161 +153,189 @@ STEP 3 — CALL QUALITY:
 STEP 4 — FLAGS:
 - turned_away: LGMS could NOT accommodate — "we're booked", "no availability", "can't do that date"
 - onsite_suggested: onsite visit/estimate mentioned
-- is_continuation: "calling back about", "as we discussed", "following up", "spoke earlier"
+- is_continuation: "calling back about", "as we discussed", "following up"
 
 STEP 5 — OUTCOME & PIPELINE:
 - call_outcome: "booked" | "estimate_sent" | "soft_pipeline" | "lost" | "unknown"
-- soft_pipeline: customer interested but not ready — needs partner, no exact date, needs to think, will call back
+- soft_pipeline: customer interested but not ready — needs partner, no exact date, needs to think
 - loss_reason (if lost): "price_too_high" | "went_with_competitor" | "wrong_timing" | "no_availability" | "just_shopping" | "other" | ""
 - soft_pipeline_reason (if soft_pipeline): "needs_partner" | "no_exact_date" | "needs_to_think" | "will_call_back" | "other" | ""
 
-STEP 6 — RAPPORT OPPORTUNITY ANALYSIS:
-Scan the transcript for moments where the customer shared something personal, stressful, or emotionally significant.
-For each such moment, evaluate:
-- Did the rep acknowledge it warmly? (good)
-- Did the rep use it to reinforce trust in LGMS? (better — e.g. "we won't do that to you", "we handle this all the time")
-- Did the rep completely ignore it and barrel through the script? (coaching point)
+STEP 6 — MOVE TIMELINE:
+Detect when customer wants to move. Classify move_timeline:
+- "exact_date": customer provided a specific date → assumed close expected regardless of how far out
+- "this_week": within 7 days → must attempt to book on call, overcome objections
+- "two_to_four_weeks": 2-4 weeks → strong close + objection handling expected
+- "one_to_three_months": 1-3 months → close attempt expected, lighter pressure
+- "three_plus_months": 3+ months → attempt appreciated, soft pipeline acceptable
+- "unknown": no clear timeline — look for clues (seasons, life events, vague references)
 
-Examples of rapport opportunities:
-- Customer mentions someone bailed on them or let them down → "I'm sorry to hear that, we won't do that to you"
-- Customer mentions a life event (divorce, new job, family change) → acknowledgment and empathy
-- Customer is clearly stressed or anxious → reassurance
-- Customer mentions bad experience with movers → "that won't happen with us, here's why"
-- Customer shares something personal (moving mom, first apartment, etc.) → genuine acknowledgment
+STEP 7 — PRICING MODEL:
+Detect whether move was quoted as hourly or pointed (flat-rate).
+pricing_model:
+- "pointed": rep used "flat rate", "based on inventory", "fixed price", or gave a single dollar figure for the job
+- "hourly": rep mentioned a per-hour rate, per-guy rate, or estimated number of hours
+- "unknown": unclear
 
-List missed_rapport_opportunities as specific moments: "Customer said [X], rep gave no acknowledgment"
-
-STEP 7 — CLOSING ANALYSIS:
-close_attempts: count how many times rep explicitly tried to book/schedule
-- Assuming the close counts: "Let me get you on the calendar for Saturday" = 1 attempt
-- Asking permission is weaker: "Do you want to go ahead and book?" = 0.5 but still counts
-- Never attempting = 0
+STEP 8 — CLOSING ANALYSIS:
+COUNT close_attempts — how many times did rep explicitly try to book/schedule?
+ASSUMED CLOSE: if rep moved directly to scheduling without asking permission (e.g. "Let me get you on for Saturday" not "Do you want to book?"), closing score starts at minimum 7.
 
 CLOSING LANGUAGE (strong signals):
-"I have a spot available for you", "let me get you on the board/schedule/calendar",
-"first come first serve", "no cancellation fee", "save that for you", "hold that for you",
-"get you taken care of", "can I go ahead and", "let me go ahead and book",
-"shall I go ahead and get that set up"
+"I have a spot available", "let me get you on the board/schedule/calendar",
+"first come first serve", "no cancellation fee", "no deposit to hold a spot",
+"save/hold that for you", "get you taken care of", "let me go ahead and book"
 
-OBJECTION HANDLING — for each objection:
+OBJECTION HANDLING:
 - overcome: rep countered with specific response and advanced conversation
-- abandoned: rep accepted without counter ("ok, call us back", "completely understand", "no problem")
+- abandoned: rep accepted without counter ("ok call us back", "completely understand", "no problem")
 
 Ideal counters:
-- Price too high → "What were you expecting? Let me see what I can do" + work through it
-- Need to think → "I understand — no cancellation fee, so would it make sense to hold the spot while you decide?"
-- Need to check with partner → "Of course — no cancellation fee, want me to hold that while you check?"
-- Already have a quote → "What are they quoting you? We'd love to earn your business today"
+- Need to think → "No deposit required — would it make sense to hold the spot while you decide?"
+- Need to check with partner → "No deposit to hold — want me to lock that in while you check?"
+- Price too high → "What were you expecting? Let me see what I can do"
+- Already have a quote → "What are they quoting? We'd love to earn your business today"
+
+FOLLOW-UP LANGUAGE (important for soft pipeline):
+Good reps mention: follow-up call timeframe, first come first serve, no deposit to hold.
+Missing these on soft pipeline = coaching point.
 
 pipeline_recovery_quality (soft_pipeline only, 1-10):
-- 1-3: "ok call us back" — no next step, lead will go cold
-- 4-6: sent email estimate, gave some info
-- 7-8: set specific callback time or confirmed next step
-- 9-10: held tentative spot + specific callback + email — clear path to book
+- 1-3: "ok call us back" — no next step
+- 4-6: sent email estimate, some info
+- 7-8: specific callback time + FCFS + no deposit mentioned
+- 9-10: held spot + callback + email + FCFS + no deposit — clear path to book
 
-STEP 8 — SALESMANSHIP:
-Detect whether rep used value proposition language. Score the CONCEPT not exact words.
+STEP 9 — RAPPORT OPPORTUNITIES:
+Scan for moments where customer shared something personal, stressful, or emotionally significant.
+Missed opportunities = specific coaching points: "Customer said [X], rep gave no acknowledgment"
+Examples:
+- Someone bailed on them → "We won't do that to you"
+- Life event (divorce, new job) → empathy
+- Stressed/anxious → reassurance
+- Bad experience with movers → "That won't happen with us"
 
-ALWAYS-RELEVANT (should say on most calls):
+STEP 10 — SALESMANSHIP:
+Score on CONCEPT not exact words.
+
+ALWAYS-RELEVANT (most calls):
 - Background checked / screened movers
 - No day labor / professional employees
-- We show up / we don't miss appointments / we're reliable
-- We have the proper equipment / trucks / tools
+- We show up / reliable / don't miss appointments
+- Proper equipment / trucks / tools
+- Customer reassurance from concern — when customer expresses worry, rep responds with specific LGMS quality
 
-SITUATIONAL (only when applicable):
-- "You can leave your clothes in the dresser" (when bedroom furniture present)
-- "We disassemble and reassemble" (when furniture assembly needed)
-- "We can rearrange things" (in-house or customer mentions layout)
-- "We're careful with your belongings" / takes care with items
+SITUATIONAL (when applicable):
+- "Clothes in the dresser" — bedroom furniture present
+- "Disassemble and reassemble" — furniture assembly needed
+- "Can rearrange things" — in-house or layout mentioned
+- "Careful with belongings" — customer expresses concern
+
+POINTED VALUE PROPS (when pricing_model = pointed):
+- No clock pressure, take time to do it right
+- Disassembly/reassembly included
+- Rearranging included
+- Exact cost upfront, no surprise bill
+- Detailed inventory ensures accuracy
+
+HOURLY VALUE PROPS (when pricing_model = hourly):
+- Only pay for time used
+- Rounded to nearest quarter hour
+- Clock starts on arrival not drive time
+- Flexibility for extra tasks
+- MUST provide estimated hours — if not given, coaching point
+
+CUSTOMER NAME USAGE:
+- Never used: no contribution
+- Used at least once naturally: small bonus
+- Used naturally multiple times: meaningful bonus
+- Forced/awkward: no bonus
 
 Scoring:
-- 1-3: None of the above mentioned
-- 4-5: One always-relevant phrase used
-- 6-7: Two or more always-relevant phrases
-- 8-9: Always-relevant + appropriate situational phrases, woven naturally
-- 10: Multiple value props woven throughout conversation naturally
+- 1-3: No value props, no name use
+- 4-5: One always-relevant phrase
+- 6-7: Two+ always-relevant, or one + name use
+- 8-9: Always-relevant + situational + name naturally + pricing model props
+- 10: Full suite woven naturally, name used, reassurance addressed, pricing props used
 
-Track value_props_used as list of concepts detected.
+STEP 11 — CHECKLIST (22 steps):
 
-STEP 9 — CHECKLIST (apply based on move_category):
+STANDARD MOVE — all 22:
+1. got_move_date
+2. got_customer_name
+3. got_phone_number — TRUE only if rep asked OR confirmed ("I have this number, is that right?"). Passive caller ID alone = false.
+4. got_cities
+5. got_home_type
+6. got_stairs_info
+7. did_full_inventory
+8. asked_forgotten_items
+9. asked_about_boxes (more important on pointed moves)
+10. gave_price_on_call
+11. attempted_to_close
+12. offered_email_estimate
+13. mentioned_confirmations
+14. thanked_customer
+15. asked_name_at_start — TRUE if rep asked, OR if customer introduced themselves first
+16. led_estimate_process
+17. got_email — TRUE if rep asked for OR confirmed an existing email
+18. scheduled_onsite_attempt (na unless triggered)
+19. offered_alternatives (na unless triggered)
+20. took_rapport_opportunities
+21. completed_booking_wrapup
+22. captured_lead
 
-STANDARD MOVE — all 22 steps:
-1. got_move_date, 2. got_customer_name, 3. got_phone_number, 4. got_cities,
-5. got_home_type, 6. got_stairs_info, 7. did_full_inventory, 8. asked_forgotten_items,
-9. asked_about_boxes, 10. gave_price_on_call, 11. pitched_fvp,
-12. attempted_to_close, 13. offered_email_estimate, 14. mentioned_confirmations,
-15. thanked_customer, 16. asked_name_at_start, 17. led_estimate_process,
-18. scheduled_onsite_attempt (na unless triggered), 19. offered_alternatives (na unless triggered),
-20. took_rapport_opportunities, 21. completed_booking_wrapup, 22. captured_lead
-
-SPECIALTY: Apply: move_date, name, phone, cities, stairs, price, fvp, close, confirmations, thanks, name_at_start, lead. Set rest to "na".
-UNLOAD ONLY: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, lead. Set pitched_fvp and rest to "na".
-IN-HOUSE: Apply: move_date, name, phone, inventory, price, fvp, close, thanks, name_at_start, lead. Set cities/stairs/boxes and rest to "na".
-COMMERCIAL: Apply all standard steps. Set onsite/alternatives to "na" unless triggered.
-STORAGE: Apply: move_date, name, phone, cities, stairs, price, fvp, close, confirmations, thanks, name_at_start, lead. Set inventory/boxes and rest to "na".
+SPECIALTY: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, email, lead. Rest = "na".
+UNLOAD ONLY: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, email, lead. Rest = "na".
+IN-HOUSE: Apply: move_date, name, phone, inventory, price, close, thanks, name_at_start, email, lead. Rest = "na".
+COMMERCIAL: Apply all standard steps. onsite/alternatives = "na" unless triggered.
+STORAGE: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, email, lead. Rest = "na".
 
 CHECKLIST VALUES: true | false | "na"
 
-STEP 10 — SCORING (1-10):
+STEP 12 — SCORING (1-10 each):
 
-OVERALL — calculate server-side using weighted formula. Set your overall score using this formula:
-overall = round(closing*0.25 + price*0.15 + fvp*0.15 + rapport*0.13 + salesmanship*0.10 + info*0.09 + control*0.09 + professionalism*0.08 + 0.5)
-Note: server will recalculate — your overall score is a sanity check only.
+OVERALL — server recalculates. Sanity check:
+overall = round(closing*0.25 + price*0.15 + rapport*0.15 + salesmanship*0.20 + info_control*0.15 + professionalism*0.10)
 
 CLOSING ATTEMPT (25% weight):
-- 1-2: Never attempted — let customer go without asking
-- 3-4: Weak attempt, accepted first objection without any counter
+- 1-2: Never attempted
+- 3-4: Weak, accepted first objection without counter
 - 5-6: One attempt, gave up too easily
-- 7-8: Clear attempt, handled at least one objection with counter
-- 9: Strong attempt, overcame objections, used urgency/no-cancel-fee language
-- 10: Multiple attempts, assumed close, overcame all objections confidently
+- 7: MINIMUM if rep assumed the close
+- 7-8: Clear attempt, handled at least one objection
+- 9: Strong, used FCFS/no-deposit/urgency, overcame objections
+- 10: Multiple attempts, assumed close, overcame all objections
+Timeline adjustment: exact date or this week = not booking after real attempt is NOT penalized, not attempting IS penalized
 
-INFORMATION COMPLETENESS (9% weight):
-- Score on WHAT was gathered, NOT the order
-- Penalize only if required info was never obtained
-- Natural conversation that circles back scores well
-- Do NOT penalize for N/A checklist items
+PRICE DELIVERY (15% weight):
+POINTED: 1-3 no price, 4-6 price without framing, 7-8 confident with inventory context, 9-10 confident + value framed + handled objection
+HOURLY: missing estimated hours when giving rate = coaching point + cap score at 6. 7-8 rate+hours confidently, 9-10 rate+hours+value framing
 
-CALL CONTROL (9% weight):
-- Score on whether rep ultimately steered to all required info
-- Do NOT penalize for natural conversation or customer tangents
-- Penalize only if key info was never recovered
+RAPPORT & TONE (15% weight):
+- 1-3: Flat, missed emotional moments
+- 4-6: Polite but mechanical
+- 7-8: Warm, acknowledged situation
+- 9-10: Genuine connection, used situation to reinforce LGMS trust
 
-FVP PITCH (15% weight):
-- 0-2: Never mentioned (when required)
-- 3-5: Mentioned briefly, no explanation
-- 6: Mentioned, said can be removed or dismissed it
-- 7: Mentioned, included cost, moved on — standard
-- 8: Explained briefly what it covers, stated cost
-- 9-10: Explained thoroughly, adjusted coverage, handled objection
-- N/A for unload_only and storage moves
+SALESMANSHIP (20% weight): see Step 10 rubric
 
-RAPPORT & TONE (13% weight):
-- 1-3: Flat, bothered, missed obvious rapport opportunities, customer uncomfortable
-- 4-6: Polite but mechanical, some warmth but missed moments
-- 7-8: Warm, acknowledged customer's situation, customer felt heard
-- 9-10: Excellent — genuine connection, used customer's situation to build trust
+INFORMATION & CONTROL (15% weight — combined):
+Score on what was gathered AND how well rep steered the call.
+Penalize only if required info never obtained. Natural conversation scores well. Do not penalize N/A items.
 
-SALESMANSHIP (10% weight): see rubric above
-
-PROFESSIONALISM (8% weight):
-- Includes expectation setting, email explanation, day-of call mention, smooth handling of complications
+PROFESSIONALISM (10% weight):
+Expectation setting, email explanation, day-of call mention, clean wrap-up, handling complications smoothly.
 
 CONFIDENCE SCORE (1-10):
-- 10: Clear complete transcript
-- 7-9: Good, minor ambiguities
-- 4-6: Some audio issues
-- 1-3: Poor audio or very ambiguous
+10: clear transcript. 7-9: minor issues. 4-6: some audio problems. 1-3: poor audio, manager should review.
 
-TALK RATIO: use speaker labels if diarized, otherwise estimate.
+TALK RATIO: speaker labels if diarized, otherwise estimate.
 
 KEYWORDS — detect if rep said (concept not exact words):
-- "Full Value Protection" or "FVP"
 - "confirmation call"
 - "hourly" or "per hour"
 - "moving boxes"
 - "fuel" or "fuel charge"
-- "declared value"
 - "Little Guys" or "Little Guys Movers"
 - "spot available" or "have a spot"
 - "get you on the board/schedule/calendar"
@@ -322,6 +349,9 @@ KEYWORDS — detect if rep said (concept not exact words):
 - "we show up" or "we don't miss"
 - "clothes in the dresser"
 - "disassemble" or "reassemble"
+- "flat rate" or "fixed price" or "based on inventory"
+- "no deposit"
+- "estimated hours" or "should take about" or "probably looking at"
 
 Return CHARACTER POSITION of first occurrence for each keyword and objection.
 
@@ -336,222 +366,7 @@ Transcript:
 
 Respond ONLY with valid JSON, no markdown:
 
-{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"close_attempts":1,"objections_overcome":[],"objections_abandoned":[],"pipeline_recovery_quality":0,"missed_rapport_opportunities":[],"value_props_used":[],"salesmanship_score":0,"audio_duration_estimate":0,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"salesmanship":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
-    return prompt
-
-    prompt = f"""You are a sales call evaluator for Little Guys Movers (LGMS).
-{corrections_block}{diarization_note}
-STEP 1 — CLASSIFY CALL TYPE:
-Determine the move_category (this drives which checklist steps apply):
-- "standard": typical household move, load and unload
-- "specialty": single heavy item — piano, safe, hot tub, pool table, single appliance
-- "unload_only": truck already packed, just unloading
-- "in_house": moving items within the same location
-- "commercial": office or business move
-- "storage": moving out of or into storage
-- "non_move": not a moving estimate — complaint, inquiry, wrong number, etc.
-
-Also determine:
-- call_type: "sales_estimate" | "follow_up" | "complaint" | "booking_confirmation" | "non_sales" | "too_short" | "other"
-- word_count: approximate word count
-- exclude_from_scoring: true if fewer than 80 words OR clearly not a sales call OR disconnected
-
-IMPORTANT: Even if exclude_from_scoring is true, still detect turned_away. A call where LGMS
-says "we don't have availability on that date" is a Turned Away call even if it's only 10 words.
-These short turned-away calls must still be captured.
-
-STEP 2 — DETECT REP NAME:
-- Look for rep introduction (e.g. "This is Britt", "Thank you for calling Little Guys this is Sarah")
-- If diarized transcript, look at Speaker 0's first lines
-- Return FIRST NAME ONLY. Return "Unknown" if not found.
-
-STEP 3 — CALL QUALITY:
-- "disconnected": abrupt ending, "Hello? Hello?" patterns, very short
-- "poor_audio": heavy [inaudible] density (5+ occurrences), one-sided
-- "normal": otherwise
-
-STEP 4 — FLAGS:
-- turned_away: LGMS could NOT accommodate — rep said "we're booked", "we don't have availability", "we can't do that date", "we're full that day", "we're not available then". Capture even on very short calls.
-- onsite_suggested: onsite visit/estimate mentioned
-- is_continuation: "calling back about", "as we discussed", "following up", "spoke earlier"
-
-STEP 5 — OUTCOME & PIPELINE:
-- call_outcome: "booked" | "estimate_sent" | "soft_pipeline" | "lost" | "unknown"
-- Use "soft_pipeline" when customer is interested but not ready: needs partner approval, no exact date, needs to think, will call back
-- loss_reason (only if lost): "price_too_high" | "went_with_competitor" | "wrong_timing" | "no_availability" | "just_shopping" | "other" | ""
-- soft_pipeline_reason (only if soft_pipeline): "needs_partner" | "no_exact_date" | "needs_to_think" | "will_call_back" | "other" | ""
-
-STEP 6 — CLOSING ANALYSIS (most important part of evaluation):
-
-LGMS reps are trained to actively close on every call. The goal is to book the move on the first call,
-not let the customer "call back." Every call should end with a clear close attempt or a clear next step.
-
-COUNT close_attempts: how many times did the rep explicitly try to book/schedule the move?
-- Each distinct ask counts: "Can I get you on the calendar?", "Let me go ahead and get you booked", "Shall I save that spot for you?" = 3 attempts
-- Repeating after an objection = additional attempt (good)
-- Never asking at all = 0 (very bad)
-
-CLOSING LANGUAGE to look for (these are strong signals of a good close):
-- "I have a spot available for you"
-- "let me get you on the board"
-- "let me get you on the schedule"
-- "first come first serve" (creates urgency)
-- "no cancellation fee" (removes objection barrier)
-- "save that for you" / "hold that for you"
-- "get you taken care of"
-- "get you on the calendar"
-- "can I go ahead and" / "shall I go ahead and"
-- "let me go ahead and book"
-
-OBJECTION HANDLING — for each objection detected, evaluate:
-- Did rep acknowledge the objection? (good)
-- Did rep provide a counter/solution? (better)
-- Did rep attempt to close again after the objection? (best)
-- Or did rep just say "ok, call us back"? (failure)
-
-Classify each objection as either overcome or abandoned:
-- overcome: rep countered and either booked or meaningfully advanced the conversation
-- abandoned: rep accepted the objection without any counter and let customer go
-
-IDEAL RESPONSES by objection type:
-- "Need to think about it" → good rep: "I totally understand — we do have availability on that date and there's no cancellation fee, so would it make sense to go ahead and hold that spot while you think it over?"
-- "Need to check with partner" → good rep: "Of course — while I have you, would it help to hold that spot? No cancellation fee, so there's no risk, and availability goes fast"
-- "Price too high" → good rep: "I hear you — what were you expecting? Let me see what I can do" then works through it
-- "Already have another quote" → good rep: "That's great — what are they quoting you? We're very competitive and I'd love to earn your business today"
-
-PIPELINE RECOVERY (soft_pipeline calls only):
-pipeline_recovery_quality 1-10:
-- 1-3: Rep just said "ok call us back" with no next step — lead will likely go cold
-- 4-6: Rep offered to send email estimate or gave some follow-up info
-- 7-8: Rep set a specific callback time or sent confirmation of next step
-- 9-10: Rep held a tentative spot, set specific callback, sent email — customer has a clear path to book
-
-STEP 7 — CHECKLIST (apply based on move_category):
-
-STANDARD MOVE — all 22 steps apply:
-1. got_move_date
-2. got_customer_name
-3. got_phone_number
-4. got_cities
-5. got_home_type
-6. got_stairs_info
-7. did_full_inventory
-8. asked_forgotten_items
-9. asked_about_boxes
-10. gave_price_on_call
-11. pitched_fvp (Full Value Protection — ALWAYS required for standard)
-12. attempted_to_close
-13. offered_email_estimate (if not booked) / mentioned_confirmations (if booked)
-14. mentioned_confirmations
-15. thanked_customer
-16. asked_name_at_start
-17. led_estimate_process
-18. scheduled_onsite_attempt — set to "na" unless customer specifically asked for onsite
-19. offered_alternatives — set to "na" unless customer hesitated or move was difficult
-20. took_rapport_opportunities
-21. completed_booking_wrapup (if booked)
-22. captured_lead
-
-SPECIALTY (piano, safe, hot tub, etc.) — reduced checklist:
-- Apply: got_move_date, got_customer_name, got_phone_number, got_cities, got_stairs_info, gave_price_on_call, pitched_fvp, attempted_to_close, mentioned_confirmations, thanked_customer, asked_name_at_start, captured_lead
-- Set to "na": got_home_type, did_full_inventory, asked_forgotten_items, asked_about_boxes, scheduled_onsite_attempt, offered_alternatives, led_estimate_process, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities
-
-UNLOAD ONLY — reduced checklist:
-- Apply: got_move_date, got_customer_name, got_phone_number, got_cities, got_stairs_info, gave_price_on_call, attempted_to_close, mentioned_confirmations, thanked_customer, asked_name_at_start, captured_lead
-- Set to "na": got_home_type, did_full_inventory, asked_forgotten_items, asked_about_boxes, pitched_fvp, scheduled_onsite_attempt, offered_alternatives, led_estimate_process, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities
-
-IN-HOUSE SHUFFLE — reduced checklist:
-- Apply: got_move_date, got_customer_name, got_phone_number, did_full_inventory, gave_price_on_call, pitched_fvp, attempted_to_close, thanked_customer, asked_name_at_start, captured_lead
-- Set to "na": got_cities, got_home_type, got_stairs_info, asked_forgotten_items, asked_about_boxes, scheduled_onsite_attempt, offered_alternatives, mentioned_confirmations, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities, led_estimate_process
-
-COMMERCIAL — apply most steps, treat inventory as equipment/furniture list:
-- Apply all standard steps
-- Set to "na": scheduled_onsite_attempt, offered_alternatives (unless triggered)
-
-STORAGE — reduced checklist:
-- Apply: got_move_date, got_customer_name, got_phone_number, got_cities, got_stairs_info, gave_price_on_call, pitched_fvp, attempted_to_close, mentioned_confirmations, thanked_customer, asked_name_at_start, captured_lead
-- Set to "na": got_home_type, did_full_inventory, asked_forgotten_items, asked_about_boxes, scheduled_onsite_attempt, offered_alternatives, led_estimate_process, completed_booking_wrapup, offered_email_estimate, took_rapport_opportunities
-
-CHECKLIST VALUES: true | false | "na"
-
-STEP 8 — SCORING (1-10, be honest and critical):
-
-OVERALL SCORE — calculated weighted average (do not override with gut feel):
-- closing_attempt: 25% weight (most important)
-- price_delivery: 15% weight
-- fvp_pitch: 15% weight
-- rapport_tone: 15% weight
-- info_sequence: 10% weight
-- call_control: 10% weight
-- professionalism: 10% weight
-Calculate: overall = (closing*0.25 + price*0.15 + fvp*0.15 + rapport*0.15 + info*0.10 + control*0.10 + prof*0.10)
-Round to nearest integer.
-
-CLOSING ATTEMPT (1-10) — most heavily weighted:
-- 1-2: Never attempted to close at all — just let customer hang up
-- 3-4: Weak close, no follow-through — accepted first objection without any counter
-- 5-6: Made one attempt but gave up too easily, or close was vague/passive
-- 7-8: Made clear close attempt, handled at least one objection with a counter
-- 9-10: Multiple close attempts, overcame objections with confidence and urgency, used no-cancellation-fee and availability language
-
-INFORMATION COMPLETENESS:
-- Score based on WHAT information was gathered, NOT the order
-- Penalize only if required information was NEVER obtained
-- Natural conversation that circles back to get info scores well
-
-CALL CONTROL:
-- Score on whether rep ULTIMATELY steered to all required info
-- Do NOT penalize for natural conversation or customer tangents
-- Penalize only if key info was never recovered
-
-FVP PITCH:
-- Standard, specialty, commercial, in_house: required
-- Unload only, storage: mark note as "not required for this move type"
-
-RAPPORT & TONE (1-10):
-- 1-3: Flat, bothered, disengaged; missed obvious rapport opportunities
-- 4-6: Polite but mechanical; some warmth but opportunities missed
-- 7-8: Warm and engaged; acknowledged customer's situation; customer felt heard
-- 9-10: Excellent — enthusiastic, genuine connection
-
-CONFIDENCE SCORE:
-- 10: Clear complete transcript, straightforward call
-- 7-9: Good transcript, minor ambiguities
-- 4-6: Some audio issues or ambiguous moments
-- 1-3: Poor audio, very short, or highly ambiguous — manager should review
-
-TALK RATIO: Use speaker labels if diarized, otherwise estimate from line counts.
-
-KEYWORDS — check if rep said any of these:
-- "Full Value Protection" or "FVP"
-- "confirmation call"
-- "hourly" or "per hour"
-- "moving boxes"
-- "fuel" or "fuel charge"
-- "declared value"
-- "Little Guys" or "Little Guys Movers"
-- "spot available" or "have a spot"
-- "get you on the board" or "get you on the schedule" or "get you on the calendar"
-- "first come first serve"
-- "no cancellation fee"
-- "save that for you" or "hold that for you"
-- "get you taken care of"
-- "go ahead and book" or "go ahead and get you"
-
-Return CHARACTER POSITION of first occurrence for each keyword and objection found.
-
-OBJECTIONS: Price too high, Need to think about it, Already have another quote, Wrong timing, Need to check with partner, Other
-
-SENTIMENT: positive / neutral / hesitant / negative
-
-Filename: {filename}
-
-Transcript:
-{transcript}
-
-Respond ONLY with valid JSON, no markdown:
-
-{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"close_attempts":0,"objections_overcome":[],"objections_abandoned":[],"pipeline_recovery_quality":0,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["Full Value Protection"],"keyword_positions":{{"Full Value Protection":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"info_sequence":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"fvp_pitch":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"call_control":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"pitched_fvp":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
+{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","pricing_model":"unknown","move_timeline":"unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"close_attempts":1,"objections_overcome":[],"objections_abandoned":[],"pipeline_recovery_quality":0,"missed_rapport_opportunities":[],"value_props_used":[],"salesmanship_score":0,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["confirmation call"],"keyword_positions":{{"confirmation call":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"information_control":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"salesmanship":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"got_email":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
     return prompt
 
 # ──────────────────────────────────────────────
@@ -949,14 +764,12 @@ def transcribe_audio(audio_bytes, filename, keyterms=None):
 def calculate_weighted_overall(scores):
     """Calculate weighted overall score server-side — guaranteed accuracy."""
     w = {
-        "closing_attempt": 0.25,
-        "price_delivery": 0.15,
-        "fvp_pitch": 0.15,
-        "rapport_tone": 0.13,
-        "salesmanship": 0.10,
-        "info_sequence": 0.09,
-        "call_control": 0.09,
-        "professionalism": 0.08,
+        "closing_attempt":      0.25,
+        "price_delivery":       0.15,
+        "rapport_tone":         0.15,
+        "salesmanship":         0.20,
+        "information_control":  0.15,
+        "professionalism":      0.10,
     }
     total = 0.0
     weight_used = 0.0
@@ -968,7 +781,6 @@ def calculate_weighted_overall(scores):
             weight_used += weight
     if weight_used < 0.3:
         return 0
-    # Normalize if some scores were 0/missing
     normalized = total / weight_used if weight_used > 0 else 0
     return min(10, max(1, round(normalized)))
 
@@ -1015,7 +827,7 @@ def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diar
         scores["salesmanship"] = {"score": result["salesmanship_score"], "note": ""}
     weighted_overall = calculate_weighted_overall(scores)
     if weighted_overall > 0:
-        scores["overall"] = {"score": weighted_overall, "note": "Weighted: closing 25%, price 15%, fvp 15%, rapport 13%, salesmanship 10%, info 9%, control 9%, prof 8%"}
+        scores["overall"] = {"score": weighted_overall, "note": "Weighted: closing 25%, price 15%, rapport 15%, salesmanship 20%, info&control 15%, prof 10%"}
         result["scores"] = scores
 
     # Save token counts for cost tracking
@@ -1168,6 +980,8 @@ def _reanalyze_worker():
                     "input_tokens": result.get("input_tokens", 0),
                     "output_tokens": result.get("output_tokens", 0),
                     "rapport_tone": result.get("scores", {}).get("rapport_tone", {}).get("score", 0),
+                    "pricing_model": result.get("pricing_model", "unknown"),
+                    "move_timeline": result.get("move_timeline", "unknown"),
                 }
                 if call_date:
                     update_data["call_date"] = call_date
@@ -1307,9 +1121,9 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
         "missed_rapport_opportunities": result.get("missed_rapport_opportunities", []),
         "input_tokens": result.get("input_tokens", 0),
         "output_tokens": result.get("output_tokens", 0),
+        "pricing_model": result.get("pricing_model", "unknown"),
+        "move_timeline": result.get("move_timeline", "unknown"),
     }
-    saved = supa("POST", "calls", record)
-    return saved, None
 
 def _batch_upload_worker(zip_bytes):
     """Background worker — extract ZIP, process each audio file, save to DB."""
@@ -1713,6 +1527,8 @@ class Handler(BaseHTTPRequestHandler):
                 "storage_filename": p.get("storage_filename", ""),
                 "input_tokens": p.get("input_tokens", 0),
                 "output_tokens": p.get("output_tokens", 0),
+                "pricing_model": p.get("pricing_model", "unknown"),
+                "move_timeline": p.get("move_timeline", "unknown"),
             }
             result = supa("POST", "calls", record)
             self._ok(result)
