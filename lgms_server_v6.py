@@ -819,8 +819,12 @@ def run_claude_analysis(transcript, filename, model="claude-sonnet-4-20250514", 
         headers={"Content-Type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"},
         method="POST"
     )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        resp = json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            resp = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='replace')
+        raise Exception(f"Anthropic API HTTP {e.code}: {error_body[:500]}")
     tb = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
     if not tb:
         raise Exception("No response from Claude")
