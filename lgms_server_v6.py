@@ -41,6 +41,7 @@ _reanalyze_job = {
     "status": "idle",
     "total": 0, "processed": 0, "current": "", "errors": 0,
     "started_at": None, "finished_at": None,
+    "stop_requested": False,
 }
 _reanalyze_lock = threading.Lock()
 
@@ -785,7 +786,16 @@ def calculate_weighted_overall(scores):
     normalized = total / weight_used if weight_used > 0 else 0
     return min(10, max(1, round(normalized)))
 
-def normalize_objection(raw):
+# Vonage ingestion settings
+# Max call duration in seconds to process (default 15 min = 900s). Calls longer than this are skipped.
+MAX_CALL_DURATION_SECONDS = int(os.environ.get("MAX_CALL_DURATION_SECONDS", 900))
+
+def should_skip_by_duration(duration_seconds):
+    """Return (skip, reason) for calls that exceed the max duration threshold."""
+    if duration_seconds and duration_seconds > MAX_CALL_DURATION_SECONDS:
+        mins = duration_seconds // 60
+        return True, f"Call duration {mins}m exceeds {MAX_CALL_DURATION_SECONDS//60}m limit"
+    return False, ""
     """Normalize objection labels to canonical display names regardless of how Claude returned them."""
     if not raw:
         return raw
@@ -808,6 +818,18 @@ def normalize_objection(raw):
 
 def run_claude_analysis(transcript, filename, model="claude-sonnet-4-20250514", is_diarized=False):
     corrections = get_recent_corrections()
+    # Truncate very long transcripts to prevent exceeding Claude's token limit
+    # Prompt template is ~16k chars; Claude's limit is ~200k tokens but request body has practical limits
+    # 14,000 chars of transcript ≈ 3,500 tokens — combined with prompt stays well within limits
+    MAX_TRANSCRIPT_CHARS = 14000
+    if len(transcript) > MAX_TRANSCRIPT_CHARS:
+        log(f"  Truncating long transcript: {len(transcript)} chars → {MAX_TRANSCRIPT_CHARS} chars ({filename})")
+        # Try to truncate at a sentence boundary
+        truncated = transcript[:MAX_TRANSCRIPT_CHARS]
+        last_newline = truncated.rfind('\n')
+        if last_newline > MAX_TRANSCRIPT_CHARS * 0.9:
+            truncated = truncated[:last_newline]
+        transcript = truncated + "\n[Transcript truncated — call was unusually long]"
     prompt = build_prompt(transcript, filename, corrections, is_diarized=is_diarized)
     req_body = json.dumps({
         "model": model,
@@ -966,6 +988,15 @@ def _reanalyze_worker():
             _reanalyze_job["skipped"] = 0
 
         for call in calls:
+            # Check if stop was requested
+            with _reanalyze_lock:
+                if _reanalyze_job.get("stop_requested"):
+                    _reanalyze_job["status"] = "stopped"
+                    _reanalyze_job["current"] = ""
+                    _reanalyze_job["finished_at"] = datetime.now(timezone.utc).isoformat()
+                    log("  Re-analyze stopped by user request")
+                    return
+
             transcript = call.get("transcript", "")
             filename = call.get("filename", "call.txt")
             call_id = call.get("id")
@@ -1299,6 +1330,8 @@ class Handler(BaseHTTPRequestHandler):
             self._reanalyze_status()
         elif path == "/reanalyze/unscored":
             self._reanalyze_unscored()
+        elif path == "/reanalyze/stop":
+            self._reanalyze_stop()
         elif path == "/batch_upload/status":
             self._batch_upload_status()
         elif path == "/corrections":
@@ -1341,6 +1374,7 @@ class Handler(BaseHTTPRequestHandler):
             "/reps/deduplicate": self._dedup_reps,
             "/reps/bulk_rename": self._bulk_rename_rep,
             "/reanalyze/start": self._reanalyze_start,
+            "/reanalyze/stop": self._reanalyze_stop,
             "/corrections/save": self._save_correction,
             "/transcript_corrections/save": self._save_transcript_correction,
             "/transcript_corrections/delete": self._delete_transcript_correction,
@@ -1907,6 +1941,13 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         with _reanalyze_lock:
             status = dict(_reanalyze_job)
         self._ok(status)
+
+    def _reanalyze_stop(self):
+        with _reanalyze_lock:
+            if _reanalyze_job["status"] != "running":
+                self._ok({"message": "No job running", "status": _reanalyze_job["status"]}); return
+            _reanalyze_job["stop_requested"] = True
+        self._ok({"message": "Stop requested — will halt after current call completes"})
 
     def _reanalyze_unscored(self):
         """Return count and list of calls with no scores (never analyzed or failed)."""
