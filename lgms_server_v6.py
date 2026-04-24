@@ -395,7 +395,7 @@ def parse_call_date_from_filename(filename):
 # SUPABASE HELPERS
 # ──────────────────────────────────────────────
 
-def supa(method, path, body=None, extra_headers=None):
+def supa(method, path, body=None, extra_headers=None, prefer_minimal=False):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise Exception("Supabase not configured")
     url = f"{SUPABASE_URL}/rest/v1/{path}"
@@ -404,12 +404,19 @@ def supa(method, path, body=None, extra_headers=None):
     req.add_header("apikey", SUPABASE_KEY)
     req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
     req.add_header("Content-Type", "application/json")
-    req.add_header("Prefer", "return=representation")
+    req.add_header("Prefer", "return=minimal" if prefer_minimal else "return=representation")
     if extra_headers:
         for k, v in extra_headers.items():
             req.add_header(k, v)
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body_bytes = r.read()
+            if not body_bytes or body_bytes == b'':
+                return {}
+            return json.loads(body_bytes)
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='replace')
+        raise Exception(f"Supabase {method} {path[:60]} HTTP {e.code}: {error_body[:300]}")
 
 def supa_storage_upload(bucket, path, data, content_type="audio/mpeg"):
     url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
@@ -1061,7 +1068,7 @@ def _reanalyze_worker():
                     update_data["exclude_from_scoring"] = True
                     update_data["exclusion_reason"] = "Disconnected/short call — auto excluded"
 
-                supa("PATCH", f"calls?id=eq.{call_id}", update_data)
+                supa("PATCH", f"calls?id=eq.{call_id}", update_data, prefer_minimal=True)
 
                 with _reanalyze_lock:
                     _reanalyze_job["processed"] += 1
@@ -1069,11 +1076,14 @@ def _reanalyze_worker():
                 time.sleep(0.5)  # Brief pause between calls — keeps server responsive to other requests
 
             except Exception as e:
+                import traceback
+                full_error = traceback.format_exc()
                 log(f"  Re-analyze error for {filename}: {e}")
+                log(f"  Full traceback: {full_error[-500:]}")
                 with _reanalyze_lock:
                     _reanalyze_job["errors"] += 1
                     _reanalyze_job["processed"] += 1
-                    _reanalyze_job["failed_calls"].append({"filename": filename, "id": call_id, "error": str(e)[:120]})
+                    _reanalyze_job["failed_calls"].append({"filename": filename, "id": call_id, "error": str(e)[:300]})
 
         with _reanalyze_lock:
             _reanalyze_job["status"] = "complete"
