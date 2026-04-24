@@ -28,8 +28,9 @@ DEEPGRAM_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
 OPENAI_KEY   = os.environ.get("OPENAI_API_KEY", "")  # fallback
 PORT         = int(os.environ.get("PORT", 8765))
 
-# Global semaphore — max 3 concurrent transcription/Claude calls
-_analysis_semaphore = threading.Semaphore(3)
+# Global semaphore — max 1 concurrent reanalysis call (prevents memory exhaustion on Render standard plan)
+# Single file uploads and batch uploads share this semaphore but are unaffected since they're user-initiated
+_analysis_semaphore = threading.Semaphore(1)
 
 # Keyterm cache — rebuilt every 30 minutes
 _keyterm_cache = {"terms": [], "built_at": 0}
@@ -784,7 +785,28 @@ def calculate_weighted_overall(scores):
     normalized = total / weight_used if weight_used > 0 else 0
     return min(10, max(1, round(normalized)))
 
-def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diarized=False):
+def normalize_objection(raw):
+    """Normalize objection labels to canonical display names regardless of how Claude returned them."""
+    if not raw:
+        return raw
+    s = str(raw).lower().strip().replace('_', ' ').replace('-', ' ')
+    # Remove trailing punctuation
+    s = s.rstrip('.,!?')
+    if any(x in s for x in ['price', 'too high', 'expensive', 'cost', 'quote', 'cheaper']):
+        if any(x in s for x in ['another quote', 'other quote', 'competitor', 'someone else', 'already have', 'have a quote', 'have another']):
+            return "Already have another quote"
+        return "Price too high"
+    if any(x in s for x in ['think', 'consider', 'decide', 'not sure', 'unsure', 'need time', 'think about']):
+        return "Need to think about it"
+    if any(x in s for x in ['partner', 'spouse', 'husband', 'wife', 'check with', 'talk to', 'significant other', 'roommate']):
+        return "Need to check with partner"
+    if any(x in s for x in ['timing', 'not ready', 'wrong time', 'bad time', 'too early', 'too late', 'not the right']):
+        return "Wrong timing"
+    if any(x in s for x in ['another quote', 'other quote', 'have a quote', 'already have', 'someone else', 'other company', 'other mover']):
+        return "Already have another quote"
+    return raw.strip()
+
+def run_claude_analysis(transcript, filename, model="claude-sonnet-4-20250514", is_diarized=False):
     corrections = get_recent_corrections()
     prompt = build_prompt(transcript, filename, corrections, is_diarized=is_diarized)
     req_body = json.dumps({
@@ -829,6 +851,12 @@ def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diar
     if weighted_overall > 0:
         scores["overall"] = {"score": weighted_overall, "note": "Weighted: closing 25%, price 15%, rapport 15%, salesmanship 20%, info&control 15%, prof 10%"}
         result["scores"] = scores
+
+    # Normalize objection labels — Claude sometimes returns snake_case or slight variants
+    result["objections_detected"] = [normalize_objection(o) for o in result.get("objections_detected", [])]
+    # Re-key objection_positions with normalized labels
+    raw_pos = result.get("objection_positions", {})
+    result["objection_positions"] = {normalize_objection(k): v for k, v in raw_pos.items()}
 
     # Save token counts for cost tracking
     usage = resp.get("usage", {})
@@ -918,12 +946,20 @@ body{{font-family:Arial,sans-serif;color:#1a1c1a;margin:0;padding:24px;font-size
 def _reanalyze_worker():
     global _reanalyze_job
     try:
+        # Wait for any active batch upload to finish first
+        waited = 0
+        while _batch_job.get("status") == "running" and waited < 300:
+            log("Reanalyze waiting for batch upload to finish...")
+            time.sleep(10)
+            waited += 10
         calls = supa("GET", "calls?order=created_at.desc&limit=5000&select=id,transcript,filename")
         total = len(calls)
         with _reanalyze_lock:
             _reanalyze_job["total"] = total
             _reanalyze_job["processed"] = 0
             _reanalyze_job["errors"] = 0
+            _reanalyze_job["failed_calls"] = []
+            _reanalyze_job["skipped"] = 0
 
         for call in calls:
             transcript = call.get("transcript", "")
@@ -936,6 +972,7 @@ def _reanalyze_worker():
             if not transcript or not transcript.strip():
                 with _reanalyze_lock:
                     _reanalyze_job["processed"] += 1
+                    _reanalyze_job["skipped"] += 1
                 continue
 
             try:
@@ -994,11 +1031,26 @@ def _reanalyze_worker():
                 with _reanalyze_lock:
                     _reanalyze_job["processed"] += 1
 
+                time.sleep(0.5)  # Brief pause between calls — keeps server responsive to other requests
+
             except Exception as e:
                 log(f"  Re-analyze error for {filename}: {e}")
                 with _reanalyze_lock:
                     _reanalyze_job["errors"] += 1
                     _reanalyze_job["processed"] += 1
+                    _reanalyze_job["failed_calls"].append({"filename": filename, "id": call_id, "error": str(e)[:120]})
+
+        with _reanalyze_lock:
+            _reanalyze_job["status"] = "complete"
+            _reanalyze_job["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _reanalyze_job["current"] = ""
+            _reanalyze_job["summary"] = {
+                "total": total,
+                "succeeded": total - _reanalyze_job["errors"] - _reanalyze_job["skipped"],
+                "skipped": _reanalyze_job["skipped"],
+                "errors": _reanalyze_job["errors"],
+                "finished_at": _reanalyze_job["finished_at"],
+            }
 
         with _reanalyze_lock:
             _reanalyze_job["status"] = "complete"
@@ -1241,6 +1293,8 @@ class Handler(BaseHTTPRequestHandler):
             self._export_pdf_rep()
         elif path == "/reanalyze/status":
             self._reanalyze_status()
+        elif path == "/reanalyze/unscored":
+            self._reanalyze_unscored()
         elif path == "/batch_upload/status":
             self._batch_upload_status()
         elif path == "/corrections":
@@ -1832,6 +1886,9 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         with _reanalyze_lock:
             if _reanalyze_job["status"] == "running":
                 self._ok({"message": "Already running", "status": _reanalyze_job}); return
+        if _batch_job.get("status") == "running":
+            self._ok({"message": "Batch upload in progress — wait for it to finish before re-analyzing", "blocked": True}); return
+        with _reanalyze_lock:
             _reanalyze_job = {
                 "status": "running",
                 "total": 0, "processed": 0, "current": "", "errors": 0,
@@ -1846,6 +1903,27 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         with _reanalyze_lock:
             status = dict(_reanalyze_job)
         self._ok(status)
+
+    def _reanalyze_unscored(self):
+        """Return count and list of calls with no scores (never analyzed or failed)."""
+        try:
+            calls = supa("GET", "calls?select=id,filename,created_at,rep_name&order=created_at.desc&limit=5000")
+            unscored = []
+            for c in calls:
+                # A call is considered unscored if scores is missing/empty or overall score is 0
+                scores = c.get("scores") or {}
+                overall = scores.get("overall", {})
+                score_val = overall.get("score", 0) if isinstance(overall, dict) else 0
+                if not scores or score_val == 0:
+                    unscored.append({
+                        "id": c.get("id"),
+                        "filename": c.get("filename"),
+                        "created_at": c.get("created_at"),
+                        "rep_name": c.get("rep_name"),
+                    })
+            self._ok({"total": len(calls), "unscored_count": len(unscored), "unscored": unscored})
+        except Exception as e:
+            self._err(500, str(e))
 
     def _batch_upload_start(self, body):
         """Accept raw ZIP bytes via multipart or base64 JSON, start background processing."""
