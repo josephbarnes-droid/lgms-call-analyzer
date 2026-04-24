@@ -423,7 +423,11 @@ function updateStatusBar(){
     msg.textContent='⚠ Do not delete calls until complete';
   } else {
     if(progBar)progBar.remove();
-    // Show last job result briefly if just completed
+    // Show last job result briefly if just completed or stopped
+    if(job.status==='stopped'){
+      msg.innerHTML=`⏹ Re-analyze stopped · ${job.processed||0} of ${job.total||'?'} calls processed · <span style="cursor:pointer;text-decoration:underline" onclick="nav('management')">see details</span>`;
+      return;
+    }
     const justDone=job.status==='complete'&&job.summary;
     if(justDone&&job.summary.finished_at){
       const mins=Math.floor((new Date()-new Date(job.summary.finished_at))/60000);
@@ -1267,6 +1271,7 @@ function renderManagement(){
           <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Re-run all transcripts through updated Claude prompt. Runs in background. ~$0.02/call.</p>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
             <button class="btn btn-s btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Start bulk re-analyze'}</button>
+            ${job.status==='running'?'<button class="btn btn-d btn-sm" onclick="stopReanalyze()">⏹ Stop</button>':''}
             <button class="btn btn-g btn-sm" onclick="checkUnscored()">🔍 Check unscored calls</button>
           </div>
           ${job.status==='complete'&&job.summary?`<div style="background:var(--surface);border-radius:9px;padding:12px 14px;border:1px solid var(--border2);margin-bottom:10px">
@@ -1384,6 +1389,15 @@ async function checkUnscored(){
       </div>`;
     }
   }catch(e){if(el)el.innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+async function stopReanalyze(){
+  if(!confirm('Stop the re-analyze job? Progress so far will be saved — you can restart later.'))return;
+  try{
+    await fetch(API+'/reanalyze/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    window._lastJobStatus={...window._lastJobStatus,stop_requested:true};
+    updateStatusBar();
+    if(currentPage==='management')renderManagement();
+  }catch(e){alert('Stop failed: '+e.message);}
 }
 async function startReanalyze(){
   const btn=g('reanalyze-btn');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Starting…';
