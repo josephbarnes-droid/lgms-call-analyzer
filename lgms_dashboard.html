@@ -397,30 +397,70 @@ function updateStatusBar(){
   const bar=g('status-bar'),msg=g('sb-msg');if(!bar||!msg)return;
   const job=window._lastJobStatus||{status:'idle'};
   const batchJob=window._lastBatchStatus||{status:'idle'};
-  const jobRunning=job.status==='running'||batchJob.status==='running';
-  bar.classList.toggle('warn',jobRunning);
-  if(jobRunning){
-    const jobDesc=job.status==='running'?`Bulk re-analyze running (${job.processed||0}/${job.total||'?'} calls)`:batchJob.status==='running'?`Bulk upload running (${batchJob.processed||0}/${batchJob.total||'?'} files)`:'';
-    msg.innerHTML=`⚠ ${jobDesc} — avoid deleting or editing calls until complete`;
-  } else if(dataLoadedAt){
-    const mins=Math.floor((new Date()-dataLoadedAt)/60000);
-    msg.textContent=mins<1?'Data just loaded':`Data loaded ${mins} min ago`;
+  const jobRunning=job.status==='running';
+  const batchRunning=batchJob.status==='running';
+  const anyRunning=jobRunning||batchRunning;
+  bar.classList.toggle('warn',anyRunning);
+
+  // Build or remove the global progress bar
+  let progBar=g('sb-prog-wrap');
+  if(anyRunning){
+    const active=jobRunning?job:batchJob;
+    const pct=active.total?Math.round((active.processed||0)/active.total*100):0;
+    const label=jobRunning
+      ?`Re-analyzing: ${active.processed||0}/${active.total||'?'} calls (${pct}%) — ${active.errors||0} errors`
+      :`Uploading: ${active.processed||0}/${active.total||'?'} files (${pct}%)`;
+    if(!progBar){
+      progBar=document.createElement('span');
+      progBar.id='sb-prog-wrap';
+      progBar.style.cssText='display:flex;align-items:center;gap:8px;flex:1;min-width:0';
+      msg.parentNode.insertBefore(progBar,msg.nextSibling);
+    }
+    progBar.innerHTML=`<span style="font-size:11px;color:var(--amber);white-space:nowrap">${label}</span>
+      <div style="flex:1;height:4px;background:rgba(255,183,77,.2);border-radius:4px;min-width:60px;max-width:220px">
+        <div style="height:100%;width:${pct}%;background:var(--amber);border-radius:4px;transition:width .5s"></div>
+      </div>`;
+    msg.textContent='⚠ Do not delete calls until complete';
+  } else {
+    if(progBar)progBar.remove();
+    // Show last job result briefly if just completed
+    const justDone=job.status==='complete'&&job.summary;
+    if(justDone&&job.summary.finished_at){
+      const mins=Math.floor((new Date()-new Date(job.summary.finished_at))/60000);
+      if(mins<10){
+        const errs=job.summary.errors||0;
+        msg.innerHTML=errs>0
+          ?`✓ Re-analyze done: ${job.summary.succeeded} succeeded, <span style="color:var(--red)">${errs} failed</span> · <span style="cursor:pointer;text-decoration:underline" onclick="nav('management')">see details</span>`
+          :`✓ Re-analyze done: ${job.summary.succeeded} calls · ${mins<1?'just now':mins+' min ago'}`;
+        return;
+      }
+    }
+    if(dataLoadedAt){
+      const mins=Math.floor((new Date()-dataLoadedAt)/60000);
+      msg.textContent=mins<1?'Data just loaded':`Data loaded ${mins} min ago`;
+    }
   }
   updateLocIndicator();
 }
 function startStatusPoller(){
   if(statusPoller)clearInterval(statusPoller);
-  statusPoller=setInterval(async()=>{
+  let fastMode=false;
+  async function poll(){
     try{
       const [rr,br]=await Promise.all([fetch(API+'/reanalyze/status'),fetch(API+'/batch_upload/status')]);
       const rd=await rr.json(),bd=await br.json();
       const wasRunning=(window._lastJobStatus?.status==='running')||(window._lastBatchStatus?.status==='running');
       window._lastJobStatus=rd;window._lastBatchStatus=bd;
-      const nowDone=(wasRunning)&&(rd.status!=='running'&&bd.status!=='running');
+      const nowRunning=rd.status==='running'||bd.status==='running';
+      const nowDone=wasRunning&&!nowRunning;
       updateStatusBar();
-      if(nowDone){await loadCalls();({overview:renderOverview,library:renderLibrary,profiles:renderProfiles})[currentPage]?.();}
+      // Switch to fast polling (3s) when a job is running, slow (30s) when idle
+      if(nowRunning&&!fastMode){fastMode=true;clearInterval(statusPoller);statusPoller=setInterval(poll,3000);}
+      else if(!nowRunning&&fastMode){fastMode=false;clearInterval(statusPoller);statusPoller=setInterval(poll,30000);}
+      if(nowDone){await loadCalls();({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement})[currentPage]?.();}
     }catch(e){}
-  },30000);
+  }
+  statusPoller=setInterval(poll,30000);
   // Also update the "X mins ago" display every minute
   setInterval(updateStatusBar,60000);
 }
@@ -521,7 +561,7 @@ function renderOverview(){
           <table class="lb"><thead><tr>
             <th>#</th><th onclick="sortLB('rep_name')">Rep</th><th onclick="sortLB('overall')">Overall ↕</th>
             <th onclick="sortLB('rapport_tone')">Rapport</th><th onclick="sortLB('price_delivery')">Price</th>
-            <th onclick="sortLB('salesmanship')">Sales</th><th onclick="sortLB('closing_attempt')">Closing</th><th onclick="sortLB('calls')">Calls</th>
+            <th onclick="sortLB('salesmanship')">Selling</th><th onclick="sortLB('closing_attempt')">Closing</th><th onclick="sortLB('calls')">Calls</th>
           </tr></thead><tbody id="lb-body"></tbody></table>
           <div class="lb-expand" id="lb-expand" onclick="lbShowAll=!lbShowAll;renderLB()"></div>
         </div>
@@ -618,8 +658,21 @@ function renderKW(sc){
   const el=g('kw-viz');if(!el)return;
   el.innerHTML=sorted.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer" onclick="libFilters.kw='${k}';libFilters.attn='';nav('library')" title="Filter calls with: ${k}"><span style="min-width:90px;font-size:11.5px;color:var(--ink2)">${k}</span><div style="flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${Math.round(v/mx*100)}%;height:100%;background:var(--g);border-radius:2px"></div></div><span style="font-size:12.5px;font-weight:700;color:var(--g);min-width:18px;text-align:right">${v}</span></div>`).join('');
 }
+function normObj(raw){
+  if(!raw)return raw;
+  const s=raw.toLowerCase().replace(/_/g,' ').replace(/-/g,' ').replace(/[.,!?]+$/,'').trim();
+  if(s.includes('price')||s.includes('too high')||s.includes('expensive')||s.includes('cost')){
+    if(s.includes('another quote')||s.includes('other quote')||s.includes('already have')||s.includes('have a quote'))return'Already have another quote';
+    return'Price too high';
+  }
+  if(s.includes('think')||s.includes('consider')||s.includes('need time')||s.includes('not sure'))return'Need to think about it';
+  if(s.includes('partner')||s.includes('spouse')||s.includes('check with')||s.includes('talk to')||s.includes('husband')||s.includes('wife'))return'Need to check with partner';
+  if(s.includes('timing')||s.includes('not ready')||s.includes('wrong time')||s.includes('bad time'))return'Wrong timing';
+  if(s.includes('another quote')||s.includes('other quote')||s.includes('already have')||s.includes('other company')||s.includes('other mover'))return'Already have another quote';
+  return raw.trim();
+}
 function renderObj(sc){
-  const cnt={};(sc||[]).forEach(c=>(c.objections_detected||[]).forEach(o=>{cnt[o]=(cnt[o]||0)+1;}));
+  const cnt={};(sc||[]).forEach(c=>(c.objections_detected||[]).forEach(o=>{const n=normObj(o);cnt[n]=(cnt[n]||0)+1;}));
   const sorted=Object.entries(cnt).sort((a,b)=>b[1]-a[1]);const el=g('obj-viz');if(!el)return;
   el.innerHTML=sorted.length?sorted.map(([o,v])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer" onclick="libFilters.obj='${o}';libFilters.attn='';nav('library')" title="Filter calls with: ${o}"><span style="color:var(--ink2)">${o}</span><span style="font-size:11px;font-weight:700;background:rgba(239,83,80,.15);color:#ef9a9a;padding:2px 9px;border-radius:10px">${v}</span></div>`).join(''):'<div style="color:var(--ink4);font-size:13px">No objections recorded</div>';
 }
@@ -689,7 +742,7 @@ function renderCallList(){
     if(libFilters.score==='low'&&(c.scores?.overall?.score||0)>4)return false;
     if(libFilters.attn==='decline'&&!c.availability_decline)return false;
     if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
-    if(libFilters.obj&&!(c.objections_detected||[]).includes(libFilters.obj))return false;
+    if(libFilters.obj&&!(c.objections_detected||[]).some(o=>normObj(o)===libFilters.obj))return false;
     if(libFilters.kw&&!(c.keywords_detected||[]).includes(libFilters.kw))return false;
     if(libFilters.move_cat&&c.move_category!==libFilters.move_cat)return false;
     if(libFilters.confidence==='low'&&(c.evaluation_confidence||10)>5)return false;
@@ -734,7 +787,7 @@ function buildRow(c){
       ${!SHARE_MODE?`<input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleSel('${c.id}')" style="width:15px;height:15px;cursor:pointer;flex-shrink:0" />`:''}
       <div class="cr-av" style="${isExcl?'background:var(--ink3)':''}">${ini(c.rep_name)}</div>
       <div class="cr-info">
-        <div class="cr-title"><span style="color:var(--g);cursor:pointer;font-weight:600" onclick="event.stopPropagation();nav('profiles',{rep:'${esc(c.rep_name||'').replace(/'/g,'')}'})">${esc(c.rep_name||'?')}</span> — ${esc(c.caller_name||'Unknown')}${isExcl?' <span style="font-size:10px;color:var(--ink3)">(excl.)</span>':''}</div>
+        <div class="cr-title"><span style="color:${!c.rep_name||c.rep_name==='Unknown'?'var(--amber)':'var(--g)'};cursor:pointer;font-weight:600" onclick="event.stopPropagation();handleRepClick('${c.id}','${esc((c.rep_name||'').replace(/'/g,''))}')">${esc(c.rep_name||'Unknown')}${!c.rep_name||c.rep_name==='Unknown'?' <span style="font-size:10px;font-weight:500;color:var(--amber)">⚠ assign</span>':''}</span> — ${esc(c.caller_name||'Unknown')}${isExcl?' <span style="font-size:10px;color:var(--ink3)">(excl.)</span>':''}</div>
         <div class="cr-sub">${esc(c.call_purpose||'')} · ${esc(c.move_type||'')} · ${fmt(c.call_date||c.created_at)}${c.word_count?` · ~${c.word_count} words`:''}</div>
       </div>
       <div class="cr-right">
@@ -781,7 +834,7 @@ function buildRow(c){
         ${(c.objections_abandoned||[]).length?`<div><span style="font-size:10px;font-weight:700;color:#ef5350;text-transform:uppercase;letter-spacing:.7px;margin-right:6px">Abandoned:</span>${c.objections_abandoned.map(o=>`<span style="background:rgba(239,83,80,.12);color:#ef9a9a;padding:2px 9px;border-radius:10px;font-size:11.5px;margin-right:4px">${esc(o)}</span>`).join('')}</div>`:''}
       </div>`:''}
       <div class="ds"><h4>Keywords</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${(c.keywords_detected||[]).map((k,i)=>{const pos=c.keyword_positions?.[k];const spanId=`txs-${c.id}-kw-${i}`;return`<span class="tag" style="background:rgba(92,158,255,.1);color:var(--blue);cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="jumpTx(event,'${spanId}')"`:''}>${esc(k)}</span>`;}).join('')||'<span style="color:var(--ink4);font-size:12px">None</span>'}</div></div>
-      ${(c.objections_detected||[]).length?`<div class="ds"><h4>Objections</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map((o,i)=>{const pos=c.objection_positions?.[o];const spanId=`txs-${c.id}-obj-${i}`;const isAbn=(c.objections_abandoned||[]).includes(o);return`<span style="background:${isAbn?'rgba(239,83,80,.2)':'var(--rl)'};color:${isAbn?'#ef9a9a':'var(--red)'};padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="jumpTx(event,'${spanId}')"`:''}>${esc(o)}${isAbn?' ⚠':''}</span>`;}).join('')}</div></div>`:''}
+      ${(c.objections_detected||[]).length?`<div class="ds"><h4>Objections</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map((o,i)=>{const norm=normObj(o);const pos=c.objection_positions?.[o]||c.objection_positions?.[norm];const spanId=`txs-${c.id}-obj-${i}`;const isAbn=(c.objections_abandoned||[]).some(a=>normObj(a)===norm);return`<span style="background:${isAbn?'rgba(239,83,80,.2)':'var(--rl)'};color:${isAbn?'#ef9a9a':'var(--red)'};padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="jumpTx(event,'${spanId}')"`:''}>${esc(norm)}${isAbn?' ⚠':''}</span>`;}).join('')}</div></div>`:''}
       ${(c.missed_rapport_opportunities||[]).length?`<div class="ds"><h4>Missed Rapport Opportunities</h4><div style="display:flex;flex-direction:column;gap:5px">${c.missed_rapport_opportunities.map(m=>`<div style="background:rgba(255,183,77,.06);border-left:3px solid var(--amber);border-radius:0 9px 9px 0;padding:8px 12px;font-size:12.5px;color:var(--tx2)">⚠ ${esc(m)}</div>`).join('')}</div></div>`:''}
       <div class="ds"><h4>Talk Ratio</h4><div class="tr-bar" style="max-width:360px"><div class="tr-rep" style="width:${c.talk_ratio_rep||40}%">${c.talk_ratio_rep||40}% Rep</div><div class="tr-cust" style="width:${c.talk_ratio_customer||60}%">${c.talk_ratio_customer||60}% Cust</div></div></div>
       ${(c.value_props_used||[]).length?`<div class="ds"><h4>Value Props Used</h4><div style="display:flex;flex-wrap:wrap;gap:6px">${c.value_props_used.map(v=>`<span style="background:rgba(76,175,80,.1);color:#66bb6a;padding:2px 9px;border-radius:10px;font-size:11.5px">${esc(v)}</span>`).join('')}</div></div>`:''}
@@ -951,16 +1004,74 @@ async function applyOv(id){
   const c=allCalls.find(x=>x.id===id);
   if(k==='__na__'){
     const cat=note||'general';
-    try{await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:cat,original_score:0,corrected_score:null,manager_note:'N/A for this move type'})});await loadCorrections();}catch(e){}
+    try{
+      const r=await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:cat,original_score:0,corrected_score:null,manager_note:'N/A for this move type'})});
+      if(!r.ok){const t=await r.text();alert('Correction save failed: '+t);return;}
+      await loadCorrections();
+    }catch(e){alert('Correction save error: '+e.message);}
     return;
   }
   const v=parseInt(g('ov-'+id)?.value);
   if(isNaN(v)||v<1||v>10){alert('Select a category and enter 1-10');return;}
   const orig=c?.scores?.[k]?.score||0;
   await updCall(id,{score_overrides:{...(c?.score_overrides||{}),[k]:v}});
-  try{await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:k,original_score:orig,corrected_score:v,manager_note:note})});await loadCorrections();}catch(e){}
+  try{
+    const r=await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:k,original_score:orig,corrected_score:v,manager_note:note})});
+    if(!r.ok){const t=await r.text();alert('Correction save failed: '+t);return;}
+    await loadCorrections();
+  }catch(e){alert('Correction save error: '+e.message);}
 }
 async function clrOv(id){await updCall(id,{score_overrides:{}});}
+
+function handleRepClick(callId, repName){
+  if(!repName||repName==='Unknown')openAssignRep(callId);
+  else nav('profiles',{rep:repName});
+}
+function openAssignRep(callId){
+  const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(r=>r&&r!=='Unknown').sort();
+  const opts=repNames.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  // Build a small inline modal
+  const existing=g('assign-rep-modal');if(existing)existing.remove();
+  const modal=document.createElement('div');
+  modal.id='assign-rep-modal';
+  modal.className='modal-bg';
+  modal.style.display='flex';
+  modal.innerHTML=`<div class="modal-box"><h2>Assign Rep</h2>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Select the rep who handled this call. This updates the call record immediately.</p>
+    <div class="fg"><label>Rep</label>
+      <select id="assign-rep-sel" class="fsel" style="width:100%">
+        <option value="">— select rep —</option>${opts}
+        <option value="__custom__">Enter name manually…</option>
+      </select>
+    </div>
+    <div class="fg" id="assign-rep-custom-wrap" style="display:none"><label>Name</label>
+      <input type="text" id="assign-rep-custom" class="ovr-inp" placeholder="First name" style="width:100%" />
+    </div>
+    <div id="assign-rep-msg"></div>
+    <div class="modal-btns">
+      <button class="btn btn-g" onclick="g('assign-rep-modal').remove()">Cancel</button>
+      <button class="btn btn-p" onclick="doAssignRep('${callId}')">Assign</button>
+    </div>
+  </div>`;
+  // Show custom input when "Enter manually" selected
+  modal.querySelector('#assign-rep-sel').onchange=function(){
+    g('assign-rep-custom-wrap').style.display=this.value==='__custom__'?'block':'none';
+  };
+  document.body.appendChild(modal);
+}
+
+async function doAssignRep(callId){
+  const sel=g('assign-rep-sel');
+  let repName=sel?.value;
+  if(repName==='__custom__'){repName=g('assign-rep-custom')?.value?.trim();}
+  if(!repName){g('assign-rep-msg').innerHTML='<div class="msg-err">Select or enter a rep name</div>';return;}
+  try{
+    await updCall(callId,{rep_name:repName});
+    g('assign-rep-modal').remove();
+  }catch(e){
+    if(g('assign-rep-msg'))g('assign-rep-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;
+  }
+}
 async function updCall(id,data){
   try{
     await fetch(API+'/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...data})});
@@ -1154,8 +1265,22 @@ function renderManagement(){
         <div class="card">
           <div class="card-hdr"><h3>Bulk Re-Analyze</h3></div>
           <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Re-run all transcripts through updated Claude prompt. Runs in background. ~$0.02/call.</p>
-          <button class="btn btn-s btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Start bulk re-analyze'}</button>
-          ${reanalyzeHtml}
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <button class="btn btn-s btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Start bulk re-analyze'}</button>
+            <button class="btn btn-g btn-sm" onclick="checkUnscored()">🔍 Check unscored calls</button>
+          </div>
+          ${job.status==='complete'&&job.summary?`<div style="background:var(--surface);border-radius:9px;padding:12px 14px;border:1px solid var(--border2);margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Last job completed ${fmt(job.summary.finished_at)}</div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap">
+              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--g)">${job.summary.succeeded}</div><div style="font-size:11px;color:var(--ink3)">succeeded</div></div>
+              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--ink2)">${job.summary.skipped}</div><div style="font-size:11px;color:var(--ink3)">skipped<br>(no transcript)</div></div>
+              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--red)">${job.summary.errors}</div><div style="font-size:11px;color:var(--ink3)">errors</div></div>
+              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--ink2)">${job.summary.total}</div><div style="font-size:11px;color:var(--ink3)">total</div></div>
+            </div>
+            ${job.failed_calls&&job.failed_calls.length?`<div style="margin-top:10px;border-top:1px solid var(--border2);padding-top:8px"><div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">Failed calls:</div>${job.failed_calls.map(f=>`<div style="font-size:11px;color:var(--ink3);padding:2px 0">${esc(f.filename)} — ${esc(f.error)}</div>`).join('')}</div>`:''}
+          </div>`:''}
+          ${job.status==='running'?`<div style="background:var(--surface);border-radius:9px;padding:14px;margin-top:4px;border:1px solid var(--border2)"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${job.total?Math.round(job.processed/job.total*100):0}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`:''}
+          <div id="unscored-results" style="margin-top:10px"></div>
         </div>
       </div>
     </div>
@@ -1242,9 +1367,36 @@ async function acceptDedup(canonical,variants){
   for(const v of variants){if(v===canonical)continue;try{await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:v,new_name:canonical})});allCalls.forEach(c=>{if(c.rep_name===v)c.rep_name=canonical;});}catch(e){}}
   renderManagement();
 }
+async function checkUnscored(){
+  const el=g('unscored-results');
+  if(el)el.innerHTML='<span class="spin spin-dark"></span> Checking…';
+  try{
+    const r=await fetch(API+'/reanalyze/unscored');
+    const d=await r.json();
+    if(!el)return;
+    if(d.unscored_count===0){
+      el.innerHTML='<div class="msg-ok">✓ All '+d.total+' calls have scores.</div>';
+    } else {
+      el.innerHTML=`<div style="background:var(--al);border:1px solid var(--amber);border-radius:9px;padding:12px 14px">
+        <div style="font-weight:700;color:var(--amber);margin-bottom:8px">⚠ ${d.unscored_count} of ${d.total} calls have no scores</div>
+        <div style="max-height:180px;overflow-y:auto">${d.unscored.map(c=>`<div style="font-size:11px;color:var(--ink2);padding:2px 0;border-bottom:1px solid rgba(255,183,77,.15)">${esc(c.filename||c.id)} <span style="color:var(--ink3)">${fmt(c.created_at)}</span></div>`).join('')}</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--ink3)">Run Bulk Re-Analyze to process these calls.</div>
+      </div>`;
+    }
+  }catch(e){if(el)el.innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
 async function startReanalyze(){
   const btn=g('reanalyze-btn');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Starting…';
-  try{await fetch(API+'/reanalyze/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});startReanalPoller();}catch(e){btn.disabled=false;btn.textContent='⚡ Start bulk re-analyze';alert('Failed: '+e.message);}
+  try{
+    const r=await fetch(API+'/reanalyze/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d=await r.json();
+    if(d.blocked){
+      btn.disabled=false;btn.innerHTML='⚡ Start bulk re-analyze';
+      alert('A batch upload is currently running. Wait for it to finish before starting bulk re-analyze — running both at the same time can crash the server.');
+      return;
+    }
+    startReanalPoller();
+  }catch(e){btn.disabled=false;btn.innerHTML='⚡ Start bulk re-analyze';alert('Failed: '+e.message);}
 }
 function startReanalPoller(){
   if(reanalyzePoller)clearInterval(reanalyzePoller);
@@ -1308,14 +1460,13 @@ async function deleteShare(id){if(!confirm('Delete?'))return;try{await fetch(API
 function copyToClip(url){navigator.clipboard?.writeText(url).then(()=>{alert('Copied!');}).catch(()=>prompt('Copy link:',url));}
 
 // ── CORRECTIONS ──
-function renderCorrections(){
-  loadCorrections().then(()=>{
-    set('page',`<div class="card">
+async function renderCorrections(){
+  await loadCorrections();
+  set('page',`<div class="card">
     <div class="card-hdr"><h3>Correction Log</h3><span class="bdg">${corrections.length} corrections</span></div>
     <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Score corrections are automatically included in future Claude analysis calls as calibration examples.</p>
     ${corrections.length?corrections.map(c=>`<div class="corr-item"><div><span style="font-weight:700">${c.category?.replace(/_/g,' ')||'unknown'}</span> <span style="color:var(--red)">${c.original_score}</span> <span style="color:var(--g)">→ ${c.corrected_score}</span> <span style="color:var(--ink3);font-size:11px;margin-left:8px">${fmt(c.created_at)}</span>${c.used_in_prompt?'<span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:1px 6px;border-radius:8px;margin-left:6px">Active</span>':''}</div>${c.manager_note?`<div style="color:var(--ink3);margin-top:2px;font-size:11px">${esc(c.manager_note)}</div>`:''}</div>`).join(''):`<div class="empty"><span class="empty-ico">✏️</span><p>No corrections yet. Use score override in any call to log a correction.</p></div>`}
   </div>`);
-  });
 }
 
 // ── ADD CALLS ──
