@@ -395,6 +395,15 @@ def parse_call_date_from_filename(filename):
 # SUPABASE HELPERS
 # ──────────────────────────────────────────────
 
+def _supa_auth_header(key):
+    """Return the correct Authorization header value for the given Supabase key.
+    Legacy JWT keys (eyJ...) require 'Bearer <token>'.
+    New keys (sb_secret_... or sb_publishable_...) must NOT have Bearer prefix —
+    per Supabase docs, the Authorization value must exactly match the apikey value."""
+    if key and key.startswith("sb_"):
+        return key  # New format — match apikey exactly
+    return f"Bearer {key}"  # Legacy JWT format
+
 def supa(method, path, body=None, extra_headers=None, prefer_minimal=False):
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise Exception("Supabase not configured")
@@ -402,7 +411,7 @@ def supa(method, path, body=None, extra_headers=None, prefer_minimal=False):
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
     req.add_header("Content-Type", "application/json")
     req.add_header("Prefer", "return=minimal" if prefer_minimal else "return=representation")
     if extra_headers:
@@ -422,31 +431,40 @@ def supa_storage_upload(bucket, path, data, content_type="audio/mpeg"):
     url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
     req.add_header("Content-Type", content_type)
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='replace')
+        raise Exception(f"Storage upload {bucket}/{path[:50]} HTTP {e.code}: {error_body[:300]}")
 
 def supa_storage_signed_url(bucket, path, expires=86400):
     url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{path}"
     body = json.dumps({"expiresIn": expires}).encode()
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
     req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=30) as r:
-        result = json.loads(r.read())
-    signed = result.get("signedURL", "")
-    if signed and not signed.startswith("http"):
-        signed = f"{SUPABASE_URL}{signed}"
-    return signed
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read())
+        signed = result.get("signedURL", "")
+        if signed and not signed.startswith("http"):
+            signed = f"{SUPABASE_URL}{signed}"
+        return signed
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8', errors='replace')
+        log(f"  Signed URL error for {bucket}/{path[:50]}: HTTP {e.code} {error_body[:200]}")
+        return ""
 
 def supa_storage_list(bucket):
     url = f"{SUPABASE_URL}/storage/v1/object/list/{bucket}"
     body = json.dumps({"prefix": "", "limit": 1000}).encode()
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
     req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())
@@ -456,7 +474,7 @@ def supa_storage_delete(bucket, paths):
     body = json.dumps({"prefixes": paths}).encode()
     req = urllib.request.Request(url, data=body, method="DELETE")
     req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", f"Bearer {SUPABASE_KEY}")
+    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
     req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())
@@ -483,7 +501,7 @@ def enforce_storage_cap():
                     file_info = next((f for f in files if isinstance(f, dict) and f.get("name") == storage_path), None)
                     file_size = file_info.get("metadata", {}).get("size", 0) if file_info else 0
                     supa_storage_delete("call-audio", [storage_path])
-                    supa("PATCH", f"calls?id=eq.{call['id']}", {"audio_url": ""})
+                    supa("PATCH", f"calls?id=eq.{call['id']}", {"audio_url": "", "storage_filename": ""})
                     total_bytes -= file_size
                 except Exception as e:
                     log(f"  Storage cleanup error: {e}")
@@ -914,11 +932,11 @@ def generate_call_pdf(call):
     checklist = call.get("checklist", {})
     overrides = call.get("score_overrides", {})
 
-    score_keys = ["info_sequence","price_delivery","fvp_pitch","closing_attempt","call_control","professionalism","rapport_tone","overall"]
-    score_labels = ["Info Sequence","Price Delivery","FVP Pitch","Closing Attempt","Call Control","Professionalism","Rapport & Tone","Overall"]
+    score_keys = ["rapport_tone","information_control","price_delivery","closing_attempt","salesmanship","professionalism","overall"]
+    score_labels = ["Rapport & Tone","Information & Control","Price Delivery","Closing Attempt","Salesmanship","Professionalism","Overall"]
 
-    ck_keys = ["got_move_date","got_customer_name","got_phone_number","got_cities","got_home_type","got_stairs_info","did_full_inventory","asked_forgotten_items","asked_about_boxes","gave_price_on_call","pitched_fvp","attempted_to_close","offered_email_estimate","mentioned_confirmations","thanked_customer","asked_name_at_start","led_estimate_process","scheduled_onsite_attempt","offered_alternatives","took_rapport_opportunities","completed_booking_wrapup","captured_lead"]
-    ck_labels = ["Move date","Customer name","Phone number","Cities/locations","Home type","Stairs info","Full inventory","Forgotten items","Moving boxes","Gave price on call","FVP pitched","Closing attempt","Email estimate offered","Confirmations mentioned","Thanked customer","Asked name at start","Led estimate process","Scheduled onsite attempt","Offered alternatives","Took rapport opportunities","Completed booking wrap-up","Lead captured"]
+    ck_keys = ["got_move_date","got_customer_name","got_phone_number","got_cities","got_home_type","got_stairs_info","did_full_inventory","asked_forgotten_items","asked_about_boxes","gave_price_on_call","attempted_to_close","offered_email_estimate","mentioned_confirmations","thanked_customer","asked_name_at_start","led_estimate_process","got_email","scheduled_onsite_attempt","offered_alternatives","took_rapport_opportunities","completed_booking_wrapup","captured_lead"]
+    ck_labels = ["Move date","Customer name","Phone number","Cities/locations","Home type","Stairs info","Full inventory","Forgotten items","Moving boxes","Gave price on call","Closing attempt","Email estimate offered","Confirmations mentioned","Thanked customer","Asked name at start","Led estimate process","Got email","Scheduled onsite attempt","Offered alternatives","Took rapport opportunities","Completed booking wrap-up","Lead captured"]
 
     def sc(s):
         if s >= 8: return "#16a34a"
@@ -989,6 +1007,11 @@ def _reanalyze_worker():
             waited += 10
         calls = supa("GET", "calls?order=created_at.desc&limit=5000&select=id,transcript,filename")
         total = len(calls)
+        # Fetch transcript corrections ONCE before the loop, not on every iteration
+        try:
+            tx_corrections_cached = get_transcript_corrections()
+        except Exception:
+            tx_corrections_cached = []
         with _reanalyze_lock:
             _reanalyze_job["total"] = total
             _reanalyze_job["processed"] = 0
@@ -1021,18 +1044,21 @@ def _reanalyze_worker():
 
             try:
                 with _analysis_semaphore:
-                    # Apply corrections before analysis
-                    tx_corrections = get_transcript_corrections()
-                    clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
+                    # Apply corrections before analysis (using corrections cached at job start)
+                    clean_transcript = apply_transcript_corrections(transcript, tx_corrections_cached)
                     result = run_claude_analysis(clean_transcript, filename)
+
+                # Fetch existing record's manager-controlled fields so we don't overwrite them
+                # (managers may have manually toggled turned_away, exclusions, etc.)
+                try:
+                    existing = supa("GET", f"calls?id=eq.{call_id}&select=availability_decline,turned_away,onsite_suggested,exclude_from_scoring,exclusion_reason,manager_notes,tags,score_overrides,is_continuation&limit=1")
+                    existing_call = existing[0] if existing else {}
+                except Exception:
+                    existing_call = {}
 
                 call_date = parse_call_date_from_filename(filename)
                 update_data = {
-                    "availability_decline": result.get("availability_decline", False),
-                    "turned_away": result.get("turned_away", False),
-                    "onsite_suggested": result.get("onsite_suggested", False),
-                    "call_quality": result.get("call_quality", "normal"),
-                    "is_continuation": result.get("is_continuation", False),
+                    # Claude-derived fields — overwrite freely
                     "scores": result.get("scores", {}),
                     "checklist": result.get("checklist", {}),
                     "strengths": result.get("strengths", []),
@@ -1044,8 +1070,6 @@ def _reanalyze_worker():
                     "customer_sentiment": result.get("customer_sentiment", "neutral"),
                     "call_summary": result.get("call_summary", ""),
                     "word_count": result.get("word_count", 0),
-                    "exclude_from_scoring": result.get("exclude_from_scoring", False),
-                    "exclusion_reason": result.get("exclusion_reason", ""),
                     "call_type": result.get("call_type", "sales_estimate"),
                     "move_category": result.get("move_category", "standard"),
                     "loss_reason": result.get("loss_reason", ""),
@@ -1062,12 +1086,31 @@ def _reanalyze_worker():
                     "output_tokens": result.get("output_tokens", 0),
                     "pricing_model": result.get("pricing_model", "unknown"),
                     "move_timeline": result.get("move_timeline", "unknown"),
+                    "call_quality": result.get("call_quality", "normal"),
+                    # Manager-controlled fields — preserve existing values if previously set
+                    # If existing has a True value, keep True (manager-set). Otherwise use Claude's detection.
+                    "availability_decline": existing_call.get("availability_decline") or result.get("availability_decline", False),
+                    "turned_away": existing_call.get("turned_away") or result.get("turned_away", False),
+                    "onsite_suggested": existing_call.get("onsite_suggested") or result.get("onsite_suggested", False),
+                    "is_continuation": existing_call.get("is_continuation") or result.get("is_continuation", False),
                 }
-                if call_date:
-                    update_data["call_date"] = call_date
-                if result.get("call_quality") == "disconnected" and not result.get("exclude_from_scoring"):
+                # Manager exclusion handling: preserve manual exclusions but allow auto-exclude on disconnect
+                existing_exclude = existing_call.get("exclude_from_scoring", False)
+                existing_reason = existing_call.get("exclusion_reason", "")
+                if existing_exclude and not existing_reason.startswith("Disconnected"):
+                    # Manager manually excluded — preserve their decision and reason
+                    update_data["exclude_from_scoring"] = True
+                    update_data["exclusion_reason"] = existing_reason
+                elif result.get("call_quality") == "disconnected":
+                    # Auto-exclude disconnected
                     update_data["exclude_from_scoring"] = True
                     update_data["exclusion_reason"] = "Disconnected/short call — auto excluded"
+                else:
+                    update_data["exclude_from_scoring"] = result.get("exclude_from_scoring", False)
+                    update_data["exclusion_reason"] = result.get("exclusion_reason", "")
+
+                if call_date:
+                    update_data["call_date"] = call_date
 
                 supa("PATCH", f"calls?id=eq.{call_id}", update_data, prefer_minimal=True)
 
@@ -1218,6 +1261,14 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
         "move_timeline": result.get("move_timeline", "unknown"),
     }
 
+    # Save to Supabase
+    try:
+        saved = supa("POST", "calls", record)
+        return saved, None
+    except Exception as e:
+        log(f"  Save error for {filename}: {e}")
+        raise
+
 def _batch_upload_worker(zip_bytes):
     """Background worker — extract ZIP, process each audio file, save to DB."""
     global _batch_job
@@ -1261,6 +1312,14 @@ def _batch_upload_worker(zip_bytes):
 
         # Process in batches of 3
         for i in range(0, total, 3):
+            # Check for stop request before each group
+            with _batch_lock:
+                if _batch_job.get("stop_requested"):
+                    _batch_job["status"] = "stopped"
+                    _batch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
+                    _batch_job["current"] = ""
+                    log(f"  Batch upload stopped by user: {_batch_job['processed']} processed before halt")
+                    return
             batch = audio_files[i:i+3]
             threads = []
             results = [None] * len(batch)
@@ -1386,6 +1445,7 @@ class Handler(BaseHTTPRequestHandler):
             "/transcript_corrections/delete": self._delete_transcript_correction,
             "/transcript_corrections/reapply": self._reapply_corrections,
             "/batch_upload/start": self._batch_upload_start,
+            "/batch_upload/stop": self._batch_upload_stop,
         }
         fn = routes.get(path)
         if fn:
@@ -1398,7 +1458,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _get_calls(self):
         try:
-            calls = supa("GET", "calls?order=created_at.desc&limit=2000")
+            # Optional ?slim=1 strips transcript text from response (for list views)
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            slim = qs.get("slim", ["0"])[0] == "1"
+            if slim:
+                # Select all columns except transcript
+                calls = supa("GET", "calls?order=created_at.desc&limit=2000&select=id,filename,storage_filename,rep_name,rep_name_detected,caller_name,call_purpose,call_type,move_type,move_category,call_outcome,loss_reason,soft_pipeline_reason,word_count,exclude_from_scoring,exclusion_reason,call_summary,key_details,talk_ratio_rep,talk_ratio_customer,keywords_detected,keyword_positions,objections_detected,objection_positions,customer_sentiment,scores,checklist,strengths,coaching_points,tags,manager_notes,score_overrides,call_date,audio_url,share_token,availability_decline,turned_away,onsite_suggested,call_quality,is_continuation,continuation_group_id,evaluation_confidence,is_diarized,close_attempts,objections_overcome,objections_abandoned,pipeline_recovery_quality,salesmanship_score,value_props_used,missed_rapport_opportunities,input_tokens,output_tokens,pricing_model,move_timeline,created_at")
+            else:
+                calls = supa("GET", "calls?order=created_at.desc&limit=2000")
             self._ok(calls)
         except Exception as e:
             self._err(500, str(e))
@@ -1718,21 +1785,31 @@ class Handler(BaseHTTPRequestHandler):
             p = json.loads(body)
             find_text = p.get("find_text", "").strip()
             replace_text = p.get("replace_text", "").strip()
-            if not find_text:
-                self._err(400, "find_text required"); return
-            # Update existing rule if same find_text exists
-            existing = supa("GET", f"transcript_corrections?find_text=ilike.{urllib.parse.quote(find_text)}&limit=1")
-            if existing:
-                supa("PATCH", f"transcript_corrections?id=eq.{existing[0]['id']}", {"replace_text": replace_text})
-                self._ok({"updated": True, "id": existing[0]["id"]})
-            else:
-                result = supa("POST", "transcript_corrections", {"find_text": find_text, "replace_text": replace_text})
-                self._ok(result)
-            # Also save updated transcript on the call if provided
             call_id = p.get("call_id")
             new_transcript = p.get("new_transcript")
+
+            # If neither a rule nor a transcript edit is provided, that's an error
+            if not find_text and not (call_id and new_transcript):
+                self._err(400, "Either find_text or (call_id + new_transcript) is required"); return
+
+            response = {"saved": True}
+
+            # If find_text was provided, save/update the rule
+            if find_text:
+                existing = supa("GET", f"transcript_corrections?find_text=ilike.{urllib.parse.quote(find_text)}&limit=1")
+                if existing:
+                    supa("PATCH", f"transcript_corrections?id=eq.{existing[0]['id']}", {"replace_text": replace_text})
+                    response["rule"] = {"updated": True, "id": existing[0]["id"]}
+                else:
+                    rule_result = supa("POST", "transcript_corrections", {"find_text": find_text, "replace_text": replace_text})
+                    response["rule"] = {"created": True, "data": rule_result}
+
+            # If call transcript was edited, save it before responding (so we don't _ok twice)
             if call_id and new_transcript:
                 supa("PATCH", f"calls?id=eq.{call_id}", {"transcript": new_transcript})
+                response["transcript_updated"] = True
+
+            self._ok(response)
         except Exception as e:
             self._err(500, str(e))
 
@@ -1819,13 +1896,24 @@ class Handler(BaseHTTPRequestHandler):
     def _get_shared_view_by_token(self):
         try:
             token = self.path.split("/share/")[1].split("?")[0]
+            # Validate token format (only allow URL-safe base64 characters that secrets.token_urlsafe produces)
+            if not re.match(r'^[A-Za-z0-9_-]{1,128}$', token):
+                self._err(404, "Share link not found"); return
             result = supa("GET", f"shared_views?token=eq.{token}&limit=1")
             if not result:
                 self._err(404, "Share link not found"); return
             view = result[0]
             html = read_html()
-            rep_ids_json = json.dumps(view.get("rep_ids", []))
-            inject = f'<script>window.SHARE_TOKEN="{token}";window.SHARE_VIEW_LEVEL="{view.get("view_level","manager")}";window.SHARE_REP_IDS={rep_ids_json};window.SHARE_LABEL="{view.get("label","")}";</script>'
+            # Use json.dumps for ALL injected values — this safely escapes quotes, backslashes, </script>, etc.
+            inject_payload = {
+                "SHARE_TOKEN": token,
+                "SHARE_VIEW_LEVEL": view.get("view_level", "manager"),
+                "SHARE_REP_IDS": view.get("rep_ids", []),
+                "SHARE_LABEL": view.get("label", ""),
+            }
+            # Build script with each window assignment using json.dumps for safe escaping
+            assignments = ";".join(f"window.{k}={json.dumps(v)}" for k, v in inject_payload.items())
+            inject = f'<script>{assignments};</script>'
             html = html.replace(b"</head>", inject.encode() + b"</head>", 1)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1938,6 +2026,9 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
                 "total": 0, "processed": 0, "current": "", "errors": 0,
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "finished_at": None,
+                "stop_requested": False,
+                "skipped": 0,
+                "failed_calls": [],
             }
         t = threading.Thread(target=_reanalyze_worker, daemon=True)
         t.start()
@@ -1948,7 +2039,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
             status = dict(_reanalyze_job)
         self._ok(status)
 
-    def _reanalyze_stop(self):
+    def _reanalyze_stop(self, body=None):
         with _reanalyze_lock:
             if _reanalyze_job["status"] != "running":
                 self._ok({"message": "No job running", "status": _reanalyze_job["status"]}); return
@@ -1982,6 +2073,9 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         with _batch_lock:
             if _batch_job["status"] == "running":
                 self._ok({"message": "Already running", "status": _batch_job}); return
+        # Reciprocal block: don't start batch upload while reanalyze is running
+        if _reanalyze_job.get("status") == "running":
+            self._ok({"message": "Bulk re-analyze in progress — wait for it to finish before uploading new calls", "blocked": True}); return
 
         content_type = self.headers.get("Content-Type", "")
         try:
@@ -2022,6 +2116,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "finished_at": None,
                 "error_list": [],
+                "stop_requested": False,
             }
 
         t = threading.Thread(target=_batch_upload_worker, args=(zip_bytes,), daemon=True)
@@ -2034,28 +2129,39 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
             status = dict(_batch_job)
         self._ok(status)
 
+    def _batch_upload_stop(self, body=None):
+        with _batch_lock:
+            if _batch_job.get("status") != "running":
+                self._ok({"message": "No batch upload running", "status": _batch_job.get("status")}); return
+            _batch_job["stop_requested"] = True
+        self._ok({"message": "Stop requested — will halt after current files finish"})
+
     # ── EXPORT ──
 
     def _export_csv(self):
         try:
             calls = supa("GET", "calls?order=created_at.desc&limit=5000")
-            ck_keys = ["got_move_date","got_customer_name","got_phone_number","got_cities","got_home_type","got_stairs_info","did_full_inventory","asked_forgotten_items","asked_about_boxes","gave_price_on_call","pitched_fvp","attempted_to_close","offered_email_estimate","mentioned_confirmations","thanked_customer","asked_name_at_start","led_estimate_process","scheduled_onsite_attempt","offered_alternatives","took_rapport_opportunities","completed_booking_wrapup","captured_lead"]
-            hdrs = ["Date","Call Date","Rep","Caller","Purpose","Type","Move","Outcome","Sentiment","Excluded","Overall","Rapport","Info Seq","Price","FVP","Closing","Control","Prof.","Compliance%","Talk Rep%","Talk Cust%","Words","Quality","Declined","Onsite","Continuation","Keywords","Objections","Strengths","Coaching"]
+            # v12 checklist keys (no pitched_fvp; added v12 items like got_email)
+            ck_keys = ["got_move_date","got_customer_name","got_phone_number","got_cities","got_home_type","got_stairs_info","did_full_inventory","asked_forgotten_items","asked_about_boxes","gave_price_on_call","attempted_to_close","offered_email_estimate","mentioned_confirmations","thanked_customer","asked_name_at_start","led_estimate_process","got_email","scheduled_onsite_attempt","offered_alternatives","took_rapport_opportunities","completed_booking_wrapup","captured_lead"]
+            # v12 score categories: overall, rapport_tone, information_control (merged), price_delivery, closing_attempt, salesmanship, professionalism
+            hdrs = ["Date","Call Date","Rep","Caller","Purpose","Type","Move","Outcome","Sentiment","Excluded","Overall","Rapport","Info & Control","Price","Closing","Salesmanship","Prof.","Compliance%","Talk Rep%","Talk Cust%","Words","Quality","Declined","Turned Away","Onsite","Continuation","Keywords","Objections","Strengths","Coaching"]
             rows = []
             for c in calls:
-                s = c.get("scores", {})
-                comp = round(sum(1 for k in ck_keys if c.get("checklist", {}).get(k)) / len(ck_keys) * 100)
+                s = c.get("scores", {}) or {}
+                ck = c.get("checklist", {}) or {}
+                comp = round(sum(1 for k in ck_keys if ck.get(k)) / len(ck_keys) * 100)
                 rows.append([
                     (c.get("created_at",""))[:10], (c.get("call_date","") or "")[:10],
                     c.get("rep_name",""), c.get("caller_name",""), c.get("call_purpose",""),
                     c.get("call_type",""), c.get("move_type",""), c.get("call_outcome",""),
                     c.get("customer_sentiment",""), "Yes" if c.get("exclude_from_scoring") else "No",
-                    s.get("overall",{}).get("score",""), s.get("rapport_tone",{}).get("score",""),
-                    s.get("info_sequence",{}).get("score",""), s.get("price_delivery",{}).get("score",""),
-                    s.get("fvp_pitch",{}).get("score",""), s.get("closing_attempt",{}).get("score",""),
-                    s.get("call_control",{}).get("score",""), s.get("professionalism",{}).get("score",""),
+                    (s.get("overall") or {}).get("score",""), (s.get("rapport_tone") or {}).get("score",""),
+                    (s.get("information_control") or {}).get("score",""), (s.get("price_delivery") or {}).get("score",""),
+                    (s.get("closing_attempt") or {}).get("score",""), (s.get("salesmanship") or {}).get("score",""),
+                    (s.get("professionalism") or {}).get("score",""),
                     comp, c.get("talk_ratio_rep",""), c.get("talk_ratio_customer",""), c.get("word_count",""),
                     c.get("call_quality","normal"), "Yes" if c.get("availability_decline") else "No",
+                    "Yes" if c.get("turned_away") else "No",
                     "Yes" if c.get("onsite_suggested") else "No", "Yes" if c.get("is_continuation") else "No",
                     "; ".join(c.get("keywords_detected") or []), "; ".join(c.get("objections_detected") or []),
                     "; ".join(c.get("strengths") or []), "; ".join(c.get("coaching_points") or []),
@@ -2099,7 +2205,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
                 "caller_name": f"{len(sc_calls)} scored calls",
                 "call_outcome": f"Avg overall: {avg_overall}/10",
                 "call_summary": f"Rep profile for {rep_name}. Total: {len(calls)} calls. Scored: {len(sc_calls)}. Avg overall: {avg_overall}/10.",
-                "scores": {sk: {"score": round(sum(c.get("scores",{}).get(sk,{}).get("score",0) for c in sc_calls)/max(len(sc_calls),1),1), "note": f"Avg across {len(sc_calls)} calls"} for sk in ["info_sequence","price_delivery","fvp_pitch","closing_attempt","call_control","professionalism","rapport_tone","overall"]},
+                "scores": {sk: {"score": round(sum((c.get("scores",{}) or {}).get(sk,{}).get("score",0) for c in sc_calls)/max(len(sc_calls),1),1), "note": f"Avg across {len(sc_calls)} calls"} for sk in ["rapport_tone","information_control","price_delivery","closing_attempt","salesmanship","professionalism","overall"]},
                 "checklist": {},
                 "coaching_points": list({cp for c in sc_calls for cp in (c.get("coaching_points") or [])}),
                 "manager_notes": "",
