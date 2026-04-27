@@ -451,9 +451,18 @@ def supa_storage_signed_url(bucket, path, expires=86400):
         with urllib.request.urlopen(req, timeout=30) as r:
             result = json.loads(r.read())
         signed = result.get("signedURL", "")
-        if signed and not signed.startswith("http"):
-            signed = f"{SUPABASE_URL}{signed}"
-        return signed
+        if not signed:
+            return ""
+        # Supabase returns a relative path like "/object/sign/{bucket}/{path}?token=..."
+        # We need to prepend "{SUPABASE_URL}/storage/v1" to make it a full URL.
+        if signed.startswith("http"):
+            return signed  # Already absolute (some Supabase versions return full URL)
+        if signed.startswith("/storage/v1"):
+            return f"{SUPABASE_URL}{signed}"  # Has prefix already
+        # Otherwise, prepend the storage API path
+        if not signed.startswith("/"):
+            signed = "/" + signed
+        return f"{SUPABASE_URL}/storage/v1{signed}"
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8', errors='replace')
         log(f"  Signed URL error for {bucket}/{path[:50]}: HTTP {e.code} {error_body[:200]}")
