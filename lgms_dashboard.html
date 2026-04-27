@@ -1094,6 +1094,465 @@ html, body {
   .page { padding: 16px; }
   .topbar { padding: 0 16px; }
 }
+
+/* ============================================ */
+/* PHASE 3 ADDITIONS — Mockup-aligned classes   */
+/* for the new Overview page layout             */
+/* ============================================ */
+
+/* Variable aliases — mockup uses hyphenated names */
+:root {
+  --surface-2: var(--surface2);
+  --line: var(--border);
+  --line-2: var(--border2);
+  --line-strong: var(--border3);
+  --ink-2: var(--ink2);
+  --ink-3: var(--ink3);
+  --ink-4: var(--ink4);
+  --ink-5: var(--ink5);
+  --lg-red-bg: #FAE3E1;
+  --shadow-sm: var(--sh);
+  --shadow-md: var(--sh2);
+}
+
+/* Page title in topbar */
+.page-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  flex: 1;
+}
+.page-title-meta {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 16px;
+  margin-left: 8px;
+}
+.page-meta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+/* Buttons — mockup variants (in addition to btn-p/btn-s/btn-g) */
+.btn-primary {
+  background: var(--lg-green);
+  color: white;
+  border-color: var(--lg-green-dark);
+  box-shadow: var(--sh);
+}
+.btn-primary:hover { background: var(--lg-green-dark); }
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--ink);
+  border: 1px solid var(--border2);
+}
+.btn-secondary:hover { background: var(--surface); border-color: var(--border3); }
+.btn-ghost { background: transparent; color: var(--ink2); }
+.btn-ghost:hover { background: var(--surface-sunken); color: var(--ink); }
+
+/* HERO METRICS */
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.hero-grid.hero-2up { grid-template-columns: 1.2fr 1fr; }
+
+.hero-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  position: relative;
+  overflow: hidden;
+}
+.hero-card.featured {
+  background: linear-gradient(135deg, #005F2D 0%, #007236 60%, #1A8045 100%);
+  color: white;
+  border-color: var(--lg-green-dark);
+  box-shadow: var(--sh2);
+}
+.hero-card.featured::after {
+  content: '';
+  position: absolute;
+  right: -40px; top: -40px;
+  width: 180px; height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+}
+.hero-label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-weight: 500;
+}
+.hero-card.featured .hero-label { color: rgba(255,255,255,0.75); }
+.hero-value {
+  font-family: var(--font-display);
+  font-size: 52px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-weight: 700;
+  display: flex; align-items: baseline; gap: 4px;
+}
+.hero-card.featured .hero-value { color: white; }
+.hero-value-suffix {
+  font-size: 22px;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.hero-card.featured .hero-value-suffix { color: rgba(255,255,255,0.6); }
+.hero-detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 8px;
+}
+.hero-card.featured .hero-detail { color: rgba(255,255,255,0.7); }
+
+/* TREND PILLS */
+.trend-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+.trend-pill.up { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.trend-pill.down { background: var(--lg-red-bg); color: var(--lg-red); }
+.trend-pill.flat { background: var(--surface-sunken); color: var(--ink-3); }
+.hero-card.featured .trend-pill.up {
+  background: rgba(255,255,255,0.18);
+  color: white;
+}
+
+/* OUTCOME BAR */
+.outcome-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 10px;
+  background: var(--surface-sunken);
+}
+.outcome-bar-segment { height: 100%; display: block; }
+.outcome-bar-legend {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-family: var(--font-label);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.outcome-bar-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.outcome-bar-legend span::before {
+  content: '';
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  background: var(--c, var(--ink-3));
+}
+
+/* CHART ROW */
+.chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.chart-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px 18px;
+  display: flex;
+  flex-direction: column;
+}
+.chart-card-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.chart-card-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.chart-card-meta {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* DONUT CHART */
+.donut-wrap {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 14px;
+  align-items: center;
+  flex: 1;
+}
+.donut-svg { width: 100%; height: auto; display: block; }
+.donut-center-num {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  fill: var(--ink);
+}
+.donut-center-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  fill: var(--ink-3);
+  font-weight: 500;
+}
+.donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.donut-legend-item {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.donut-legend-swatch {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+}
+.donut-legend-label {
+  color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.donut-legend-value {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.donut-legend-pct {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 11px;
+  margin-left: 3px;
+}
+
+/* OBJECTIONS BAR LIST */
+.objection-list { display: flex; flex-direction: column; gap: 10px; flex: 1; padding-top: 2px; }
+.objection-row {
+  display: grid;
+  grid-template-columns: 18px 1fr 36px;
+  gap: 10px;
+  align-items: center;
+}
+.objection-rank {
+  font-family: var(--font-label);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-4);
+  text-align: center;
+}
+.objection-rank.top { color: var(--lg-red); }
+.objection-content { min-width: 0; }
+.objection-label {
+  font-size: 12.5px;
+  color: var(--ink);
+  margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-weight: 500;
+}
+.objection-bar-wrap {
+  height: 4px;
+  background: var(--surface-sunken);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.objection-bar-fill {
+  height: 100%;
+  background: var(--lg-red);
+  border-radius: 2px;
+}
+.objection-count {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: right;
+}
+
+/* TWO-COLUMN LAYOUT */
+.two-col {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+/* PANELS (mockup style) */
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.panel-title em {
+  font-style: normal;
+  color: var(--ink-3);
+  font-weight: 400;
+  margin-left: 6px;
+  font-size: 14px;
+}
+.panel-meta {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* LEADERBOARD (mockup style) */
+.lb-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 70px 70px 70px 70px;
+  gap: 12px;
+  padding: 12px 22px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.lb-row:hover { background: var(--surface); }
+.lb-row:last-child { border-bottom: none; }
+.lb-row.lb-header {
+  background: var(--surface-sunken);
+  cursor: default;
+}
+.lb-row.lb-header:hover { background: var(--surface-sunken); }
+.lb-row.lb-header .lb-score,
+.lb-row.lb-header .lb-rank,
+.lb-row.lb-header .lb-name-text {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.lb-rank.top { color: var(--lg-green); font-weight: 700; font-size: 14px; }
+.lb-avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.lb-name-text {
+  font-size: 13.5px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.lb-name-sub {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 400;
+}
+.lb-score {
+  text-align: right;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* SCORE COLOR ENCODING */
+.score-good { color: var(--lg-green); }
+.score-mid { color: var(--lg-gold); }
+.score-low { color: var(--lg-red); }
+
+/* ATTENTION PANEL (mockup style) */
+.attn-item {
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.attn-item:hover { background: var(--surface); }
+.attn-item:last-child { border-bottom: none; }
+.attn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+.attn-dot.warn { background: var(--lg-red); }
+.attn-dot.info { background: var(--lg-blue); }
+.attn-dot.alert { background: var(--lg-gold); }
+.attn-content { flex: 1; min-width: 0; }
+.attn-title {
+  font-size: 13.5px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+.attn-desc {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.4;
+}
+
+/* RESPONSIVE — mockup row collapses */
+@media (max-width: 1100px) {
+  .chart-row { grid-template-columns: 1fr 1fr; }
+  .two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .chart-row { grid-template-columns: 1fr; }
+  .hero-grid.hero-2up { grid-template-columns: 1fr; }
+}
+
 </style>
 </head>
 <body>
@@ -1365,97 +1824,352 @@ function set(id,html){const el=g(id);if(el)el.innerHTML=html;}
 function g(id){return document.getElementById(id);}
 
 // ── OVERVIEW ──
+// SVG donut path generator — same approach as mockup
+function svgDonutPaths(segments, cx, cy, rOuter, rInner) {
+  // segments: [{value, color}]; returns array of path strings
+  const total = segments.reduce((s, x) => s + x.value, 0);
+  if (total === 0) return [];
+  const paths = [];
+  let angle = -Math.PI / 2; // start at top
+  segments.forEach(seg => {
+    if (seg.value <= 0) return;
+    const portion = seg.value / total;
+    const a1 = angle;
+    const a2 = angle + portion * 2 * Math.PI;
+    const large = portion > 0.5 ? 1 : 0;
+    const x1o = cx + rOuter * Math.cos(a1);
+    const y1o = cy + rOuter * Math.sin(a1);
+    const x2o = cx + rOuter * Math.cos(a2);
+    const y2o = cy + rOuter * Math.sin(a2);
+    const x1i = cx + rInner * Math.cos(a2);
+    const y1i = cy + rInner * Math.sin(a2);
+    const x2i = cx + rInner * Math.cos(a1);
+    const y2i = cy + rInner * Math.sin(a1);
+    const d = `M ${x1o.toFixed(2)} ${y1o.toFixed(2)} A ${rOuter} ${rOuter} 0 ${large} 1 ${x2o.toFixed(2)} ${y2o.toFixed(2)} L ${x1i.toFixed(2)} ${y1i.toFixed(2)} A ${rInner} ${rInner} 0 ${large} 0 ${x2i.toFixed(2)} ${y2i.toFixed(2)} Z`;
+    paths.push({ d, color: seg.color, value: seg.value, label: seg.label });
+    angle = a2;
+  });
+  return paths;
+}
+
+// Build a chart card with a donut + legend
+function buildDonutCard(title, meta, items, centerLabel) {
+  // items: [{label, value, color}], pre-sorted desc
+  const total = items.reduce((s, i) => s + i.value, 0);
+  if (total === 0) {
+    return `<div class="chart-card">
+      <div class="chart-card-header">
+        <div class="chart-card-title">${esc(title)}</div>
+        <div class="chart-card-meta">${esc(meta)}</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12.5px;padding:24px 0;text-align:center">No data yet</div>
+    </div>`;
+  }
+  const paths = svgDonutPaths(items, 80, 80, 72, 46);
+  const svgPaths = paths.map(p => `<path d="${p.d}" fill="${p.color}"/>`).join('');
+  const legend = items.map(i => {
+    const pct = Math.round(i.value / total * 100);
+    return `<div class="donut-legend-item">
+      <span class="donut-legend-swatch" style="background:${i.color}"></span>
+      <span class="donut-legend-label">${esc(i.label)}</span>
+      <span class="donut-legend-value">${i.value}<span class="donut-legend-pct">·${pct}%</span></span>
+    </div>`;
+  }).join('');
+  return `<div class="chart-card">
+    <div class="chart-card-header">
+      <div class="chart-card-title">${esc(title)}</div>
+      <div class="chart-card-meta">${esc(meta)}</div>
+    </div>
+    <div class="donut-wrap">
+      <svg class="donut-svg" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+        ${svgPaths}
+        <text class="donut-center-num" x="80" y="82" text-anchor="middle">${total}</text>
+        <text class="donut-center-label" x="80" y="98" text-anchor="middle">${esc(centerLabel)}</text>
+      </svg>
+      <div class="donut-legend">${legend}</div>
+    </div>
+  </div>`;
+}
+
+// Group calls by move category and loss reason
+function buildMoveTypeChart(scoredCalls) {
+  const palette = {
+    standard: 'var(--lg-green)',
+    specialty: 'var(--blue)',
+    long_distance: 'var(--lg-gold)',
+    commercial: 'var(--lg-red-light)',
+    unload_only: 'var(--lg-green-light)',
+    in_house: '#8FAE9B',
+    storage: '#9BAFC9',
+    non_move: 'var(--ink5)'
+  };
+  const labels = {
+    standard: 'Local · Standard',
+    specialty: 'Specialty',
+    long_distance: 'Long distance',
+    commercial: 'Commercial',
+    unload_only: 'Unload only',
+    in_house: 'In-house',
+    storage: 'Storage',
+    non_move: 'Non-move'
+  };
+  const counts = {};
+  scoredCalls.forEach(c => {
+    const cat = c.move_category;
+    if (cat && cat !== 'unknown' && labels[cat]) {
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+  });
+  const items = Object.entries(counts)
+    .map(([k, v]) => ({ label: labels[k], value: v, color: palette[k] }))
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  return buildDonutCard('Move type', total > 0 ? `${total} categorized` : '', items, 'CALLS');
+}
+
+function buildLossReasonChart(scoredCalls) {
+  const palette = {
+    price_too_high: 'var(--lg-red)',
+    went_with_competitor: 'var(--blue)',
+    no_availability: 'var(--lg-gold)',
+    wrong_timing: 'var(--lg-red-light)',
+    just_shopping: 'var(--ink5)',
+    other: '#9F9F9F'
+  };
+  const labels = {
+    price_too_high: 'Price too high',
+    went_with_competitor: 'Went w/ competitor',
+    no_availability: 'No availability',
+    wrong_timing: 'Wrong timing',
+    just_shopping: 'Just shopping',
+    other: 'Other'
+  };
+  const counts = {};
+  scoredCalls.forEach(c => {
+    if (c.call_outcome !== 'lost') return;
+    const r = c.loss_reason;
+    if (r && labels[r]) counts[r] = (counts[r] || 0) + 1;
+  });
+  const items = Object.entries(counts)
+    .map(([k, v]) => ({ label: labels[k], value: v, color: palette[k] }))
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  return buildDonutCard('Why we lost', total > 0 ? `${total} lost deals` : 'No lost deals categorized', items, 'LOST DEALS');
+}
+
+function buildObjectionsCard(scoredCalls) {
+  const counts = {};
+  scoredCalls.forEach(c => {
+    if (!c.objections) return;
+    let arr = c.objections;
+    if (typeof arr === 'string') {
+      try { arr = JSON.parse(arr); } catch(e) { arr = []; }
+    }
+    if (!Array.isArray(arr)) return;
+    arr.forEach(o => {
+      const raw = (typeof o === 'string') ? o : (o?.objection || o?.text || '');
+      const k = normObj(raw);
+      if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (sorted.length === 0) {
+    return `<div class="chart-card">
+      <div class="chart-card-header">
+        <div class="chart-card-title">Top objections</div>
+        <div class="chart-card-meta">across all calls</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12.5px;padding:24px 0;text-align:center">No objections recorded yet</div>
+    </div>`;
+  }
+  const max = sorted[0][1];
+  const rows = sorted.map(([label, val], i) => `
+    <div class="objection-row">
+      <div class="objection-rank${i === 0 ? ' top' : ''}">${i + 1}</div>
+      <div class="objection-content">
+        <div class="objection-label">${esc(label)}</div>
+        <div class="objection-bar-wrap"><div class="objection-bar-fill" style="width:${Math.round(val/max*100)}%"></div></div>
+      </div>
+      <div class="objection-count">${val}</div>
+    </div>`).join('');
+  return `<div class="chart-card">
+    <div class="chart-card-header">
+      <div class="chart-card-title">Top objections</div>
+      <div class="chart-card-meta">across all calls</div>
+    </div>
+    <div class="objection-list">${rows}</div>
+  </div>`;
+}
+
+// Score color helper
+function scoreClass(s) {
+  const n = parseFloat(s);
+  if (isNaN(n)) return '';
+  if (n >= 8) return 'score-good';
+  if (n >= 5) return 'score-mid';
+  return 'score-low';
+}
+
+// Outcome distribution bar for the Calls hero card
+function buildOutcomeBar(sc) {
+  const counts = { booked: 0, soft_pipeline: 0, lost: 0, other: 0 };
+  sc.forEach(c => {
+    const o = c.call_outcome;
+    if (o === 'booked') counts.booked++;
+    else if (o === 'soft_pipeline') counts.soft_pipeline++;
+    else if (o === 'lost') counts.lost++;
+    else counts.other++;
+  });
+  const total = sc.length;
+  if (total === 0) return '';
+  const pct = k => total ? (counts[k] / total * 100) : 0;
+  const segments = [];
+  if (counts.booked > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('booked')}%;background:var(--lg-green)"></div>`);
+  if (counts.soft_pipeline > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('soft_pipeline')}%;background:var(--lg-gold)"></div>`);
+  if (counts.lost > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('lost')}%;background:var(--lg-red-light)"></div>`);
+  if (counts.other > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('other')}%;background:var(--ink5)"></div>`);
+  const legend = [];
+  if (counts.booked) legend.push(`<span style="--c:var(--lg-green)">${counts.booked} booked</span>`);
+  if (counts.soft_pipeline) legend.push(`<span style="--c:var(--lg-gold)">${counts.soft_pipeline} pipeline</span>`);
+  if (counts.lost) legend.push(`<span style="--c:var(--lg-red-light)">${counts.lost} lost</span>`);
+  return `<div class="outcome-bar">${segments.join('')}</div>
+    <div class="outcome-bar-legend">${legend.join('')}</div>`;
+}
+
 function renderOverview(){
   const fc=getFC(),sc=scc(fc);
   const turnedAway=fc.filter(c=>c.turned_away).length;
   const badQ=fc.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
   const booked=sc.filter(c=>c.call_outcome==='booked').length;
   const softPipeline=sc.filter(c=>c.call_outcome==='soft_pipeline').length;
-  const br=sc.length?Math.round(booked/sc.length*100):0;
-  const compPct=sc.length?Math.round(sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]).length,0)/(sc.length*CK.length)*100):0;
-  const excl=fc.filter(c=>c.exclude_from_scoring).length;
-  const attn=[
-    turnedAway>0?`<div class="attn-card amber" onclick="navFilter('turned_away')"><span class="ac-ico">📵</span><div class="ac-num">${turnedAway}</div><div class="ac-lbl">Turned Away</div></div>`:'',
-    badQ>0?`<div class="attn-card amber" onclick="navFilter('quality')"><span class="ac-ico">⚠️</span><div class="ac-num">${badQ}</div><div class="ac-lbl">Poor Audio / Disconnected</div></div>`:'',
-  ].filter(Boolean).join('');
+  const lost=sc.filter(c=>c.call_outcome==='lost').length;
+  const unscored=fc.length - sc.length - fc.filter(c=>c.exclude_from_scoring).length;
+  const avgOverall=avg(sc,'overall');
+  const repCount=new Set(sc.map(c=>c.rep_name)).size;
+  const dateRangeLabel = dateFilter===0 ? 'all time' : `last ${dateFilter} days`;
+
+  // Build attention items list (replaces the old colored attn-cards)
+  const attnItems = [];
+  if (turnedAway > 0) attnItems.push({type:'warn', title:`${turnedAway} call${turnedAway===1?'':'s'} flagged "turned away"`, desc:'Customers were declined service. Review for coaching.', click:`navFilter('turned_away')`});
+  if (unscored > 0) attnItems.push({type:'alert', title:`${unscored} unscored call${unscored===1?'':'s'}`, desc:'Missed analysis — run bulk re-analyze.', click:`nav('library')`});
+  if (badQ > 0) attnItems.push({type:'alert', title:`${badQ} call${badQ===1?'':'s'} with poor audio`, desc:'Disconnected or low quality recordings.', click:`navFilter('quality')`});
+
   set('page',`
-    ${attn?`<div style="margin-bottom:6px"><div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px">⚠ Needs Attention</div><div class="attn-grid">${attn}</div></div>`:''}
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <div style="font-size:13px;font-weight:700">Dashboard</div>
-      <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
-        <span style="font-size:11px;color:var(--ink3)">Showing:</span>
-        <select class="fsel" onchange="dateFilter=parseInt(this.value);renderOverview()" style="font-size:11.5px;padding:5px 9px">
+    <div class="hero-grid hero-2up">
+      <div class="hero-card featured">
+        <div class="hero-label">Average Score</div>
+        <div class="hero-value">${avgOverall}<span class="hero-value-suffix">/10</span></div>
+        <div class="hero-detail">${sc.length} scored call${sc.length===1?'':'s'} · ${repCount} rep${repCount===1?'':'s'}</div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Calls</div>
+        <div class="hero-value">${fc.length}</div>
+        ${buildOutcomeBar(sc)}
+      </div>
+    </div>
+
+    <div class="chart-row">
+      ${buildMoveTypeChart(sc)}
+      ${buildLossReasonChart(sc)}
+      ${buildObjectionsCard(sc)}
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Top performers <em>${dateRangeLabel}</em></div>
+          <div class="panel-meta" id="lb-cnt"></div>
+        </div>
+        <div class="lb-row lb-header">
+          <div class="lb-rank">#</div>
+          <div class="lb-name-text">Rep</div>
+          <div class="lb-score">Overall</div>
+          <div class="lb-score">Rapport</div>
+          <div class="lb-score">Close</div>
+          <div class="lb-score">Calls</div>
+        </div>
+        <div id="lb-body"></div>
+        <div class="lb-expand" id="lb-expand" style="padding:10px 22px;text-align:center;color:var(--ink3);font-size:12px;cursor:pointer" onclick="lbShowAll=!lbShowAll;renderLB()"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Needs attention</div>
+          <div class="panel-meta">${attnItems.length} item${attnItems.length===1?'':'s'}</div>
+        </div>
+        ${attnItems.length === 0
+          ? `<div style="padding:24px 22px;color:var(--ink3);font-size:13px;text-align:center">All caught up — nothing flagged</div>`
+          : attnItems.map(a=>`
+              <div class="attn-item" onclick="${a.click}">
+                <div class="attn-dot ${a.type}"></div>
+                <div class="attn-content">
+                  <div class="attn-title">${esc(a.title)}</div>
+                  <div class="attn-desc">${esc(a.desc)}</div>
+                </div>
+              </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-hdr"><h3>Process Compliance by Group</h3><span style="font-size:11px;color:var(--ink3)">Click to expand steps</span></div>
+      <div id="comp-groups"></div>
+    </div>
+
+    <div class="grid-3">
+      <div class="card"><div class="card-hdr"><h3>Talk Ratio</h3></div><div id="talk-viz"></div></div>
+      <div class="card"><div class="card-hdr"><h3>Keywords</h3></div><div id="kw-viz"></div></div>
+      <div class="card"><div class="card-hdr"><h3>Date Filter</h3></div>
+        <select class="fsel" onchange="dateFilter=parseInt(this.value);renderOverview()" style="width:100%;font-size:13px">
           <option value="7" ${dateFilter===7?'selected':''}>Last 7 days</option>
           <option value="30" ${dateFilter===30?'selected':''}>Last 30 days</option>
           <option value="90" ${dateFilter===90?'selected':''}>Last 90 days</option>
           <option value="0" ${dateFilter===0?'selected':''}>All time</option>
         </select>
+        <div style="margin-top:12px;font-size:12px;color:var(--ink3)">Filtering ${fc.length} calls · ${dateRangeLabel}</div>
       </div>
-    </div>
-    <div class="metric-grid">
-      <div class="mc green" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Total Calls</div><div class="mc-val">${fc.length}</div><div class="mc-sub">${excl} excluded</div></div>
-      <div class="mc green" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Scored Calls</div><div class="mc-val">${sc.length}</div><div class="mc-sub">${new Set(sc.map(c=>c.rep_name)).size} reps</div></div>
-      <div class="mc blue" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'score_high',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Avg Overall</div><div class="mc-val">${avg(sc,'overall')}</div><div class="mc-sub">out of 10</div></div>
-      <div class="mc blue" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'score_high',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Avg Rapport</div><div class="mc-val">${avg(sc,'rapport_tone')}</div><div class="mc-sub">out of 10</div></div>
-      <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Compliance</div><div class="mc-val">${compPct}%</div><div class="mc-sub">22-step avg</div></div>
-      <div class="mc ${br>=50?'green':'red'}" onclick="libFilters={rep:'',out:'booked',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Booking Rate</div><div class="mc-val">${br}%</div><div class="mc-sub">${booked} booked · ${softPipeline} pipeline</div></div>
-      <div class="mc amber" onclick="libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'turned_away',obj:'',kw:''};nav('library')" style="cursor:pointer"><div class="mc-label">Turned Away</div><div class="mc-val">${turnedAway}</div><div class="mc-sub">no LGMS availability</div></div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-        <div class="card-hdr"><h3>Rep Leaderboard</h3><span class="bdg" id="lb-cnt"></span></div>
-        <div style="overflow-x:auto">
-          <table class="lb"><thead><tr>
-            <th>#</th><th onclick="sortLB('rep_name')">Rep</th><th onclick="sortLB('overall')">Overall ↕</th>
-            <th onclick="sortLB('rapport_tone')">Rapport</th><th onclick="sortLB('price_delivery')">Price</th>
-            <th onclick="sortLB('salesmanship')">Selling</th><th onclick="sortLB('closing_attempt')">Closing</th><th onclick="sortLB('calls')">Calls</th>
-          </tr></thead><tbody id="lb-body"></tbody></table>
-          <div class="lb-expand" id="lb-expand" onclick="lbShowAll=!lbShowAll;renderLB()"></div>
-        </div>
-    </div>
-    <div class="card">
-      <div class="card-hdr"><h3>Process Compliance by Group</h3><span style="font-size:11px;color:var(--ink3)">Click to expand steps</span></div>
-      <div id="comp-groups"></div>
-    </div>
-    <div class="grid-3">
-      <div class="card"><div class="card-hdr"><h3>Talk Ratio</h3></div><div id="talk-viz"></div></div>
-      <div class="card"><div class="card-hdr"><h3>Keywords</h3></div><div id="kw-viz"></div></div>
-      <div class="card"><div class="card-hdr"><h3>Objections</h3></div><div id="obj-viz"></div></div>
     </div>`);
-  renderLB();renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);
+  renderLB();renderCompGroups(sc);renderTalk(sc);
 }
 function navFilter(attn){libFilters.attn=attn;nav('library');}
 function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
 function renderLB(){
   const sc=scc(getFC());
   const repNames=[...new Set(sc.map(c=>c.rep_name))].filter(r=>r&&r!=='Unknown'&&sc.filter(c=>c.rep_name===r).length>=5);
-  const repNamesFiltered=repNames.filter(r=>sc.filter(c=>c.rep_name===r).length>=5);
-  const data=repNamesFiltered.map(r=>{
+  const data=repNames.map(r=>{
     const rc=sc.filter(c=>c.rep_name===r);
     const a=k=>rc.length?(rc.reduce((s,c)=>s+(c.scores?.[k]?.score||0),0)/rc.length):0;
-    // Fallback for old calls: average info_sequence + call_control if information_control missing
-    const ic=rc.length?(rc.reduce((s,c)=>{
-      const v=c.scores?.information_control?.score;
-      if(v>0)return s+v;
-      const old=((c.scores?.info_sequence?.score||0)+(c.scores?.call_control?.score||0))/2;
-      return s+old;
-    },0)/rc.length):0;
-    return{rep_name:r,overall:a('overall'),rapport_tone:a('rapport_tone'),price_delivery:a('price_delivery'),salesmanship:a('salesmanship'),closing_attempt:a('closing_attempt'),information_control:ic,calls:rc.length};
+    return{rep_name:r,overall:a('overall'),rapport_tone:a('rapport_tone'),price_delivery:a('price_delivery'),salesmanship:a('salesmanship'),closing_attempt:a('closing_attempt'),calls:rc.length};
   });
-  data.sort((a,b)=>lbKey==='rep_name'?a.rep_name.localeCompare(b.rep_name)*lbDir:(b[lbKey]-a[lbKey])*-lbDir);
-  const cnt=g('lb-cnt');if(cnt)cnt.textContent=`${data.length} rep${data.length!==1?'s':''}`;
+  // Sort by overall desc by default
+  data.sort((a,b)=>(b[lbKey||'overall']||0) - (a[lbKey||'overall']||0));
+  const cnt=g('lb-cnt');
+  if(cnt)cnt.textContent=`${data.length} rep${data.length!==1?'s':''} · ≥5 calls`;
   const body=g('lb-body');if(!body)return;
   const disp=lbShowAll?data:data.slice(0,10);
   const exp=g('lb-expand');
   if(exp){exp.style.display=data.length<=10?'none':'block';exp.textContent=lbShowAll?'▲ Show top 10':`▼ Show all ${data.length} reps`;}
+  if(disp.length === 0){
+    body.innerHTML = '<div style="padding:24px 22px;color:var(--ink3);font-size:13px;text-align:center">No reps with 5+ scored calls in this period</div>';
+    return;
+  }
   body.innerHTML=disp.map((d,i)=>{
-    const rc=i===0?'lb-r1':i===1?'lb-r2':i===2?'lb-r3':'lb-rn';
-    return`<tr><td><span class="lb-rank ${rc}">${i+1}</span></td>
-      <td><span class="lb-name" onclick="nav('profiles',{rep:'${esc(d.rep_name)}'})">${d.rep_name}</span></td>
-      <td><span onclick="libFilters.rep='${esc(d.rep_name)}';nav('library')" style="cursor:pointer">${chip(d.overall.toFixed(1))}</span></td>
-      <td>${chip(d.rapport_tone.toFixed(1))}</td><td>${chip(d.price_delivery.toFixed(1))}</td>
-      <td>${chip(d.salesmanship.toFixed(1))}</td><td>${chip(d.closing_attempt.toFixed(1))}</td>
-      <td style="color:var(--ink3);font-size:11px">${d.calls}</td></tr>`;
-  }).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--ink3);padding:16px">No scored calls</td></tr>';
+    const rankClass = i < 2 ? 'top' : '';
+    const ini2 = ini(d.rep_name);
+    return `<div class="lb-row" onclick="nav('profiles',{rep:'${esc(d.rep_name)}'})">
+      <div class="lb-rank ${rankClass}">${i+1}</div>
+      <div class="lb-name">
+        <div class="lb-avatar">${ini2}</div>
+        <div>
+          <div class="lb-name-text">${esc(d.rep_name)}</div>
+          <div class="lb-name-sub">${d.calls} call${d.calls===1?'':'s'}</div>
+        </div>
+      </div>
+      <div class="lb-score ${scoreClass(d.overall)}">${d.overall.toFixed(1)}</div>
+      <div class="lb-score ${scoreClass(d.rapport_tone)}">${d.rapport_tone.toFixed(1)}</div>
+      <div class="lb-score ${scoreClass(d.closing_attempt)}">${d.closing_attempt.toFixed(1)}</div>
+      <div class="lb-score" style="color:var(--ink3)">${d.calls}</div>
+    </div>`;
+  }).join('');
 }
 function renderTrend(sc){
   const canvas=document.getElementById('trend-chart');if(!canvas)return;
