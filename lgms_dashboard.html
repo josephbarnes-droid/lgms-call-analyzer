@@ -2173,6 +2173,326 @@ html, body {
   .call-row .call-date { display: none; }
 }
 
+
+/* ============================================ */
+/* PHASE 5 ADDITIONS — Rep Profiles page         */
+/* ============================================ */
+
+/* Rep picker — horizontal pill row at the top of the page */
+.rep-picker {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+.rep-picker::-webkit-scrollbar { height: 4px; }
+.rep-picker::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.rep-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px 6px 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink2);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.rep-pill:hover {
+  background: var(--surface);
+  border-color: var(--border3);
+}
+.rep-pill.active {
+  background: var(--lg-green-bg);
+  border-color: var(--lg-green-soft);
+  color: var(--lg-green-dark);
+  font-weight: 500;
+}
+.rep-pill-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.rep-pill.active .rep-pill-avatar {
+  background: var(--lg-green);
+  color: white;
+}
+.rep-pill-meta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink4);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.rep-pill.active .rep-pill-meta { color: var(--lg-green); }
+
+/* SKILL CARDS — strongest / coaching opportunity */
+.skill-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.skill-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  position: relative;
+  overflow: hidden;
+}
+.skill-card.strength { border-left: 4px solid var(--lg-green); }
+.skill-card.weakness { border-left: 4px solid var(--lg-red); }
+.skill-card-label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skill-card-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 12px;
+  color: white;
+  font-weight: 700;
+}
+.skill-card.strength .skill-card-icon { background: var(--lg-green); }
+.skill-card.weakness .skill-card-icon { background: var(--lg-red); }
+.skill-card-name {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 4px;
+  letter-spacing: -0.005em;
+}
+.skill-card-score {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 6px 0 12px;
+  line-height: 1;
+}
+.skill-card-score-suffix {
+  font-size: 18px;
+  color: var(--ink3);
+  font-weight: 400;
+}
+.skill-card-detail {
+  font-size: 12.5px;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+.skill-card-detail strong { color: var(--ink2); font-weight: 600; }
+
+/* Profile header — name + meta + actions */
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.profile-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.profile-name {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.profile-meta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* Profile score row — 5-up grid using existing styles */
+.profile-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+/* Score profile rows — wider label column */
+.score-row.score-row-wide {
+  grid-template-columns: 150px 1fr 50px 50px;
+  gap: 14px;
+}
+.score-row-delta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink4);
+  font-weight: 500;
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+.score-row-delta.up { color: var(--lg-green-dark); }
+.score-row-delta.down { color: var(--lg-red); }
+
+/* Trend chart frame */
+.profile-trend-frame {
+  height: 200px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding-top: 10px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.profile-trend-bar {
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  transition: opacity 0.15s ease;
+  min-width: 4px;
+}
+.profile-trend-summary {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.profile-trend-summary-label {
+  color: var(--ink3);
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.profile-trend-summary-val {
+  font-family: var(--font-display);
+  font-size: 24px;
+  color: var(--ink);
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+/* Recurring coaching / strengths panels */
+.profile-list-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+}
+.profile-list-panel-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.profile-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+}
+.profile-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink2);
+  line-height: 1.5;
+  padding-left: 14px;
+  position: relative;
+}
+.profile-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  background: var(--lg-red);
+  border-radius: 50%;
+}
+.profile-list.strengths li::before { background: var(--lg-green); }
+.profile-list-count {
+  margin-left: auto;
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink4);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Empty state on profile page */
+.profile-empty {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--ink3);
+  font-size: 14px;
+}
+.profile-empty-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1100px) {
+  .skill-cards { grid-template-columns: 1fr; }
+}
+
 </style>
 </head>
 <body>
@@ -3464,84 +3784,339 @@ async function updCall(id,data){
 function renderProfiles(opts={}) {
   // Build store list from reps table
   const stores = [...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
-  // If global location filter is active, use it; otherwise use local store filter
   const storeFilter = locationFilter || opts.store || '';
-  // Filter rep names by store if filter active
+
+  // Filter rep names by store if filter active. Only show reps with at least 1 scored call.
   let repNames = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
   if (storeFilter) {
     const storeReps = new Set(reps.filter(r=>r.location===storeFilter).flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
     repNames = repNames.filter(r => storeReps.has(r));
   }
-  const cards=repNames.map(r=>{
-    const rc=allCalls.filter(c=>c.rep_name===r&&!c.exclude_from_scoring);
-    const overall=rc.length?(rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length).toFixed(1):'—';
-    const rapport=rc.length?(rc.reduce((a,c)=>a+(c.scores?.rapport_tone?.score||0),0)/rc.length).toFixed(1):'—';
-    const sorted=[...rc].sort((a,b)=>new Date(b.call_date||b.created_at)-new Date(a.call_date||a.created_at));
-    const r5=sorted.slice(0,5).map(c=>c.scores?.overall?.score||0),p5=sorted.slice(5,10).map(c=>c.scores?.overall?.score||0);
-    const ra=r5.length?r5.reduce((a,b)=>a+b,0)/r5.length:0,pa=p5.length?p5.reduce((a,b)=>a+b,0)/p5.length:0;
-    const trend=pa===0?'flat':ra>pa+0.3?'up':ra<pa-0.3?'dn':'flat';
-    return`<div class="rep-card${opts.rep===r?' active':''}" onclick="openRepProfile('${esc(r)}')">
-      <div class="rep-av">${ini(r)}</div>
-      <div class="rep-name">${esc(r)}</div>
-      <div class="rep-sub">${rc.length} scored call${rc.length!==1?'s':''}</div>
-      ${(() => { const dbRep = reps.find(x=>x.full_name===r||x.nickname===r); return dbRep?.location ? `<div style="font-size:10.5px;color:var(--tx4);margin-bottom:4px">📍 ${esc(dbRep.location)}</div>` : ''; })()}
-      <div class="rep-score" style="color:${scCol(parseFloat(overall))}">${overall}</div>
-      <div style="font-size:11px;color:var(--ink3)">Rapport: ${rapport}/10</div>
-      <div class="rep-trend ${trend}">${trend==='up'?'↑ Improving':trend==='dn'?'↓ Declining':'→ Stable'}</div>
+  // Filter to reps with at least one scored call
+  repNames = repNames.filter(r => allCalls.some(c => c.rep_name===r && !c.exclude_from_scoring));
+
+  // Sort reps by overall score (desc) so top performer leads
+  const repScores = {};
+  repNames.forEach(r => {
+    const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
+    repScores[r] = rc.length ? rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length : 0;
+  });
+  repNames.sort((a,b) => repScores[b] - repScores[a]);
+
+  // Determine which rep is selected. Default to the top one.
+  const selectedRep = opts.rep && repNames.includes(opts.rep) ? opts.rep : repNames[0];
+
+  // Build the rep picker (horizontal pill row)
+  const pickerHtml = repNames.map(r => {
+    const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
+    const score = repScores[r];
+    const cls = r === selectedRep ? 'rep-pill active' : 'rep-pill';
+    return `<div class="${cls}" onclick="renderProfiles({rep:'${esc(r)}'${storeFilter?`,store:'${esc(storeFilter)}'`:''}})">
+      <div class="rep-pill-avatar">${ini(r)}</div>
+      <span>${esc(r)}</span>
+      <span class="rep-pill-meta">${score.toFixed(1)} · ${rc.length}</span>
     </div>`;
   }).join('');
+
   const storeOpts = stores.map(s=>`<option value="${s}"${storeFilter===s?' selected':''}>${s}</option>`).join('');
-  set('page',`
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-      <div style="font-size:14px;font-weight:700;color:var(--tx)">Rep Profiles${locationFilter?` — ${esc(locationFilter)}`:''}</div>
-      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-        ${(!locationFilter&&stores.length)?`<select class="fsel" onchange="renderProfiles({store:this.value})"><option value="">All locations</option>${storeOpts}</select>`:''}
-        ${(!locationFilter&&storeFilter)?`<span class="bdg" style="cursor:pointer" onclick="renderProfiles({})">✕ ${storeFilter}</span>`:''}
-      </div>
-    </div>
-    <div class="rep-grid">${cards||'<div class="empty"><span class="empty-ico">👤</span><p>No rep data yet.</p></div>'}</div>
+  const storeBar = (!locationFilter && stores.length) ? `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+    <span style="font-family:var(--font-label);font-size:11px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase">Filter by location:</span>
+    <select class="fsel" onchange="renderProfiles({store:this.value})" style="font-size:13px;padding:6px 12px"><option value="">All locations</option>${storeOpts}</select>
+    ${storeFilter?`<span class="bdg" style="cursor:pointer" onclick="renderProfiles({})">✕ ${esc(storeFilter)}</span>`:''}
+  </div>` : '';
+
+  if (repNames.length === 0) {
+    set('page', `${storeBar}<div class="profile-empty">
+      <div class="profile-empty-icon">👤</div>
+      <p>No rep data yet${storeFilter?` for ${esc(storeFilter)}`:''}.</p>
+    </div>`);
+    return;
+  }
+
+  set('page', `${storeBar}
+    <div class="rep-picker">${pickerHtml}</div>
     <div id="rep-detail"></div>`);
-  if(opts.rep)openRepProfile(opts.rep);
+
+  if (selectedRep) openRepProfile(selectedRep);
 }
+
 function openRepProfile(repName){
-  const rc=allCalls.filter(c=>c.rep_name===repName),sc=rc.filter(c=>!c.exclude_from_scoring);
-  const sorted=[...rc].sort((a,b)=>new Date(b.call_date||b.created_at)-new Date(a.call_date||a.created_at));
-  const teamSc=scc(getFC());
-  document.querySelectorAll('.rep-card').forEach(el=>el.classList.toggle('active',el.querySelector('.rep-name')?.textContent===repName));
-  const avgSc=SK.map(k=>({key:k,label:SL[SK.indexOf(k)],rep:sc.length?(sc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/sc.length).toFixed(1):'—',team:teamSc.length?(teamSc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/teamSc.length).toFixed(1):'—'}));
-  const coachMap={};sc.forEach(c=>(c.coaching_points||[]).forEach(p=>{coachMap[p]=(coachMap[p]||0)+1;}));
-  const topCoach=Object.entries(coachMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  const strMap={};sc.forEach(c=>(c.strengths||[]).forEach(s=>{strMap[s]=(strMap[s]||0)+1;}));
-  const topStr=Object.entries(strMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
-  const ckBars=CK.map((k,i)=>{const pct=sc.length?Math.round(sc.filter(c=>c.checklist?.[k]).length/sc.length*100):0,col=pct>=80?'#16a34a':pct>=50?'#d97706':'#dc2626';return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11.5px"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${CKFULL[i]}</span><div style="width:90px;height:5px;background:var(--border);border-radius:3px;overflow:hidden;flex-shrink:0"><div style="width:${pct}%;height:100%;background:${col};border-radius:3px"></div></div><span style="font-size:10.5px;font-weight:700;color:${col};min-width:28px;text-align:right">${pct}%</span></div>`;}).join('');
-  const el=g('rep-detail');if(!el)return;
-  el.innerHTML=`<div class="card" style="border-top:3px solid var(--g);margin-top:4px">
-    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap">
-      <div class="rep-av" style="width:52px;height:52px;font-size:18px;border-radius:16px">${ini(repName)}</div>
-      <div><div style="font-size:18px;font-weight:700">${esc(repName)}</div><div style="font-size:12px;color:var(--ink3)">${rc.length} total · ${sc.length} scored</div></div>
+  const rc = allCalls.filter(c => c.rep_name===repName);
+  const sc = rc.filter(c => !c.exclude_from_scoring);
+  const sorted = [...sc].sort((a,b) => new Date(b.call_date||b.created_at) - new Date(a.call_date||a.created_at));
+  const teamSc = scc(getFC());
+
+  // Compute the rep's average overall and per-skill scores
+  const repAvg = (k) => sc.length ? sc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/sc.length : 0;
+  const teamAvg = (k) => teamSc.length ? teamSc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/teamSc.length : 0;
+
+  const overall = repAvg('overall');
+  const teamOverall = teamAvg('overall');
+
+  // Compute leaderboard rank — only reps with 5+ scored calls
+  const allReps = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean);
+  const eligible = allReps.filter(r => allCalls.filter(c=>c.rep_name===r && !c.exclude_from_scoring).length >= 5);
+  const ranked = eligible.map(r => ({
+    name: r,
+    score: (() => {
+      const rrc = allCalls.filter(c=>c.rep_name===r && !c.exclude_from_scoring);
+      return rrc.length ? rrc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rrc.length : 0;
+    })()
+  })).sort((a,b) => b.score - a.score);
+  const myRank = ranked.findIndex(x => x.name === repName) + 1;
+
+  // Booking rate
+  const booked = sc.filter(c => c.call_outcome==='booked').length;
+  const bookingRate = sc.length ? Math.round(booked/sc.length*100) : 0;
+  const teamBooked = teamSc.filter(c => c.call_outcome==='booked').length;
+  const teamBookingRate = teamSc.length ? Math.round(teamBooked/teamSc.length*100) : 0;
+  const bookingDelta = bookingRate - teamBookingRate;
+
+  // Avg call length (from word count if duration not present — rough proxy)
+  const repWordCount = sc.filter(c=>c.word_count).map(c=>c.word_count);
+  const avgWords = repWordCount.length ? Math.round(repWordCount.reduce((a,b)=>a+b,0)/repWordCount.length) : 0;
+  const avgMinutes = avgWords ? (avgWords / 150).toFixed(1) : '—'; // ~150 wpm conversational rate
+
+  // Talk ratio
+  const repTalkSamples = sc.filter(c=>c.talk_ratio_rep && c.talk_ratio_customer);
+  const repTalkAvg = repTalkSamples.length ? Math.round(repTalkSamples.reduce((a,c)=>a+c.talk_ratio_rep,0)/repTalkSamples.length) : 0;
+  const custTalkAvg = repTalkSamples.length ? 100-repTalkAvg : 0;
+
+  // Compliance %
+  const compHits = sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]===true).length, 0);
+  const compPossible = sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]!=='na').length, 0);
+  const compPct = compPossible ? Math.round(compHits/compPossible*100) : 0;
+  const teamCompHits = teamSc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]===true).length, 0);
+  const teamCompPossible = teamSc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]!=='na').length, 0);
+  const teamCompPct = teamCompPossible ? Math.round(teamCompHits/teamCompPossible*100) : 0;
+  const compDelta = compPct - teamCompPct;
+
+  // Trend: split scored calls in half and compare
+  const oldest = [...sc].sort((a,b) => new Date(a.call_date||a.created_at) - new Date(b.call_date||b.created_at));
+  const half = Math.floor(oldest.length / 2);
+  const firstHalfAvg = half > 0 ? oldest.slice(0,half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/half : 0;
+  const recentHalfAvg = half > 0 ? oldest.slice(half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/(oldest.length-half) : overall;
+  const overallDelta = recentHalfAvg - firstHalfAvg;
+  const overallTrend = overallDelta > 0.3 ? 'up' : overallDelta < -0.3 ? 'down' : 'flat';
+
+  // Verdict for hero
+  const verdictLine = overall >= 8 ? `${repName.split(' ')[0]} is crushing it` :
+                      overall >= 6.5 ? `${repName.split(' ')[0]} is performing well` :
+                      overall >= 5 ? `${repName.split(' ')[0]} has room to grow` :
+                      `${repName.split(' ')[0]} needs coaching`;
+
+  // Strongest / weakest skills
+  const skillKeys = ['rapport_tone', 'information_control', 'price_delivery', 'closing_attempt', 'salesmanship', 'professionalism'];
+  const skillLabels = {
+    rapport_tone: 'Rapport & Tone',
+    information_control: 'Information Control',
+    price_delivery: 'Price Delivery',
+    closing_attempt: 'Closing Attempt',
+    salesmanship: 'Salesmanship',
+    professionalism: 'Professionalism'
+  };
+  const skillScores = skillKeys.map(k => ({ key: k, label: skillLabels[k], score: repAvg(k), team: teamAvg(k) }))
+    .filter(s => s.score > 0); // Only consider skills with actual data
+  skillScores.sort((a,b) => b.score - a.score);
+  const strongest = skillScores[0];
+  const weakest = skillScores[skillScores.length - 1];
+
+  // Build skill cards HTML
+  const skillCardsHtml = strongest && weakest && strongest !== weakest ? `<div class="skill-cards">
+    <div class="skill-card strength">
+      <div class="skill-card-label"><span class="skill-card-icon">★</span>Strongest skill</div>
+      <div class="skill-card-name">${esc(strongest.label)}</div>
+      <div class="skill-card-score ${scoreClass(strongest.score)}">${strongest.score.toFixed(1)}<span class="skill-card-score-suffix">/10</span></div>
+      <div class="skill-card-detail"><strong>${(strongest.score-strongest.team)>=0?'+':''}${(strongest.score-strongest.team).toFixed(1)} vs team avg.</strong> ${esc(repName.split(' ')[0])} consistently performs best in this area. ${strongest.score>=8?'Use as a training example for newer reps.':'Keep building on this strength.'}</div>
+    </div>
+    <div class="skill-card weakness">
+      <div class="skill-card-label"><span class="skill-card-icon">!</span>Coaching opportunity</div>
+      <div class="skill-card-name">${esc(weakest.label)}</div>
+      <div class="skill-card-score ${scoreClass(weakest.score)}">${weakest.score.toFixed(1)}<span class="skill-card-score-suffix">/10</span></div>
+      <div class="skill-card-detail"><strong>${weakest.score>=7?'Their weakest area, but still solid.':weakest.score>=5?'Notable gap vs other skills.':'Significant coaching opportunity here.'}</strong> Coaching focus area — ${(weakest.score-weakest.team)>=0?(weakest.score-weakest.team).toFixed(1)+' above':Math.abs(weakest.score-weakest.team).toFixed(1)+' below'} team avg of ${weakest.team.toFixed(1)}.</div>
+    </div>
+  </div>` : '';
+
+  // Score profile rows (left panel of two-col)
+  const scoreProfileRows = skillScores.map(s => {
+    const fillCls = s.score >= 8 ? '' : s.score >= 5 ? 'mid' : 'low';
+    const valCls = scoreClass(s.score);
+    const delta = s.score - s.team;
+    const deltaSign = delta >= 0 ? '+' : '';
+    const deltaCls = delta > 0.05 ? 'up' : delta < -0.05 ? 'down' : '';
+    return `<div class="score-row score-row-wide">
+      <div class="score-row-label">${esc(s.label)}</div>
+      <div class="score-bar"><div class="score-bar-fill ${fillCls}" style="width:${s.score*10}%"></div></div>
+      <div class="score-row-value ${valCls}">${s.score.toFixed(1)}</div>
+      <div class="score-row-delta ${deltaCls}">${deltaSign}${delta.toFixed(1)}</div>
+    </div>`;
+  }).join('');
+
+  // Build trend visualization — last N scored calls as bars
+  const trendCalls = oldest.slice(-14); // Last 14 calls
+  const trendBars = trendCalls.length > 0 ? trendCalls.map((c, i) => {
+    const v = c.scores?.overall?.score || 0;
+    const heightPct = Math.max(15, v*10); // Min 15% so empty bars are visible
+    const isRecent = i >= trendCalls.length * 0.6;
+    const color = v >= 8 ? 'var(--lg-green)' : v >= 5 ? 'var(--lg-gold)' : 'var(--lg-red)';
+    const opacity = isRecent ? '1' : '0.5';
+    return `<div class="profile-trend-bar" style="height:${heightPct}%;background:${color};opacity:${opacity}" title="${fmtS(c.call_date||c.created_at)}: ${v}/10"></div>`;
+  }).join('') : '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12px">Not enough data</div>';
+
+  // Strengths and coaching aggregations
+  const strMap = {};
+  sc.forEach(c => (c.strengths||[]).forEach(s => { strMap[s] = (strMap[s]||0) + 1; }));
+  const topStr = Object.entries(strMap).sort((a,b) => b[1]-a[1]).slice(0,5);
+  const coachMap = {};
+  sc.forEach(c => (c.coaching_points||[]).forEach(p => { coachMap[p] = (coachMap[p]||0) + 1; }));
+  const topCoach = Object.entries(coachMap).sort((a,b) => b[1]-a[1]).slice(0,5);
+
+  // Recent calls — use mockup-style call-row markup (visual only — the Library page is where you actually click into them)
+  const recentCallsHtml = sorted.slice(0, 5).map(c => {
+    const eff = c.score_overrides?.overall ?? c.scores?.overall?.score ?? 0;
+    const stripeCls = eff >= 8 ? 'good' : eff >= 5 ? 'mid' : 'low';
+    const outcomeMap = {
+      booked: {cls:'outcome-booked', label:'Booked'},
+      estimate_sent: {cls:'outcome-estimate', label:'Estimate'},
+      lost: {cls:'outcome-lost', label:'Lost'},
+      soft_pipeline: {cls:'outcome-pipeline', label:'Pipeline'}
+    };
+    const o = outcomeMap[c.call_outcome] || {cls:'outcome-unknown', label:'Unknown'};
+    const catBadges = [];
+    if (c.move_category && c.move_category !== 'unknown') {
+      const lbl = c.move_category === 'long_distance' ? 'Long distance' : c.move_category.replace(/_/g,' ');
+      catBadges.push(`<span class="cat-badge">${esc(lbl)}</span>`);
+    }
+    if (c.move_timeline && c.move_timeline !== 'unknown') {
+      const tl = {'exact_date':'Exact date','this_week':'This week','two_to_four_weeks':'2-4 wks','one_to_three_months':'1-3 mo','three_plus_months':'3+ mo'}[c.move_timeline];
+      if (tl) catBadges.push(`<span class="cat-badge">${tl}</span>`);
+    }
+    return `<div class="call-row" onclick="libFilters={rep:'${esc(repName)}',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};nav('library')" style="cursor:pointer">
+      <div class="score-stripe ${stripeCls}"></div>
+      <div class="call-score">
+        <span class="call-score-num ${scoreClass(eff)}">${eff || '—'}</span>
+        <span class="call-score-label">overall</span>
+      </div>
+      <div class="call-meta-main">
+        <div class="call-caller">${esc(c.caller_name || 'Unknown caller')}${c.call_purpose ? ' · ' + esc(c.call_purpose) : ''}</div>
+        <div class="call-summary">${esc(c.call_summary || c.move_type || '')}</div>
+        ${catBadges.length ? `<div class="call-categorization">${catBadges.join('')}</div>` : ''}
+      </div>
+      <div class="call-rep">
+        <div class="call-rep-avatar">${ini(repName)}</div>
+        <span class="call-rep-name">${esc(repName.split(' ')[0])}</span>
+      </div>
+      <div><span class="outcome-badge ${o.cls}">${o.label}</span></div>
+      <div class="call-date">${fmtS(c.call_date||c.created_at)}</div>
+      <div class="row-arrow">›</div>
+    </div>`;
+  }).join('');
+
+  // Determine whether the rep has location data
+  const dbRep = reps.find(x => x.full_name===repName || x.nickname===repName);
+  const repLocation = dbRep?.location || '';
+
+  const overallDeltaTeam = overall - teamOverall;
+  const trendPillUp = overallTrend === 'up';
+  const trendPillDown = overallTrend === 'down';
+
+  const el = g('rep-detail');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="profile-header">
+      <div class="profile-avatar">${ini(repName)}</div>
+      <div>
+        <div class="profile-name">${esc(repName)}</div>
+        <div class="profile-meta">${repLocation ? esc(repLocation) + ' · ' : ''}${rc.length} total · ${sc.length} scored${myRank > 0 ? ` · ranked #${myRank} of ${ranked.length}` : ''}</div>
+      </div>
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-g btn-sm" onclick="exportPDFRep('${esc(repName)}')">↓ PDF Report</button>
-        <button class="btn btn-g btn-sm" onclick="libFilters.rep='${esc(repName)}';nav('library')">View calls</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportPDFRep('${esc(repName)}')">↓ PDF report</button>
+        <button class="btn btn-secondary btn-sm" onclick="libFilters={rep:'${esc(repName)}',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};nav('library')">View all calls</button>
       </div>
     </div>
-    <div class="scores-grid" style="margin-bottom:20px">
-      ${avgSc.map(s=>{const n=parseFloat(s.rep),tn=parseFloat(s.team),col=scCol(n);const diff=(!isNaN(n)&&!isNaN(tn))?(n-tn):null;const ds=diff!==null?(diff>0.05?`<span style="color:#16a34a;font-size:10px;font-weight:700">+${diff.toFixed(1)}</span>`:diff<-0.05?`<span style="color:var(--red);font-size:10px;font-weight:700">${diff.toFixed(1)}</span>`:''):'';return`<div class="score-box"><div class="score-box-lbl">${s.label}</div><div class="score-box-val" style="color:${col}">${s.rep}<span style="font-size:10px;color:var(--ink3)">/10</span> ${ds}</div><div class="score-box-bar"><div class="score-box-fill" style="width:${(!isNaN(n)?n:0)*10}%;background:${col}"></div></div><div class="score-box-note" style="color:var(--ink3)">Team: ${s.team}</div></div>`;}).join('')}
+
+    <div class="hero-grid">
+      <div class="hero-card featured">
+        <div class="hero-label">Performance · ${esc(verdictLine)} ${overallTrend !== 'flat' ? `<span class="trend-pill ${trendPillUp?'up':'down'}">${trendPillUp?'↑':'↓'} ${Math.abs(overallDelta).toFixed(1)}</span>` : ''}</div>
+        <div class="hero-value">${overall.toFixed(1)}<span class="hero-value-suffix">/10</span></div>
+        <div class="hero-detail">${sc.length} scored calls${myRank > 0 ? ` · ranked #${myRank} of ${ranked.length} reps` : ''}</div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Booking Rate ${bookingDelta !== 0 ? `<span class="trend-pill ${bookingDelta>0?'up':'down'}">${bookingDelta>0?'↑':'↓'} ${Math.abs(bookingDelta)}%</span>` : ''}</div>
+        <div class="hero-value">${bookingRate}<span class="hero-value-suffix">%</span></div>
+        <div class="hero-detail">${booked} booked of ${sc.length}</div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Avg Call Length</div>
+        <div class="hero-value">${avgMinutes}<span class="hero-value-suffix">min</span></div>
+        <div class="hero-detail">${repTalkAvg > 0 ? `${repTalkAvg}% rep, ${custTalkAvg}% customer` : 'No talk ratio data'}</div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Compliance ${compDelta !== 0 ? `<span class="trend-pill ${compDelta>0?'up':'down'}">${compDelta>0?'↑':'↓'} ${Math.abs(compDelta)}%</span>` : ''}</div>
+        <div class="hero-value">${compPct}<span class="hero-value-suffix">%</span></div>
+        <div class="hero-detail">checklist items hit</div>
+      </div>
     </div>
-    <div class="grid-2" style="margin-bottom:16px">
-      <div><div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Score Trends</div><div style="position:relative;height:180px"><canvas id="rep-trend-chart"></canvas></div></div>
-      <div><div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">22-Step Compliance</div><div style="max-height:200px;overflow-y:auto">${ckBars}</div></div>
+
+    ${skillCardsHtml}
+
+    <div class="two-col" style="grid-template-columns:1fr 1fr">
+      <div class="panel" style="padding:22px">
+        <div class="panel-header" style="padding:0 0 18px;border:none">
+          <div class="panel-title">Score profile</div>
+          <div class="panel-meta">vs team avg</div>
+        </div>
+        <div class="score-card" style="border:none;padding:0">
+          ${scoreProfileRows || '<div style="color:var(--ink3);font-size:13px">Not enough scored calls yet.</div>'}
+        </div>
+      </div>
+
+      <div class="panel" style="padding:22px">
+        <div class="panel-header" style="padding:0 0 18px;border:none">
+          <div class="panel-title">Performance trend</div>
+          <div class="panel-meta">overall · last ${trendCalls.length} calls</div>
+        </div>
+        <div class="profile-trend-frame">${trendBars}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:10px;font-family:var(--font-label);font-size:10px;color:var(--ink3);letter-spacing:0.08em;font-weight:500">
+          <span>OLDEST</span>
+          <span>RECENT</span>
+        </div>
+        ${oldest.length > 1 ? `<div class="profile-trend-summary">
+          <div>
+            <div class="profile-trend-summary-label">First half avg</div>
+            <div class="profile-trend-summary-val">${firstHalfAvg.toFixed(1)}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="profile-trend-summary-label">Recent half avg</div>
+            <div class="profile-trend-summary-val ${overallTrend==='up'?'score-good':overallTrend==='down'?'score-low':''}">${recentHalfAvg.toFixed(1)} ${overallTrend !== 'flat' ? `<span class="trend-pill ${overallTrend==='up'?'up':'down'}" style="font-size:11px;vertical-align:middle">${overallTrend==='up'?'↑':'↓'} ${Math.abs(overallDelta).toFixed(1)}</span>` : ''}</div>
+          </div>
+        </div>` : ''}
+      </div>
     </div>
-    <div class="info-2col" style="margin-bottom:16px">
-      <div class="info-box"><div class="info-box-title">Top Strengths</div><ul class="info-list">${topStr.map(([s,n])=>`<li><span>💪</span>${esc(s)} <span style="color:var(--ink3);font-size:10px">(${n}×)</span></li>`).join('')||'<li style="color:var(--ink3)">Not enough data</li>'}</ul></div>
-      <div class="info-box"><div class="info-box-title">Recurring Coaching Points</div><ul class="info-list">${topCoach.map(([p,n])=>`<li><span>⚡</span>${esc(p)} <span style="color:var(--ink3);font-size:10px">(${n}×)</span></li>`).join('')||'<li style="color:var(--ink3)">Not enough data</li>'}</ul></div>
-    </div>
-    <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Recent Calls</div>
-    ${sorted.slice(0,10).map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border2);font-size:12px;cursor:pointer" onclick="libFilters.rep='${esc(repName)}';nav('library')"><span style="color:var(--ink3);min-width:75px">${fmtS(c.call_date||c.created_at)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.caller_name||'Unknown')} — ${esc(c.call_purpose||'')}</span><span class="op ${c.call_outcome==='booked'?'op-b':c.call_outcome==='estimate_sent'?'op-e':c.call_outcome==='lost'?'op-l':'op-u'}">${c.call_outcome==='booked'?'Booked':c.call_outcome==='estimate_sent'?'Est.':c.call_outcome==='lost'?'Lost':'?'}</span>${!c.exclude_from_scoring?chip((c.scores?.overall?.score||0).toFixed(1)):'<span style="color:var(--ink3);font-size:10px">excl.</span>'}</div>`).join('')}
-  </div>`;
-  const repSorted=[...sc].sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
-  const canvas2=document.getElementById('rep-trend-chart');
-  if(canvas2){if(repTrendChart){repTrendChart.destroy();repTrendChart=null;}
-    repTrendChart=new Chart(canvas2,{type:'line',data:{labels:repSorted.map(c=>fmtS(c.call_date||c.created_at)),datasets:[{label:'Overall',data:repSorted.map(c=>c.scores?.overall?.score||0),borderColor:'#4a7c3f',backgroundColor:'rgba(74,124,63,.08)',borderWidth:2,pointRadius:2,tension:.4,fill:true},{label:'Rapport',data:repSorted.map(c=>c.scores?.rapport_tone?.score||0),borderColor:'#3461c1',backgroundColor:'transparent',borderWidth:2,pointRadius:2,tension:.4,borderDash:[4,3]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{font:{size:10},boxWidth:12}}},scales:{y:{min:0,max:10,ticks:{stepSize:2,color:'#7a857a',font:{size:9}},grid:{color:'rgba(0,0,0,.04)'}},x:{ticks:{color:'#7a857a',maxRotation:45,autoSkip:true,maxTicksLimit:8,font:{size:9}},grid:{display:false}}}}});}
+
+    ${(topStr.length || topCoach.length) ? `<div class="two-col" style="grid-template-columns:1fr 1fr;margin-top:16px">
+      ${topStr.length ? `<div class="profile-list-panel">
+        <div class="profile-list-panel-title">Top strengths</div>
+        <ul class="profile-list strengths">
+          ${topStr.map(([s,n]) => `<li>${esc(s)}<span class="profile-list-count">${n}×</span></li>`).join('')}
+        </ul>
+      </div>` : ''}
+      ${topCoach.length ? `<div class="profile-list-panel">
+        <div class="profile-list-panel-title">Recurring coaching points</div>
+        <ul class="profile-list">
+          ${topCoach.map(([p,n]) => `<li>${esc(p)}<span class="profile-list-count">${n}×</span></li>`).join('')}
+        </ul>
+      </div>` : ''}
+    </div>` : ''}
+
+    ${recentCallsHtml ? `<div class="panel" style="margin-top:16px">
+      <div class="panel-header">
+        <div class="panel-title">Recent calls</div>
+        <div class="panel-meta">${rc.length} total · click to open in library</div>
+      </div>
+      <div class="call-list" style="border:none;border-radius:0">${recentCallsHtml}</div>
+    </div>` : ''}
+  `;
   el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
