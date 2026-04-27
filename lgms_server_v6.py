@@ -1,5 +1,5 @@
 """
-Little Guys Movers - Call Analyzer Server v10
+Little Guys Movers - Call Analyzer Server v12
 =============================================
 Required environment variables:
   ANTHROPIC_API_KEY  - Anthropic API key
@@ -12,7 +12,7 @@ Required environment variables:
 
 import os, json, urllib.request, urllib.error, urllib.parse, tempfile, mimetypes
 import zipfile, io, secrets, re, uuid, threading, time, sys
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone, timedelta
 
 # Force stdout flush immediately so Render logs show in real time
@@ -803,6 +803,8 @@ def should_skip_by_duration(duration_seconds):
         mins = duration_seconds // 60
         return True, f"Call duration {mins}m exceeds {MAX_CALL_DURATION_SECONDS//60}m limit"
     return False, ""
+
+def normalize_objection(raw):
     """Normalize objection labels to canonical display names regardless of how Claude returned them."""
     if not raw:
         return raw
@@ -1058,7 +1060,6 @@ def _reanalyze_worker():
                     "missed_rapport_opportunities": result.get("missed_rapport_opportunities", []),
                     "input_tokens": result.get("input_tokens", 0),
                     "output_tokens": result.get("output_tokens", 0),
-                    "rapport_tone": result.get("scores", {}).get("rapport_tone", {}).get("score", 0),
                     "pricing_model": result.get("pricing_model", "unknown"),
                     "move_timeline": result.get("move_timeline", "unknown"),
                 }
@@ -1096,11 +1097,6 @@ def _reanalyze_worker():
                 "errors": _reanalyze_job["errors"],
                 "finished_at": _reanalyze_job["finished_at"],
             }
-
-        with _reanalyze_lock:
-            _reanalyze_job["status"] = "complete"
-            _reanalyze_job["finished_at"] = datetime.now(timezone.utc).isoformat()
-            _reanalyze_job["current"] = ""
 
     except Exception as e:
         with _reanalyze_lock:
@@ -2147,7 +2143,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
 
 if __name__ == "__main__":
     log("=" * 55)
-    log("  Little Guys Movers — Call Analyzer Server v9")
+    log("  Little Guys Movers — Call Analyzer Server v12")
     log("=" * 55)
     missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","DEEPGRAM_API_KEY"] if not os.environ.get(v)]
     if missing:
@@ -2156,4 +2152,4 @@ if __name__ == "__main__":
         log("\n  All environment variables loaded")
     log(f"  Running at http://127.0.0.1:{PORT}")
     log("  Press Ctrl+C to stop\n")
-    HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
