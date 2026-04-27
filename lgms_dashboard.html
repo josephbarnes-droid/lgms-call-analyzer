@@ -2178,71 +2178,6 @@ html, body {
 /* PHASE 5 ADDITIONS — Rep Profiles page         */
 /* ============================================ */
 
-/* Rep picker — horizontal pill row at the top of the page */
-.rep-picker {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  -webkit-overflow-scrolling: touch;
-}
-.rep-picker::-webkit-scrollbar { height: 4px; }
-.rep-picker::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
-
-.rep-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 14px 6px 6px;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--ink2);
-  transition: all 0.15s ease;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.rep-pill:hover {
-  background: var(--surface);
-  border-color: var(--border3);
-}
-.rep-pill.active {
-  background: var(--lg-green-bg);
-  border-color: var(--lg-green-soft);
-  color: var(--lg-green-dark);
-  font-weight: 500;
-}
-.rep-pill-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--lg-green-bg);
-  color: var(--lg-green-dark);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-label);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-}
-.rep-pill.active .rep-pill-avatar {
-  background: var(--lg-green);
-  color: white;
-}
-.rep-pill-meta {
-  font-family: var(--font-label);
-  font-size: 11px;
-  color: var(--ink4);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-}
-.rep-pill.active .rep-pill-meta { color: var(--lg-green); }
-
 /* SKILL CARDS — strongest / coaching opportunity */
 .skill-cards {
   display: grid;
@@ -2491,6 +2426,238 @@ html, body {
 
 @media (max-width: 1100px) {
   .skill-cards { grid-template-columns: 1fr; }
+}
+
+
+/* ============================================ */
+/* PHASE 5 v2 — Rep card grid                   */
+/* (replaces .rep-picker / .rep-pill approach)  */
+/* ============================================ */
+
+.rep-location-section {
+  margin-bottom: 24px;
+}
+.rep-location-header {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rep-location-header::before {
+  content: '📍';
+  font-size: 12px;
+}
+.rep-location-header-count {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink4);
+  letter-spacing: 0.08em;
+  font-weight: 400;
+}
+
+.rep-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.rep-card-v2 {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+.rep-card-v2:hover {
+  border-color: var(--lg-green-soft);
+  box-shadow: var(--sh);
+  transform: translateY(-1px);
+}
+.rep-card-v2.active {
+  border-color: var(--lg-green);
+  box-shadow: 0 0 0 3px var(--lg-green-bg);
+}
+.rep-card-v2.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--lg-green);
+}
+
+.rep-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.rep-card-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.rep-card-v2.active .rep-card-avatar {
+  background: var(--lg-green);
+  color: white;
+}
+.rep-card-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rep-card-meta {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+.rep-card-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.rep-card-score-big {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.rep-card-score-suffix {
+  font-size: 14px;
+  color: var(--ink3);
+  font-weight: 400;
+}
+.rep-card-score-trend {
+  margin-left: auto;
+}
+
+.rep-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+  font-size: 11.5px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.rep-card-stat-label {
+  font-family: var(--font-label);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  font-weight: 500;
+}
+.rep-card-stat-val {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 2px;
+}
+.rep-card-stat-val.muted { color: var(--ink3); font-weight: 500; }
+
+/* Sparkline */
+.rep-card-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 24px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.rep-card-spark-bar {
+  flex: 1;
+  border-radius: 1.5px 1.5px 0 0;
+  min-width: 3px;
+  min-height: 2px;
+}
+
+/* Header row: location filter + sort note */
+.profile-page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+
+/* Score distribution mini-bars (on featured Average Score card) */
+.score-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+.score-dist-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.85);
+  font-weight: 500;
+}
+.score-dist-label {
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.score-dist-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.score-dist-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.score-dist-bar-fill.high { background: rgba(255,255,255,0.95); }
+.score-dist-bar-fill.mid  { background: rgba(255,255,255,0.55); }
+.score-dist-bar-fill.low  { background: rgba(255,255,255,0.30); }
+.score-dist-pct {
+  text-align: right;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
 }
 
 </style>
@@ -2976,6 +3143,34 @@ function buildOutcomeBar(sc) {
     <div class="outcome-bar-legend">${legend.join('')}</div>`;
 }
 
+
+function buildScoreDist(sc){
+  // Tally scored calls by score band based on overall score
+  let high = 0, mid = 0, low = 0;
+  let n = 0;
+  sc.forEach(c => {
+    const s = c.score_overrides?.overall ?? c.scores?.overall?.score ?? 0;
+    if (!s) return;
+    n++;
+    if (s >= 8) high++;
+    else if (s >= 5) mid++;
+    else low++;
+  });
+  if (n === 0) return '';
+  const pct = (x) => Math.round(x / n * 100);
+  const row = (label, count, pctVal, cls) => `<div class="score-dist-row">
+    <span class="score-dist-label">${label}</span>
+    <div class="score-dist-bar"><div class="score-dist-bar-fill ${cls}" style="width:${pctVal}%"></div></div>
+    <span class="score-dist-pct">${pctVal}%</span>
+  </div>`;
+  return `<div class="score-dist">
+    ${row('8–10', high, pct(high), 'high')}
+    ${row('5–7',  mid,  pct(mid),  'mid')}
+    ${row('1–4',  low,  pct(low),  'low')}
+  </div>`;
+}
+
+
 function renderOverview(){
   const fc=getFC(),sc=scc(fc);
   const turnedAway=fc.filter(c=>c.turned_away).length;
@@ -3000,6 +3195,7 @@ function renderOverview(){
         <div class="hero-label">Average Score</div>
         <div class="hero-value">${avgOverall}<span class="hero-value-suffix">/10</span></div>
         <div class="hero-detail">${sc.length} scored call${sc.length===1?'':'s'} · ${repCount} rep${repCount===1?'':'s'}</div>
+        ${buildScoreDist(sc)}
       </div>
       <div class="hero-card">
         <div class="hero-label">Calls</div>
@@ -3787,45 +3983,123 @@ function renderProfiles(opts={}) {
   const storeFilter = locationFilter || opts.store || '';
 
   // Filter rep names by store if filter active. Only show reps with at least 1 scored call.
-  let repNames = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
+  let repNames = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean);
   if (storeFilter) {
     const storeReps = new Set(reps.filter(r=>r.location===storeFilter).flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
     repNames = repNames.filter(r => storeReps.has(r));
   }
-  // Filter to reps with at least one scored call
   repNames = repNames.filter(r => allCalls.some(c => c.rep_name===r && !c.exclude_from_scoring));
 
-  // Sort reps by overall score (desc) so top performer leads
-  const repScores = {};
+  // Look up location for each rep
+  const repLocation = {};
   repNames.forEach(r => {
-    const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
-    repScores[r] = rc.length ? rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length : 0;
+    const dbRep = reps.find(x => x.full_name===r || x.nickname===r);
+    repLocation[r] = dbRep?.location || 'Unassigned';
   });
-  repNames.sort((a,b) => repScores[b] - repScores[a]);
 
-  // Determine which rep is selected. Default to the top one.
-  const selectedRep = opts.rep && repNames.includes(opts.rep) ? opts.rep : repNames[0];
+  // Group by location, then sort alphabetically within each
+  const byLocation = {};
+  repNames.forEach(r => {
+    const loc = repLocation[r];
+    (byLocation[loc] = byLocation[loc] || []).push(r);
+  });
+  Object.keys(byLocation).forEach(loc => byLocation[loc].sort((a,b) => a.localeCompare(b)));
+  // Sort location keys: known locations alphabetically, then "Unassigned" last
+  const locationOrder = Object.keys(byLocation).sort((a,b) => {
+    if (a === 'Unassigned') return 1;
+    if (b === 'Unassigned') return -1;
+    return a.localeCompare(b);
+  });
 
-  // Build the rep picker (horizontal pill row)
-  const pickerHtml = repNames.map(r => {
+  // Determine selected rep — prefer opts.rep, else top performer overall, else first
+  const allReps = repNames.slice();
+  const overall = (r) => {
     const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
-    const score = repScores[r];
-    const cls = r === selectedRep ? 'rep-pill active' : 'rep-pill';
-    return `<div class="${cls}" onclick="renderProfiles({rep:'${esc(r)}'${storeFilter?`,store:'${esc(storeFilter)}'`:''}})">
-      <div class="rep-pill-avatar">${ini(r)}</div>
-      <span>${esc(r)}</span>
-      <span class="rep-pill-meta">${score.toFixed(1)} · ${rc.length}</span>
+    return rc.length ? rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length : 0;
+  };
+  let selectedRep = opts.rep && allReps.includes(opts.rep) ? opts.rep : null;
+  if (!selectedRep && allReps.length) {
+    selectedRep = allReps.slice().sort((a,b) => overall(b) - overall(a))[0];
+  }
+
+  // Helper to compute a sparkline from a rep's last N scored calls
+  const buildCard = (r) => {
+    const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
+    const sorted = [...rc].sort((a,b) => new Date(a.call_date||a.created_at) - new Date(b.call_date||b.created_at));
+    const recent = sorted.slice(-10);
+    const sc = overall(r);
+    const cls = scoreClass(sc);
+
+    // Booking rate for this rep
+    const booked = rc.filter(c => c.call_outcome==='booked').length;
+    const bookRate = rc.length ? Math.round(booked/rc.length*100) : 0;
+
+    // Trend: split sorted in half, compare averages
+    const half = Math.floor(sorted.length / 2);
+    let trendLabel = '', trendCls = '';
+    if (sorted.length >= 4 && half > 0) {
+      const firstAvg = sorted.slice(0,half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/half;
+      const recentAvg = sorted.slice(half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/(sorted.length-half);
+      const delta = recentAvg - firstAvg;
+      if (delta > 0.3) { trendLabel = `↑ ${delta.toFixed(1)}`; trendCls = 'up'; }
+      else if (delta < -0.3) { trendLabel = `↓ ${Math.abs(delta).toFixed(1)}`; trendCls = 'down'; }
+    }
+    const trendPill = trendLabel ? `<span class="trend-pill ${trendCls}">${trendLabel}</span>` : '';
+
+    // Sparkline
+    const sparkBars = recent.length ? recent.map(c => {
+      const v = c.scores?.overall?.score || 0;
+      const h = Math.max(8, v*10);
+      const color = v >= 8 ? 'var(--lg-green)' : v >= 5 ? 'var(--lg-gold)' : v > 0 ? 'var(--lg-red)' : 'var(--ink5)';
+      return `<div class="rep-card-spark-bar" style="height:${h}%;background:${color}"></div>`;
+    }).join('') : '<div style="flex:1;color:var(--ink4);font-size:10px;text-align:center;align-self:center">No data</div>';
+
+    const isActive = r === selectedRep;
+
+    return `<div class="rep-card-v2${isActive?' active':''}" onclick="renderProfiles({rep:'${esc(r)}'${storeFilter?`,store:'${esc(storeFilter)}'`:''}})">
+      <div class="rep-card-head">
+        <div class="rep-card-avatar">${ini(r)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="rep-card-name">${esc(r)}</div>
+          <div class="rep-card-meta">${esc(repLocation[r])}</div>
+        </div>
+      </div>
+      <div class="rep-card-score-row">
+        <span class="rep-card-score-big ${cls}">${sc.toFixed(1)}<span class="rep-card-score-suffix">/10</span></span>
+        ${trendPill ? `<span class="rep-card-score-trend">${trendPill}</span>` : ''}
+      </div>
+      <div class="rep-card-stats">
+        <div>
+          <div class="rep-card-stat-label">Calls</div>
+          <div class="rep-card-stat-val muted">${rc.length}</div>
+        </div>
+        <div>
+          <div class="rep-card-stat-label">Booking</div>
+          <div class="rep-card-stat-val ${scoreClass(bookRate/10)}">${bookRate}%</div>
+        </div>
+      </div>
+      <div class="rep-card-spark">${sparkBars}</div>
+    </div>`;
+  };
+
+  // Build location sections
+  const sectionsHtml = locationOrder.map(loc => {
+    const cards = byLocation[loc].map(buildCard).join('');
+    return `<div class="rep-location-section">
+      <div class="rep-location-header">${esc(loc)}<span class="rep-location-header-count">${byLocation[loc].length} rep${byLocation[loc].length!==1?'s':''}</span></div>
+      <div class="rep-card-grid">${cards}</div>
     </div>`;
   }).join('');
 
-  const storeOpts = stores.map(s=>`<option value="${s}"${storeFilter===s?' selected':''}>${s}</option>`).join('');
-  const storeBar = (!locationFilter && stores.length) ? `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+  // Store filter bar
+  const storeOpts = stores.map(s=>`<option value="${s}"${storeFilter===s?' selected':''}>${esc(s)}</option>`).join('');
+  const storeBar = (!locationFilter && stores.length) ? `<div class="profile-page-header">
     <span style="font-family:var(--font-label);font-size:11px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase">Filter by location:</span>
     <select class="fsel" onchange="renderProfiles({store:this.value})" style="font-size:13px;padding:6px 12px"><option value="">All locations</option>${storeOpts}</select>
     ${storeFilter?`<span class="bdg" style="cursor:pointer" onclick="renderProfiles({})">✕ ${esc(storeFilter)}</span>`:''}
   </div>` : '';
 
-  if (repNames.length === 0) {
+  if (allReps.length === 0) {
     set('page', `${storeBar}<div class="profile-empty">
       <div class="profile-empty-icon">👤</div>
       <p>No rep data yet${storeFilter?` for ${esc(storeFilter)}`:''}.</p>
@@ -3834,8 +4108,8 @@ function renderProfiles(opts={}) {
   }
 
   set('page', `${storeBar}
-    <div class="rep-picker">${pickerHtml}</div>
-    <div id="rep-detail"></div>`);
+    ${sectionsHtml}
+    <div id="rep-detail" style="margin-top:8px"></div>`);
 
   if (selectedRep) openRepProfile(selectedRep);
 }
