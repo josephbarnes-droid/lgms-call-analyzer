@@ -1553,6 +1553,626 @@ html, body {
   .hero-grid.hero-2up { grid-template-columns: 1fr; }
 }
 
+
+/* ============================================ */
+/* PHASE 4 ADDITIONS — Library page              */
+/* ============================================ */
+
+/* BULK ACTIONS BAR — mockup gradient style */
+.bulk-bar-mockup {
+  background: linear-gradient(to right, var(--lg-green-bg) 0%, var(--surface2) 70%);
+  border: 1px solid var(--lg-green-soft);
+  border-radius: 12px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.bulk-bar-title {
+  font-family: var(--font-label);
+  font-weight: 600;
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* LIB TOOLBAR — mockup style */
+.lib-toolbar-mockup {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.search-box {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  transition: all 0.15s ease;
+}
+.search-box:focus-within {
+  background: var(--surface2);
+  border-color: var(--lg-green);
+  box-shadow: 0 0 0 3px var(--lg-green-bg);
+}
+.search-box input {
+  border: none;
+  outline: none;
+  background: transparent;
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.search-box input::placeholder { color: var(--ink5); }
+
+.filter-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ink2);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.filter-chip:hover {
+  background: var(--surface2);
+  border-color: var(--border3);
+}
+.filter-chip.active {
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  border-color: var(--lg-green-soft);
+  font-weight: 500;
+}
+.chip-count {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink4);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.filter-chip.active .chip-count { color: var(--lg-green); }
+
+/* CALL ROW — mockup style replaces .crow */
+.call-list {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.call-row {
+  display: grid;
+  grid-template-columns: 6px 56px 2fr 150px 110px 110px 28px;
+  gap: 14px;
+  padding: 14px 18px 14px 0;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.call-row:hover { background: var(--surface); }
+.call-row:last-of-type { border-bottom: none; }
+.call-row.expanded { background: var(--lg-green-bg); border-bottom-color: var(--lg-green-soft); }
+.call-row.expanded:hover { background: var(--lg-green-bg); }
+.call-row.flagged-row { background: var(--lg-red-bg); }
+.call-row.flagged-row:hover { background: #F8D7D3; }
+
+.score-stripe {
+  height: 100%;
+  min-height: 56px;
+  width: 6px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+  align-self: stretch;
+}
+.score-stripe.good { background: var(--lg-green-soft); }
+.score-stripe.mid { background: var(--lg-gold); opacity: 0.45; }
+.score-stripe.low { background: var(--lg-red); }
+.score-stripe.flagged { background: var(--lg-red); }
+
+.call-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.call-score-num {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+.call-score-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+.call-meta-main { min-width: 0; }
+.call-caller {
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.call-summary {
+  font-size: 12.5px;
+  color: var(--ink3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.call-categorization {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.cat-badge {
+  font-family: var(--font-label);
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--ink3);
+  background: var(--surface-sunken);
+}
+.cat-badge.specialty { background: rgba(0,102,179,0.12); color: var(--lg-blue); }
+.cat-badge.commercial { background: #E9DEF1; color: #6B3D8C; }
+.cat-badge.long-distance { background: rgba(227,177,36,0.18); color: #8A6420; }
+.cat-badge.flagged { background: var(--lg-red-bg); color: var(--lg-red); }
+
+.call-rep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink2);
+  min-width: 0;
+}
+.call-rep-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.call-rep-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outcome-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.outcome-badge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.outcome-booked { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.outcome-booked::before { background: var(--lg-green); }
+.outcome-estimate { background: rgba(227,177,36,0.18); color: #8A6420; }
+.outcome-estimate::before { background: var(--lg-gold); }
+.outcome-pipeline { background: rgba(0,102,179,0.12); color: var(--lg-blue); }
+.outcome-pipeline::before { background: var(--lg-blue); }
+.outcome-lost { background: var(--lg-red-bg); color: var(--lg-red); }
+.outcome-lost::before { background: var(--lg-red); }
+.outcome-unknown { background: var(--surface-sunken); color: var(--ink3); }
+.outcome-unknown::before { background: var(--ink4); }
+
+.call-date {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.row-arrow {
+  color: var(--ink4);
+  transition: transform 0.2s ease;
+  font-size: 18px;
+  text-align: center;
+}
+.call-row.expanded .row-arrow { transform: rotate(90deg); color: var(--lg-green-dark); }
+
+/* CALL DETAIL — sibling element after .call-row */
+.call-detail {
+  background: linear-gradient(180deg, var(--lg-green-bg) 0%, var(--surface2) 12%);
+  border-top: 1px solid var(--lg-green-soft);
+  border-bottom: 1px solid var(--border);
+  padding: 24px 32px 28px;
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 28px;
+}
+
+.call-detail-hero {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--lg-green-soft);
+}
+.verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.verdict-badge.good { background: var(--lg-green); color: white; }
+.verdict-badge.mid { background: var(--lg-gold); color: #2A1F00; }
+.verdict-badge.low { background: var(--lg-red); color: white; }
+.verdict-badge.excluded { background: var(--ink4); color: white; }
+.verdict-text {
+  flex: 1;
+  font-size: 14px;
+  color: var(--ink2);
+  line-height: 1.5;
+}
+.verdict-text strong { color: var(--ink); font-weight: 600; }
+
+/* Detail left side — main content */
+.detail-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Detail side panel */
+.detail-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Score card (used inside detail-side) */
+.score-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.score-card-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.score-row {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 80px 36px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.score-row:last-child { margin-bottom: 0; }
+.score-row-label {
+  font-size: 12.5px;
+  color: var(--ink2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.score-bar {
+  height: 4px;
+  background: var(--surface-sunken);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%;
+  background: var(--lg-green);
+  border-radius: 2px;
+}
+.score-bar-fill.mid { background: var(--lg-gold); }
+.score-bar-fill.low { background: var(--lg-red); }
+.score-row-value {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--ink);
+}
+
+/* COACHING / STRENGTHS LISTS */
+.coaching-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+}
+.coaching-list li {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.5;
+  padding-left: 14px;
+  position: relative;
+}
+.coaching-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  background: var(--lg-red);
+  border-radius: 50%;
+}
+.coaching-list .strength::before { background: var(--lg-green); }
+
+/* COLLAPSIBLE PANELS inside detail-side (checklist, manager feedback, talk ratio) */
+.detail-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.detail-section-head {
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease;
+}
+.detail-section-head:hover { background: var(--surface); }
+.detail-section-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+}
+.detail-section-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+}
+.detail-section-pill.mid { background: rgba(227,177,36,0.18); color: #8A6420; }
+.detail-section-pill.low { background: var(--lg-red-bg); color: var(--lg-red); }
+.detail-section-chev {
+  color: var(--ink4);
+  font-size: 14px;
+  transition: transform 0.2s ease;
+  margin-left: 8px;
+}
+.detail-section.open .detail-section-chev { transform: rotate(90deg); color: var(--lg-green-dark); }
+.detail-section-body {
+  display: none;
+  padding: 0 18px 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.detail-section.open .detail-section-body { display: block; }
+
+/* CHECKLIST GRID inside expanded section */
+.ck-grid-mockup {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.ck-item-mockup {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink2);
+  line-height: 1.4;
+  padding: 4px 0;
+}
+.ck-item-mockup .ck-icon {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+.ck-item-mockup.hit .ck-icon { color: var(--lg-green); }
+.ck-item-mockup.miss .ck-icon { color: var(--ink5); }
+.ck-item-mockup.na .ck-icon { color: var(--ink4); font-size: 9px; }
+
+/* TALK RATIO inside detail-side */
+.talk-ratio-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 6px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.talk-ratio-bar > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+.talk-ratio-rep { background: var(--lg-green); }
+.talk-ratio-cust { background: var(--lg-blue); }
+
+.talk-ratio-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink3);
+}
+
+/* MANAGER FEEDBACK textarea */
+.mgr-textarea {
+  width: 100%;
+  min-height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  outline: none;
+  resize: vertical;
+  transition: all 0.15s ease;
+}
+.mgr-textarea:focus {
+  border-color: var(--lg-green);
+  background: var(--surface2);
+  box-shadow: 0 0 0 3px var(--lg-green-bg);
+}
+
+/* AUDIO PLAYER (dark gem) */
+.audio-player-mockup {
+  background: var(--ink);
+  color: var(--surface2);
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.audio-play-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--lg-green);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 0 3px rgba(0, 114, 54, 0.25);
+}
+.audio-play-btn:hover { background: var(--lg-green-light); transform: scale(1.04); }
+.audio-meta {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: rgba(255,255,255,0.6);
+  letter-spacing: 0.06em;
+}
+
+/* TRANSCRIPT */
+.transcript-wrap-mockup {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  max-height: 500px;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+/* Detail action buttons */
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1100px) {
+  .call-detail { grid-template-columns: 1fr; }
+  .call-row {
+    grid-template-columns: 6px 50px 2fr 110px 100px 28px;
+  }
+  .call-row .call-rep,
+  .call-row .call-date { display: none; }
+}
+
 </style>
 </head>
 <body>
@@ -2242,67 +2862,86 @@ function renderLibrary(opts={}){
   if(opts.attn)libFilters.attn=opts.attn;
   const repOpts=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort().map(r=>`<option value="${r}"${libFilters.rep===r?' selected':''}>${r}</option>`).join('');
   const job=window._lastJobStatus||{status:'idle'};
-  const bulkBar = SHARE_MODE ? '' : `<div class="card" style="margin-bottom:12px;padding:14px 18px">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <div style="font-size:13px;font-weight:700;color:var(--ink2)">⚡ Bulk Actions</div>
-      <button class="btn btn-s btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Start bulk re-analyze'}</button>
-      <button class="btn btn-g btn-sm" onclick="checkUnscored()">🔍 Check unscored calls</button>
-      <span style="font-size:11px;color:var(--ink3);margin-left:auto">Re-run Claude on all transcripts (~$0.02/call)</span>
-    </div>
-    ${job.status==='running'?`<div style="background:var(--surface);border-radius:9px;padding:12px;margin-top:10px;border:1px solid var(--border2)"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${job.total?Math.round(job.processed/job.total*100):0}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`:''}
-    <div id="unscored-results" style="margin-top:10px"></div>
+
+  // Pre-compute counts for filter chips
+  const fc=getFC();
+  const countOut = (v) => fc.filter(c=>c.call_outcome===v && !c.exclude_from_scoring).length;
+  const cBooked=countOut('booked');
+  const cEstimate=countOut('estimate_sent');
+  const cLost=countOut('lost');
+  const cPipeline=countOut('soft_pipeline');
+
+  const bulkBar = SHARE_MODE ? '' : `<div class="bulk-bar-mockup">
+    <div class="bulk-bar-title">⚡ Bulk Actions</div>
+    <button class="btn btn-primary btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Re-analyze all'}</button>
+    <button class="btn btn-secondary btn-sm" onclick="checkUnscored()">🔍 Check unscored</button>
+    <span style="color:var(--ink3);margin-left:auto;font-size:12px">Re-run Claude on all transcripts · ~$0.02/call</span>
+    ${job.status==='running'?`<div style="background:var(--surface);border-radius:9px;padding:12px;margin-top:10px;border:1px solid var(--border2);width:100%"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${job.total?Math.round(job.processed/job.total*100):0}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`:''}
+    <div id="unscored-results" style="margin-top:10px;width:100%"></div>
   </div>`;
-  set('page', bulkBar + `<div class="card" style="margin-bottom:0">
-    <div class="lib-controls">
-      <div class="search-wrap"><span>🔍</span><input type="text" placeholder="Search calls…" value="${esc(libFilters.search)}" oninput="libFilters.search=this.value;renderCallList()" /></div>
-      <select class="fsel" onchange="libFilters.rep=this.value;renderCallList()"><option value="">All reps</option>${repOpts}</select>
-      <select class="fsel" onchange="libFilters.out=this.value;renderCallList()">
-        <option value="">All outcomes</option>
-        <option value="booked"${libFilters.out==='booked'?' selected':''}>Booked</option>
-        <option value="estimate_sent"${libFilters.out==='estimate_sent'?' selected':''}>Estimate sent</option>
-        <option value="lost"${libFilters.out==='lost'?' selected':''}>Lost</option>
-        <option value="soft_pipeline"${libFilters.out==='soft_pipeline'?' selected':''}>Soft Pipeline</option>
-      </select>
-      <select class="fsel" onchange="libFilters.score=this.value;renderCallList()">
+
+  // Build outcome filter chips
+  const chip = (val, label, count) => {
+    const active = libFilters.out === val;
+    return `<button class="filter-chip${active?' active':''}" onclick="libFilters.out='${active?'':val}';renderCallList()">${label}${count>0?`<span class="chip-count">${count}</span>`:''}</button>`;
+  };
+
+  set('page', bulkBar + `
+    <div class="lib-toolbar-mockup">
+      <div class="search-box">
+        <span style="color:var(--ink3)">🔍</span>
+        <input type="text" placeholder="Search by caller, rep, summary, or filename…" value="${esc(libFilters.search)}" oninput="libFilters.search=this.value;renderCallList()" />
+      </div>
+      ${chip('booked','Booked',cBooked)}
+      ${chip('estimate_sent','Estimate',cEstimate)}
+      ${chip('soft_pipeline','Pipeline',cPipeline)}
+      ${chip('lost','Lost',cLost)}
+      <select class="fsel" onchange="libFilters.rep=this.value;renderCallList()" style="font-size:12px;padding:6px 10px"><option value="">All reps</option>${repOpts}</select>
+      <select class="fsel" onchange="libFilters.score=this.value;renderCallList()" style="font-size:12px;padding:6px 10px">
         <option value="">All scores</option>
-        <option value="high"${libFilters.score==='high'?' selected':''}>High 8-10</option>
-        <option value="mid"${libFilters.score==='mid'?' selected':''}>Mid 5-7</option>
-        <option value="low"${libFilters.score==='low'?' selected':''}>Low 1-4</option>
+        <option value="high"${libFilters.score==='high'?' selected':''}>8–10</option>
+        <option value="mid"${libFilters.score==='mid'?' selected':''}>5–7</option>
+        <option value="low"${libFilters.score==='low'?' selected':''}>1–4</option>
       </select>
-      <select class="fsel" onchange="libFilters.move_cat=this.value;renderCallList()">
+      <select class="fsel" onchange="libFilters.move_cat=this.value;renderCallList()" style="font-size:12px;padding:6px 10px">
         <option value="">All move types</option>
         <option value="standard"${libFilters.move_cat==='standard'?' selected':''}>Standard</option>
         <option value="specialty"${libFilters.move_cat==='specialty'?' selected':''}>Specialty</option>
-        <option value="unload_only"${libFilters.move_cat==='unload_only'?' selected':''}>Unload Only</option>
-        <option value="in_house"${libFilters.move_cat==='in_house'?' selected':''}>In-House</option>
+        <option value="unload_only"${libFilters.move_cat==='unload_only'?' selected':''}>Unload only</option>
+        <option value="in_house"${libFilters.move_cat==='in_house'?' selected':''}>In-house</option>
         <option value="commercial"${libFilters.move_cat==='commercial'?' selected':''}>Commercial</option>
         <option value="storage"${libFilters.move_cat==='storage'?' selected':''}>Storage</option>
       </select>
-      <select class="fsel" onchange="libFilters.sort=this.value;renderCallList()">
-        <option value="newest"${libFilters.sort==='newest'?' selected':''}>Newest first</option>
-        <option value="oldest"${libFilters.sort==='oldest'?' selected':''}>Oldest first</option>
+      <select class="fsel" onchange="libFilters.sort=this.value;renderCallList()" style="font-size:12px;padding:6px 10px">
+        <option value="newest"${libFilters.sort==='newest'?' selected':''}>Newest</option>
+        <option value="oldest"${libFilters.sort==='oldest'?' selected':''}>Oldest</option>
         <option value="score_high"${libFilters.sort==='score_high'?' selected':''}>Highest score</option>
         <option value="score_low"${libFilters.sort==='score_low'?' selected':''}>Lowest score</option>
         <option value="location"${libFilters.sort==='location'?' selected':''}>By location</option>
       </select>
-      <button class="btn btn-g btn-sm" onclick="clearLibF()">Clear</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearLibF()">Clear</button>
     </div>
-    <div class="lib-meta">
+
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;font-size:12px;color:var(--ink3);flex-wrap:wrap">
       <span class="lib-count" id="lib-cnt"></span>
-      <label class="toggle-excl"><input type="checkbox" ${libFilters.showExcl?'checked':''} onchange="libFilters.showExcl=this.checked;renderCallList()" /> Show excluded</label>
+      <label class="toggle-excl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" ${libFilters.showExcl?'checked':''} onchange="libFilters.showExcl=this.checked;renderCallList()" /> Show excluded</label>
       ${libFilters.attn?`<span class="bdg-amber bdg" style="cursor:pointer" onclick="libFilters.attn='';renderCallList()">✕ ${libFilters.attn.replace('_',' ')} filter</span>`:''}
-      ${libFilters.obj?`<span class="bdg" style="background:rgba(239,83,80,.12);color:#ef9a9a;cursor:pointer" onclick="libFilters.obj='';renderCallList()">✕ objection: ${esc(libFilters.obj)}</span>`:''}
+      ${libFilters.obj?`<span class="bdg" style="background:var(--lg-red-bg);color:var(--lg-red);cursor:pointer" onclick="libFilters.obj='';renderCallList()">✕ objection: ${esc(libFilters.obj)}</span>`:''}
       ${libFilters.kw?`<span class="bdg-blue bdg" style="cursor:pointer" onclick="libFilters.kw='';renderCallList()">✕ keyword: ${esc(libFilters.kw)}</span>`:''}
-      ${!SHARE_MODE?`<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-g btn-sm" onclick="toggleSelAll()">☐ Select all</button>${libFilters.showExcl?`<button class="btn btn-d btn-sm" onclick="bulkDelExcluded()">🗑 Delete All Excluded</button>`:''}</span>`:''}
+      ${!SHARE_MODE?`<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-secondary btn-sm" onclick="toggleSelAll()">☐ Select all</button>${libFilters.showExcl?`<button class="btn btn-d btn-sm" onclick="bulkDelExcluded()">🗑 Delete all excluded</button>`:''}</span>`:''}
     </div>
-    ${!SHARE_MODE?`<div class="bulk-bar" id="bulk-bar"><span id="bulk-cnt">0 selected</span><button class="btn btn-d btn-sm" onclick="bulkDel()">🗑 Delete</button><button class="btn btn-g btn-sm" onclick="clearSel()">Cancel</button></div>`:''}
-    <div id="call-list"></div>
-  </div>`);
+
+    ${!SHARE_MODE?`<div class="bulk-bar" id="bulk-bar"><span id="bulk-cnt">0 selected</span><button class="btn btn-d btn-sm" onclick="bulkDel()">🗑 Delete</button><button class="btn btn-secondary btn-sm" onclick="clearSel()">Cancel</button></div>`:''}
+
+    <div class="call-list" id="call-list"></div>
+  `);
   renderCallList();
 }
+
 function clearLibF(){libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};renderLibrary();}
+
 function renderCallList(){
-  const q=libFilters.search.toLowerCase();
+  const q=(libFilters.search||'').toLowerCase();
   const base=getFC();
   let list=base.filter(c=>{
     if(!libFilters.showExcl&&c.exclude_from_scoring)return false;
@@ -2313,13 +2952,12 @@ function renderCallList(){
     if(libFilters.score==='low'&&(c.scores?.overall?.score||0)>4)return false;
     if(libFilters.attn==='decline'&&!c.availability_decline)return false;
     if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
+    if(libFilters.attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
+    if(libFilters.attn==='onsite'&&!c.onsite_suggested)return false;
     if(libFilters.obj&&!(c.objections_detected||[]).some(o=>normObj(o)===libFilters.obj))return false;
     if(libFilters.kw&&!(c.keywords_detected||[]).includes(libFilters.kw))return false;
     if(libFilters.move_cat&&c.move_category!==libFilters.move_cat)return false;
     if(libFilters.confidence==='low'&&(c.evaluation_confidence||10)>5)return false;
-    if(libFilters.attn==='onsite'&&!c.onsite_suggested)return false;
-    if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
-    if(libFilters.attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
     if(q){const hay=[c.rep_name,c.caller_name,c.call_purpose,c.call_summary,c.transcript,c.filename].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   });
@@ -2333,114 +2971,272 @@ function renderCallList(){
   }
   const cnt=g('lib-cnt');if(cnt)cnt.textContent=`${list.length} call${list.length!==1?'s':''}`;
   const el=g('call-list');if(!el)return;
-  el.innerHTML=list.length?list.map(c=>buildRow(c)).join(''):`<div class="empty"><span class="empty-ico">📞</span><p>No calls match filters.</p></div>`;
+  el.innerHTML=list.length?list.map(c=>buildRow(c)).join(''):`<div class="empty" style="padding:48px 24px;text-align:center;color:var(--ink3)"><span class="empty-ico" style="font-size:32px">📞</span><p style="margin-top:12px">No calls match the current filters.</p></div>`;
   updateBB();
 }
+
+// Score color band helper for stripes
+function scoreStripeBand(s){
+  if(!s||s===0)return 'mid';
+  if(s>=8)return 'good';
+  if(s>=5)return 'mid';
+  return 'low';
+}
+
+// Verdict-text generator: a one-sentence summary based on score
+function buildVerdictText(c){
+  const s = c.scores?.overall?.score || 0;
+  const explicit = c.call_summary;
+  if (explicit) return explicit;
+  if (s >= 8) return 'Strong performance across the call.';
+  if (s >= 5) return 'Mixed performance — some highlights, some coaching opportunities.';
+  if (s > 0) return 'Several coaching opportunities identified — review recommended.';
+  return 'No score available.';
+}
+
 function buildRow(c){
-  const s=c.scores?.overall?.score||0,eff=c.score_overrides?.overall??s;
-  const isExcl=c.exclude_from_scoring,sel=selected.has(c.id);
-  const oClass=c.call_outcome==='booked'?'op-b':c.call_outcome==='estimate_sent'?'op-e':c.call_outcome==='lost'?'op-l':c.call_outcome==='soft_pipeline'?'op-sp':'op-u';
-  const oLabel=c.call_outcome==='booked'?'Booked':c.call_outcome==='estimate_sent'?'Estimate sent':c.call_outcome==='lost'?'Lost':c.call_outcome==='soft_pipeline'?'Soft Pipeline':'Unknown';
-  const sClass=c.customer_sentiment==='positive'?'sd-pos':c.customer_sentiment==='hesitant'?'sd-hes':c.customer_sentiment==='negative'?'sd-neg':'sd-neu';
-  const tags=(c.tags||[]).map(t=>`<span class="tag" onclick="event.stopPropagation()">${esc(t)}</span>`).join('');
-  const scoresHtml=SK.map((k,i)=>{const v=c.score_overrides?.[k]??c.scores?.[k]?.score??0,col=scCol(v);return`<div class="score-box"><div class="score-box-lbl">${SL[i]}</div><div class="score-box-val" style="color:${col}">${v}<span style="font-size:10px;color:var(--ink3)">/10</span></div><div class="score-box-bar"><div class="score-box-fill" style="width:${v*10}%;background:${col}"></div></div><div class="score-box-note">${esc(c.scores?.[k]?.note||'')}</div></div>`;}).join('');
-  const ckHtml=CK.map((k,i)=>`<div class="ck-item">${(()=>{const v=c.checklist?.[k];return v===true?'<span style="color:#66bb6a">✓</span>':v==='na'?'<span style="color:var(--tx4);font-size:10px">N/A</span>':'<span style="color:var(--tx4);opacity:.5">✗</span>';})()}</span> <span>${CKFULL[i]}</span></div>`).join('');
-  const ovCnt=c.score_overrides&&Object.keys(c.score_overrides).length;
-  const ovrHtml=`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-    <select id="ok-${c.id}"><option value="">Category…</option>${SK.map(k=>`<option value="${k}">${k.replace(/_/g,' ')}</option>`).join('')}<option value="__na__">Mark as N/A</option></select>
-    <input type="number" min="1" max="10" placeholder="1-10" id="ov-${c.id}" style="width:64px;padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;outline:none" />
-    <input type="text" placeholder="Reason (optional)" id="on-${c.id}" style="width:180px;font-size:12px;padding:6px 9px;border:1.5px solid var(--border);border-radius:8px;outline:none;font-family:'Inter',sans-serif" />
-    <button class="btn btn-s btn-sm" onclick="applyOv('${c.id}')">Apply</button>
-    ${ovCnt?`<button class="btn btn-d btn-sm" onclick="clrOv('${c.id}')">Clear</button>`:''}
-  </div>${ovCnt?`<div style="margin-top:5px;font-size:11px;color:var(--ink3)">Active: ${Object.entries(c.score_overrides).map(([k,v])=>`${k}:${v}`).join(', ')}</div>`:''}`;
-  return`<div class="crow${isExcl?' excl':''}" id="row-${c.id}">
-    <div class="crow-head" onclick="toggleRow('${c.id}')">
-      ${!SHARE_MODE?`<input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();toggleSel('${c.id}')" style="width:15px;height:15px;cursor:pointer;flex-shrink:0" />`:''}
-      <div class="cr-av" style="${isExcl?'background:var(--ink3)':''}">${ini(c.rep_name)}</div>
-      <div class="cr-info">
-        <div class="cr-title"><span style="color:${!c.rep_name||c.rep_name==='Unknown'?'var(--amber)':'var(--g)'};cursor:pointer;font-weight:600" onclick="event.stopPropagation();handleRepClick('${c.id}','${esc((c.rep_name||'').replace(/'/g,''))}')">${esc(c.rep_name||'Unknown')}${!c.rep_name||c.rep_name==='Unknown'?' <span style="font-size:10px;font-weight:500;color:var(--amber)">⚠ assign</span>':''}</span> — ${esc(c.caller_name||'Unknown')}${isExcl?' <span style="font-size:10px;color:var(--ink3)">(excl.)</span>':''}</div>
-        <div class="cr-sub">${esc(c.call_purpose||'')} · ${esc(c.move_type||'')} · ${fmt(c.call_date||c.created_at)}${c.word_count?` · ~${c.word_count} words`:''}</div>
-      </div>
-      <div class="cr-right">
-        <span class="op ${oClass}">${oLabel}</span>
-        ${c.move_category&&c.move_category!=='standard'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(206,147,216,.12);color:var(--purple)">${c.move_category.replace('_',' ')}</span>`:''}
-        ${c.pricing_model&&c.pricing_model!=='unknown'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:${c.pricing_model==='pointed'?'rgba(76,175,80,.12)':'rgba(92,158,255,.12)'};color:${c.pricing_model==='pointed'?'var(--g)':'var(--blue)'}">${c.pricing_model==='pointed'?'📋 Pointed':'⏱ Hourly'}</span>`:''}
-        ${c.move_timeline&&c.move_timeline!=='unknown'?`<span style="font-size:10px;padding:2px 8px;border-radius:20px;background:var(--gl);color:var(--ink2)">${{'exact_date':'📅 Exact date','this_week':'🔥 This week','two_to_four_weeks':'📆 2-4 wks','one_to_three_months':'🗓 1-3 mo','three_plus_months':'🗓 3+ mo'}[c.move_timeline]||''}</span>`:''}
-        ${c.call_quality&&c.call_quality!=='normal'?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">${c.call_quality==='disconnected'?'📵':'⚠'} ${c.call_quality}</span>`:''}
-        ${c.availability_decline?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--rl);color:var(--red)">🚫</span>':''}
-        ${c.turned_away?'<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--al);color:var(--amber)">📵 Turned Away</span>':''}
-        <span class="sdot ${sClass}"></span>
-        ${tags}
-        ${!isExcl?`<span class="score-big" style="color:${scCol(eff)}">${eff}<span style="font-size:11px;color:var(--ink3)">/10</span></span> <span style="font-size:11px;color:var(--ink3)">${avg([c],'rapport_tone')} R</span>`:''}
-        ${ovCnt?'<span style="font-size:11px;color:var(--amber)" title="Override active">⚡</span>':''}
-      </div>
-      <span class="chev">▾</span>
+  const s=c.scores?.overall?.score||0;
+  const eff=c.score_overrides?.overall??s;
+  const isExcl=c.exclude_from_scoring;
+  const sel=selected.has(c.id);
+  const stripeClass = isExcl ? '' : (c.turned_away || c.call_quality==='disconnected') ? 'flagged' : scoreStripeBand(eff);
+  const flaggedRow = (c.turned_away || c.call_quality==='disconnected') && !isExcl;
+
+  // Outcome badge
+  const outcomeMap = {
+    booked:    {cls:'outcome-booked', label:'Booked'},
+    estimate_sent: {cls:'outcome-estimate', label:'Estimate'},
+    lost:      {cls:'outcome-lost', label:'Lost'},
+    soft_pipeline: {cls:'outcome-pipeline', label:'Pipeline'}
+  };
+  const o = outcomeMap[c.call_outcome] || {cls:'outcome-unknown', label:'Unknown'};
+
+  // Categorization badges
+  const catBadges = [];
+  if (c.move_category && c.move_category !== 'unknown') {
+    const mc = c.move_category;
+    const lbl = mc==='long_distance' ? 'Long distance' : mc.replace(/_/g,' ');
+    const mod = mc==='specialty' ? ' specialty' : mc==='commercial' ? ' commercial' : mc==='long_distance' ? ' long-distance' : '';
+    catBadges.push(`<span class="cat-badge${mod}">${esc(lbl)}</span>`);
+  }
+  if (c.pricing_model && c.pricing_model !== 'unknown') {
+    catBadges.push(`<span class="cat-badge">${c.pricing_model==='pointed'?'Pointed':'Hourly'}</span>`);
+  }
+  if (c.move_timeline && c.move_timeline !== 'unknown') {
+    const tl={'exact_date':'Exact date','this_week':'This week','two_to_four_weeks':'2-4 wks','one_to_three_months':'1-3 mo','three_plus_months':'3+ mo'}[c.move_timeline];
+    if (tl) catBadges.push(`<span class="cat-badge">${tl}</span>`);
+  }
+  if (c.turned_away) catBadges.push(`<span class="cat-badge flagged">Turned away</span>`);
+  if (c.call_quality && c.call_quality !== 'normal') catBadges.push(`<span class="cat-badge flagged">${esc(c.call_quality)}</span>`);
+
+  // ---- Build the row header ----
+  const repName = c.rep_name && c.rep_name !== 'Unknown' ? c.rep_name : 'Unknown';
+  const repIni = ini(repName);
+  const callerLine = `${esc(c.caller_name || 'Unknown caller')}${c.call_purpose ? ' · ' + esc(c.call_purpose) : ''}`;
+  const summaryLine = esc(c.call_summary || c.move_type || '');
+
+  const rowHtml = `<div class="call-row${isExcl?' excl':''}${flaggedRow?' flagged-row':''}" id="row-${c.id}" onclick="toggleRow('${c.id}')">
+    <div class="score-stripe ${stripeClass}"></div>
+    <div class="call-score">
+      ${isExcl ? '<span class="call-score-num" style="color:var(--ink4);font-size:14px">EXCL</span>' : `<span class="call-score-num ${scoreClass(eff)}">${eff || '—'}</span>`}
+      ${!isExcl ? '<span class="call-score-label">overall</span>' : ''}
     </div>
-    <div class="cr-body">
-      ${isExcl?`<div class="excl-banner">⚠ Excluded — ${esc(c.exclusion_reason||c.call_type||'marked excluded')}</div>`:''}
-      ${c.evaluation_confidence&&c.evaluation_confidence<=5?`<div style="background:rgba(255,183,77,.06);border:1px solid rgba(255,183,77,.2);border-radius:9px;padding:8px 13px;font-size:12px;color:var(--amber);margin-bottom:8px">⚠ Low confidence (${c.evaluation_confidence}/10) — manager review recommended</div>`:''}
-      ${c.loss_reason?`<div style="background:rgba(239,83,80,.06);border:1px solid rgba(239,83,80,.2);border-radius:9px;padding:8px 13px;font-size:12px;color:#ef9a9a;margin-bottom:8px">Lost — ${c.loss_reason.replace(/_/g,' ')}</div>`:''}
-      ${c.soft_pipeline_reason?`<div style="background:rgba(206,147,216,.06);border:1px solid rgba(206,147,216,.2);border-radius:9px;padding:8px 13px;font-size:12px;color:#ce93d8;margin-bottom:8px">Pipeline — ${c.soft_pipeline_reason.replace(/_/g,' ')}</div>`:''}
-      <div class="ds"><h4>Summary</h4><p style="font-size:13px;line-height:1.75">${esc(c.call_summary||'')}</p>${c.key_details?`<div style="background:var(--gl);border-radius:9px;padding:10px 13px;margin-top:9px;font-size:12px;color:var(--gd);border:1px solid var(--g2)">${esc(c.key_details)}</div>`:''}</div>
-      ${!isExcl?`<div class="ds"><h4>Performance Scores</h4><div class="scores-grid">${scoresHtml}</div></div>`:''}
-      <div class="ds"><h4>22-Step Checklist</h4><div class="ck-grid">${ckHtml}</div></div>
-      <div class="ds"><div class="info-2col">
-        <div class="info-box"><div class="info-box-title">Strengths</div><ul class="info-list">${(c.strengths||[]).map(s=>`<li><span>💪</span>${esc(s)}</li>`).join('')||'<li style="color:var(--ink3)">None</li>'}</ul></div>
-        <div class="info-box"><div class="info-box-title">Coaching Points</div><ul class="info-list">${(c.coaching_points||[]).map(p=>`<li><span>⚡</span>${esc(p)}</li>`).join('')||'<li style="color:var(--ink3)">None</li>'}</ul></div>
-      </div></div>
-      ${!isExcl?`<div class="ds"><h4>Closing Analysis</h4>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:10px">
-          <div style="background:var(--bg2);border-radius:9px;padding:12px 14px;border:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Close Attempts</div>
-            <div style="font-size:26px;font-weight:800;color:${(c.close_attempts||0)>=2?'#66bb6a':(c.close_attempts||0)===1?'#ffb74d':'#ef5350'}">${c.close_attempts||0}</div>
-            <div style="font-size:11px;color:var(--tx3);margin-top:3px">${(c.close_attempts||0)===0?'Never attempted':(c.close_attempts||0)===1?'One attempt':`${c.close_attempts} attempts`}</div>
-          </div>
-          ${c.call_outcome==='soft_pipeline'&&c.pipeline_recovery_quality?`<div style="background:var(--bg2);border-radius:9px;padding:12px 14px;border:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Pipeline Recovery</div>
-            <div style="font-size:26px;font-weight:800;color:${scCol(c.pipeline_recovery_quality)}">${c.pipeline_recovery_quality}/10</div>
-            <div style="font-size:11px;color:var(--tx3);margin-top:3px">${c.pipeline_recovery_quality>=7?'Clear next step set':c.pipeline_recovery_quality>=4?'Some follow-up offered':'No next step — lead at risk'}</div>
-          </div>`:''}
-        </div>
-        ${(c.objections_overcome||[]).length?`<div style="margin-bottom:7px"><span style="font-size:10px;font-weight:700;color:#66bb6a;text-transform:uppercase;letter-spacing:.7px;margin-right:6px">Overcome:</span>${c.objections_overcome.map(o=>`<span style="background:rgba(76,175,80,.12);color:#66bb6a;padding:2px 9px;border-radius:10px;font-size:11.5px;margin-right:4px">${esc(o)}</span>`).join('')}</div>`:''}
-        ${(c.objections_abandoned||[]).length?`<div><span style="font-size:10px;font-weight:700;color:#ef5350;text-transform:uppercase;letter-spacing:.7px;margin-right:6px">Abandoned:</span>${c.objections_abandoned.map(o=>`<span style="background:rgba(239,83,80,.12);color:#ef9a9a;padding:2px 9px;border-radius:10px;font-size:11.5px;margin-right:4px">${esc(o)}</span>`).join('')}</div>`:''}
+    <div class="call-meta-main">
+      <div class="call-caller">${callerLine}</div>
+      <div class="call-summary">${summaryLine}</div>
+      ${catBadges.length ? `<div class="call-categorization">${catBadges.join('')}</div>` : ''}
+    </div>
+    <div class="call-rep">
+      <div class="call-rep-avatar">${repIni}</div>
+      <span class="call-rep-name" onclick="event.stopPropagation();handleRepClick('${c.id}','${esc(repName.replace(/'/g,''))}')">${esc(repName)}</span>
+    </div>
+    <div><span class="outcome-badge ${o.cls}">${o.label}</span></div>
+    <div class="call-date">${fmt(c.call_date||c.created_at)}</div>
+    <div class="row-arrow">›</div>
+  </div>`;
+
+  // ---- Build the detail panel (sibling element, hidden until row.expanded) ----
+  // Verdict
+  const verdictBand = isExcl ? 'excluded' : scoreStripeBand(eff);
+  const verdictLabelText = isExcl ? 'Excluded' : (eff >= 8 ? 'Strong' : eff >= 5 ? 'Mixed' : 'Needs work');
+  const verdictBadge = `<div class="verdict-badge ${verdictBand}">${isExcl ? 'EXCL' : (eff || '—')} · ${verdictLabelText}</div>`;
+  const verdictText = `<div class="verdict-text">${esc(buildVerdictText(c))}${c.key_details ? `<br><strong>Details:</strong> ${esc(c.key_details)}` : ''}</div>`;
+
+  // Score breakdown rows (uses CK-skip and shows the 5 key skill scores)
+  const scoreRows = SK.filter(k=>k!=='overall').map((k,i)=>{
+    const v = c.score_overrides?.[k] ?? c.scores?.[k]?.score ?? 0;
+    const lbl = SL[i+1] || k.replace(/_/g,' ');
+    const fillCls = v>=8 ? '' : v>=5 ? 'mid' : 'low';
+    const valCls = scoreClass(v);
+    return `<div class="score-row">
+      <div class="score-row-label">${esc(lbl)}</div>
+      <div class="score-bar"><div class="score-bar-fill ${fillCls}" style="width:${v*10}%"></div></div>
+      <div class="score-row-value ${valCls}">${v || '—'}</div>
+    </div>`;
+  }).join('');
+
+  // Checklist counts (the collapsible pill)
+  const ckHits = CK.filter(k=>c.checklist?.[k]===true).length;
+  const ckNa = CK.filter(k=>c.checklist?.[k]==='na').length;
+  const ckTotal = CK.length;
+  const ckScored = ckTotal - ckNa;
+  const ckPillCls = ckHits >= ckScored*0.8 ? '' : ckHits >= ckScored*0.5 ? 'mid' : 'low';
+  const ckGridHtml = CK.map((k,i) => {
+    const v = c.checklist?.[k];
+    const cls = v===true ? 'hit' : v==='na' ? 'na' : 'miss';
+    const icon = v===true ? '✓' : v==='na' ? 'N/A' : '✗';
+    return `<div class="ck-item-mockup ${cls}"><span class="ck-icon">${icon}</span><span>${esc(CKFULL[i])}</span></div>`;
+  }).join('');
+
+  // Talk ratio
+  const tRep = c.talk_ratio_rep || 0;
+  const tCust = c.talk_ratio_customer || 0;
+  const tTotal = tRep + tCust;
+  const repPct = tTotal > 0 ? Math.round(tRep/tTotal*100) : 0;
+  const custPct = tTotal > 0 ? 100 - repPct : 0;
+  const talkBar = tTotal > 0
+    ? `<div class="talk-ratio-bar">
+        ${repPct > 0 ? `<div class="talk-ratio-rep" style="width:${repPct}%">${repPct}% Rep</div>` : ''}
+        ${custPct > 0 ? `<div class="talk-ratio-cust" style="width:${custPct}%">${custPct}% Cust</div>` : ''}
+       </div>
+       <div class="talk-ratio-meta"><span>Rep ${repPct}%</span><span>Customer ${custPct}%</span></div>`
+    : '<div style="color:var(--ink3);font-size:12px">No talk-ratio data</div>';
+
+  // Strengths and coaching
+  const strengthList = (c.strengths||[]).map(s=>`<li class="strength">${esc(s)}</li>`).join('') || '<li class="strength" style="color:var(--ink3)">No specific strengths noted</li>';
+  const coachingList = (c.coaching_points||[]).map(p=>`<li>${esc(p)}</li>`).join('') || '<li style="color:var(--ink3)">No coaching points noted</li>';
+
+  // Override controls
+  const ovCnt = c.score_overrides && Object.keys(c.score_overrides).length;
+  const ovrHtml = !SHARE_MODE ? `<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+    <select id="ok-${c.id}" style="font-size:12px;padding:6px 9px;border:1px solid var(--border);border-radius:6px"><option value="">Category…</option>${SK.map(k=>`<option value="${k}">${k.replace(/_/g,' ')}</option>`).join('')}<option value="__na__">Mark as N/A</option></select>
+    <input type="number" min="1" max="10" placeholder="1-10" id="ov-${c.id}" style="width:64px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none" />
+    <input type="text" placeholder="Reason (optional)" id="on-${c.id}" style="width:180px;font-size:12px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;outline:none;font-family:var(--font-ui)" />
+    <button class="btn btn-primary btn-sm" onclick="applyOv('${c.id}')">Apply</button>
+    ${ovCnt?`<button class="btn btn-d btn-sm" onclick="clrOv('${c.id}')">Clear</button>`:''}
+  </div>${ovCnt?`<div style="margin-top:5px;font-size:11px;color:var(--ink3)">Active: ${Object.entries(c.score_overrides).map(([k,v])=>`${k}:${v}`).join(', ')}</div>`:''}` : '';
+
+  // Audio + transcript on left
+  const audioBlock = c.filename ? `<div class="audio-player-mockup">
+    <button class="audio-play-btn" onclick="event.stopPropagation();playAudio('${c.id}',this)">▶</button>
+    <div class="audio-meta">
+      <span>${esc(c.filename||'')}</span>
+      <span>${c.word_count?`~${c.word_count} words`:''}</span>
+    </div>
+  </div>` : '';
+  const transcriptBlock = c.transcript ? `<div class="transcript-wrap-mockup" id="tx-${c.id}">${buildTxHtml(c)}</div>` : '<div style="color:var(--ink3);font-size:12px;padding:12px">No transcript available</div>';
+
+  // Action buttons
+  const actionsBar = `<div class="detail-actions">
+    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();exportPDFCall('${c.id}')">↓ PDF</button>
+    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openEditTranscript('${c.id}')">✏ Edit transcript</button>
+    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();reapplyCorrections('${c.id}',this)">↻ Re-analyze</button>
+    ${!SHARE_MODE?`<button class="btn btn-d btn-sm" style="margin-left:auto" onclick="event.stopPropagation();delCall('${c.id}')">🗑 Delete</button>`:''}
+  </div>`;
+
+  // Banners (excl, low confidence, loss reason)
+  const banners = `${isExcl?`<div class="excl-banner" style="background:var(--surface-sunken);border:1px solid var(--border);padding:10px 14px;border-radius:8px;font-size:12.5px;color:var(--ink2);margin-bottom:8px">⚠ Excluded — ${esc(c.exclusion_reason||c.call_type||'marked excluded')}</div>`:''}
+    ${c.evaluation_confidence&&c.evaluation_confidence<=5?`<div style="background:rgba(227,177,36,0.1);border:1px solid rgba(227,177,36,0.3);border-radius:8px;padding:10px 14px;font-size:12.5px;color:#8A6420;margin-bottom:8px">⚠ Low confidence (${c.evaluation_confidence}/10) — manager review recommended</div>`:''}
+    ${c.loss_reason?`<div style="background:var(--lg-red-bg);border:1px solid rgba(201,37,44,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-red);margin-bottom:8px">Lost — ${esc(c.loss_reason.replace(/_/g,' '))}</div>`:''}
+    ${c.soft_pipeline_reason?`<div style="background:rgba(0,102,179,0.08);border:1px solid rgba(0,102,179,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-blue);margin-bottom:8px">Pipeline — ${esc(c.soft_pipeline_reason.replace(/_/g,' '))}</div>`:''}`;
+
+  // Tags + objections + keywords
+  const tagsRow = `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">
+    ${(c.tags||[]).map(t=>`<span class="tag" style="background:var(--surface-sunken);color:var(--ink2);padding:3px 8px;border-radius:4px;font-size:11px">${esc(t)}${!SHARE_MODE?` <span class="tag-rm" onclick="event.stopPropagation();rmTag('${c.id}','${esc(t)}')" style="cursor:pointer;color:var(--ink4);margin-left:4px">✕</span>`:''}</span>`).join('')}
+    ${!SHARE_MODE?`<input class="tag-inp" placeholder="+ tag" onkeydown="addTag(event,'${c.id}')" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;outline:none;font-family:var(--font-ui);width:80px" />`:''}
+  </div>`;
+
+  const keywordsBlock = (c.keywords_detected||[]).length ? `<div style="margin-top:10px"><div class="score-card-title" style="margin-bottom:8px">Keywords</div><div style="display:flex;flex-wrap:wrap;gap:5px">${c.keywords_detected.map((k,i)=>{const pos=c.keyword_positions?.[k];const spanId=`txs-${c.id}-kw-${i}`;return`<span class="cat-badge specialty" style="cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="event.stopPropagation();jumpTx(event,'${spanId}')"`:''}>${esc(k)}</span>`;}).join('')}</div></div>` : '';
+
+  const objectionsBlock = (c.objections_detected||[]).length ? `<div style="margin-top:10px"><div class="score-card-title" style="margin-bottom:8px">Objections</div><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map((ob,i)=>{const norm=normObj(ob);const pos=c.objection_positions?.[ob]||c.objection_positions?.[norm];const spanId=`txs-${c.id}-obj-${i}`;const isAbn=(c.objections_abandoned||[]).some(a=>normObj(a)===norm);return`<span class="cat-badge flagged" style="cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="event.stopPropagation();jumpTx(event,'${spanId}')"`:''}>${esc(norm)}${isAbn?' ⚠':''}</span>`;}).join('')}</div></div>` : '';
+
+  // The detail block (sibling to call-row, hidden via CSS until .expanded)
+  const detailHtml = `<div class="call-detail" id="detail-${c.id}" style="display:none">
+    <div class="call-detail-hero">
+      ${verdictBadge}
+      ${verdictText}
+    </div>
+
+    <div class="detail-main">
+      ${banners}
+      ${audioBlock}
+      ${transcriptBlock}
+      ${keywordsBlock}
+      ${objectionsBlock}
+      ${tagsRow}
+      ${actionsBar}
+    </div>
+
+    <div class="detail-side">
+      ${!isExcl?`<div class="score-card">
+        <div class="score-card-title"><span>Score breakdown</span><span style="font-family:var(--font-display);font-size:18px;font-weight:700;color:${eff>=8?'var(--lg-green)':eff>=5?'var(--lg-gold)':'var(--lg-red)'}">${eff||'—'}<span style="font-size:12px;color:var(--ink3);font-weight:400">/10</span></span></div>
+        ${scoreRows}
       </div>`:''}
-      <div class="ds"><h4>Keywords</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${(c.keywords_detected||[]).map((k,i)=>{const pos=c.keyword_positions?.[k];const spanId=`txs-${c.id}-kw-${i}`;return`<span class="tag" style="background:rgba(92,158,255,.1);color:var(--blue);cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="jumpTx(event,'${spanId}')"`:''}>${esc(k)}</span>`;}).join('')||'<span style="color:var(--ink4);font-size:12px">None</span>'}</div></div>
-      ${(c.objections_detected||[]).length?`<div class="ds"><h4>Objections</h4><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map((o,i)=>{const norm=normObj(o);const pos=c.objection_positions?.[o]||c.objection_positions?.[norm];const spanId=`txs-${c.id}-obj-${i}`;const isAbn=(c.objections_abandoned||[]).some(a=>normObj(a)===norm);return`<span style="background:${isAbn?'rgba(239,83,80,.2)':'var(--rl)'};color:${isAbn?'#ef9a9a':'var(--red)'};padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="jumpTx(event,'${spanId}')"`:''}>${esc(norm)}${isAbn?' ⚠':''}</span>`;}).join('')}</div></div>`:''}
-      ${(c.missed_rapport_opportunities||[]).length?`<div class="ds"><h4>Missed Rapport Opportunities</h4><div style="display:flex;flex-direction:column;gap:5px">${c.missed_rapport_opportunities.map(m=>`<div style="background:rgba(255,183,77,.06);border-left:3px solid var(--amber);border-radius:0 9px 9px 0;padding:8px 12px;font-size:12.5px;color:var(--tx2)">⚠ ${esc(m)}</div>`).join('')}</div></div>`:''}
-      <div class="ds"><h4>Talk Ratio</h4><div class="tr-bar" style="max-width:360px"><div class="tr-rep" style="width:${c.talk_ratio_rep||40}%">${c.talk_ratio_rep||40}% Rep</div><div class="tr-cust" style="width:${c.talk_ratio_customer||60}%">${c.talk_ratio_customer||60}% Cust</div></div></div>
-      ${(c.value_props_used||[]).length?`<div class="ds"><h4>Value Props Used</h4><div style="display:flex;flex-wrap:wrap;gap:6px">${c.value_props_used.map(v=>`<span style="background:rgba(76,175,80,.1);color:#66bb6a;padding:2px 9px;border-radius:10px;font-size:11.5px">${esc(v)}</span>`).join('')}</div></div>`:''}
-      <div class="ds"><h4>Tags</h4><div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${(c.tags||[]).map(t=>`<span class="tag">${esc(t)} <span class="tag-rm" onclick="event.stopPropagation();rmTag('${c.id}','${esc(t)}')">✕</span></span>`).join('')}<input class="tag-inp" placeholder="+ tag" onkeydown="addTag(event,'${c.id}')" /></div></div>
-      ${!SHARE_MODE?`
-      <div class="ds"><h4>Manager Notes</h4><textarea class="nt" id="nt-${c.id}" placeholder="Add coaching notes…">${esc(c.manager_notes||'')}</textarea><button class="btn btn-s btn-sm" style="margin-top:6px" onclick="saveNotes('${c.id}')">Save notes</button></div>
-      <div class="ds"><h4>Score Override <span style="font-size:10px;font-weight:400;color:var(--ink3)">— saves to correction log</span></h4>${ovrHtml}</div>
-      <div class="ds"><h4>Exclude from Scoring</h4><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" ${c.exclude_from_scoring?'checked':''} onchange="toggleExcl('${c.id}',this.checked)" />Exclude this call</label></div>
-      `:''}
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-        <button class="btn btn-g btn-sm" onclick="exportPDFCall('${c.id}')">↓ PDF</button>
-        ${c.filename?`<button class="btn btn-g btn-sm" onclick="playAudio('${c.id}',this)">▶ Audio</button>`:''}
-        <button class="btn btn-g btn-sm" onclick="openEditTranscript('${c.id}')">✏ Edit Transcript</button>
-        <button class="btn btn-g btn-sm" onclick="reapplyCorrections('${c.id}',this)">↻ Re-analyze</button>
+
+      <div class="detail-section" id="ck-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('ck-section-${c.id}')">
+          <span class="detail-section-title">22-step checklist</span>
+          <span class="detail-section-pill ${ckPillCls}">${ckHits}/${ckScored} ✓${ckNa>0?` · ${ckNa} N/A`:''}</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">
+          <div class="ck-grid-mockup">${ckGridHtml}</div>
+        </div>
       </div>
-      ${c.transcript?`<div class="ds"><h4>Transcript <span style="font-weight:400;color:var(--tx4);text-transform:none;letter-spacing:0">— click keywords/objections above to jump & highlight</span></h4><div class="txb" id="tx-${c.id}">${buildTxHtml(c)}</div></div>`:''}
-      ${!SHARE_MODE?`<div style="text-align:right;margin-top:10px"><button class="btn btn-d btn-sm" onclick="delCall('${c.id}')">🗑 Delete</button></div>`:''}
+
+      <div class="score-card">
+        <div class="score-card-title">Strengths</div>
+        <ul class="coaching-list">${strengthList}</ul>
+      </div>
+
+      <div class="score-card">
+        <div class="score-card-title">Coaching opportunities</div>
+        <ul class="coaching-list">${coachingList}</ul>
+      </div>
+
+      <div class="detail-section" id="talk-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('talk-section-${c.id}')">
+          <span class="detail-section-title">Talk ratio</span>
+          <span class="detail-section-pill">${repPct}% / ${custPct}%</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">${talkBar}</div>
+      </div>
+
+      ${!SHARE_MODE?`<div class="detail-section" id="mgr-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('mgr-section-${c.id}')">
+          <span class="detail-section-title">Manager feedback</span>
+          <span class="detail-section-pill">${c.manager_notes?'Has notes':'Add notes'}</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">
+          <textarea class="mgr-textarea" id="nt-${c.id}" placeholder="Add coaching notes for this call…">${esc(c.manager_notes||'')}</textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();saveNotes('${c.id}')">Save notes</button>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-left:auto"><input type="checkbox" ${c.exclude_from_scoring?'checked':''} onchange="event.stopPropagation();toggleExcl('${c.id}',this.checked)" />Exclude from scoring</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-section" id="ov-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('ov-section-${c.id}')">
+          <span class="detail-section-title">Score override</span>
+          <span class="detail-section-pill ${ovCnt?'mid':''}">${ovCnt?`${ovCnt} active`:'None'}</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">${ovrHtml}</div>
+      </div>`:''}
     </div>
   </div>`;
+
+  return rowHtml + detailHtml;
 }
 
-async function playAudio(callId,btn){
-  const orig=btn.innerHTML;btn.disabled=true;btn.innerHTML='Loading…';
-  try{
-    const r=await fetch(API+'/audio_url/'+callId);
-    const d=await r.json();
-    if(!r.ok||!d.url)throw new Error(d.error||'No audio file found');
-    window.open(d.url,'_blank');
-    btn.innerHTML=orig;btn.disabled=false;
-  }catch(e){
-    btn.innerHTML='Not found';btn.disabled=false;
-    setTimeout(()=>{btn.innerHTML=orig;},2000);
-  }
+// New helper: toggle a single detail section (checklist, talk ratio, manager feedback)
+function toggleDetailSection(id){
+  const el = g(id);
+  if (el) el.classList.toggle('open');
 }
-
 
 function markTxEdited(callId){
   const tx=g('tx-'+callId);if(!tx)return;
@@ -2534,7 +3330,14 @@ function jumpTx(evt,spanId){
     setTimeout(()=>span.classList.remove('active'),2500);
   },row&&!row.classList.contains('open')?200:50);
 }
-function toggleRow(id){const r=g('row-'+id);if(r)r.classList.toggle('open');}
+function toggleRow(id){
+  const r=g('row-'+id);
+  const d=g('detail-'+id);
+  if(r){
+    const isOpen = r.classList.toggle('expanded');
+    if(d) d.style.display = isOpen ? 'grid' : 'none';
+  }
+}
 function toggleSel(id){if(selected.has(id))selected.delete(id);else selected.add(id);updateBB();const r=g('row-'+id);if(r){const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=selected.has(id);}}
 function updateBB(){const b=g('bulk-bar');if(!b)return;const n=selected.size;b.classList.toggle('on',n>0);const c=g('bulk-cnt');if(c)c.textContent=`${n} call${n!==1?'s':''} selected`;}
 function clearSel(){selected.clear();updateBB();renderCallList();}
