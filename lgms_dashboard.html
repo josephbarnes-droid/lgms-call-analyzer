@@ -308,7 +308,6 @@ textarea.nt:focus{border-color:var(--g)}
   <div id="status-bar" class="status-bar">
     <span class="sb-msg" id="sb-msg">Loading…</span>
     <span id="loc-indicator"></span>
-    <button class="btn btn-d btn-sm" id="stop-all-btn" style="padding:3px 9px;font-size:11px;display:none" onclick="stopAllOperations()" title="Stop all running operations">⏹ Stop all</button>
     <button class="btn btn-g btn-sm" style="padding:3px 9px;font-size:11px" onclick="refreshData()">↺ Refresh</button>
   </div>
   <div class="page" id="page"></div>
@@ -402,10 +401,6 @@ function updateStatusBar(){
   const batchRunning=batchJob.status==='running';
   const anyRunning=jobRunning||batchRunning;
   bar.classList.toggle('warn',anyRunning);
-
-  // Show/hide the global Stop All button
-  const stopBtn=g('stop-all-btn');
-  if(stopBtn) stopBtn.style.display = anyRunning ? '' : 'none';
 
   // Build or remove the global progress bar
   let progBar=g('sb-prog-wrap');
@@ -707,7 +702,6 @@ function renderLibrary(opts={}){
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <div style="font-size:13px;font-weight:700;color:var(--ink2)">⚡ Bulk Actions</div>
       <button class="btn btn-s btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Start bulk re-analyze'}</button>
-      ${job.status==='running'?'<button class="btn btn-d btn-sm" onclick="stopReanalyze()">⏹ Stop</button>':''}
       <button class="btn btn-g btn-sm" onclick="checkUnscored()">🔍 Check unscored calls</button>
       <span style="font-size:11px;color:var(--ink3);margin-left:auto">Re-run Claude on all transcripts (~$0.02/call)</span>
     </div>
@@ -1627,39 +1621,12 @@ function setAudioFiles(files){
   if(list)list.innerHTML=files.map((f,i)=>`<div class="q-item" id="qi-${i}"><span class="q-ico" id="qis-${i}">⭕</span><span class="q-name">${esc(f.name)}</span><span class="q-size">${(f.size/1024/1024).toFixed(1)}MB</span></div>`).join('');
 }
 function setQS(i,s){const el=document.getElementById('qis-'+i);if(el)el.innerHTML={processing:'▶',done:'✅',skipped:'⚠️',error:'❌'}[s]||'⭕';}
-// Client-side cancel flag for individual audio file uploads
-let _audioUploadCancel = false;
-function cancelAudioUpload(){
-  _audioUploadCancel = true;
-  showToast('Cancelling — current files will finish, queue will stop', 'info');
-}
 async function submitAudio(){
   if(!audioFiles.length)return;
-  _audioUploadCancel = false;
   const btn=g('add-audio-btn');btn.disabled=true;btn.innerHTML='<span class="spin"></span> Processing…';
-  // Show inline cancel button next to progress
-  const progEl=g('audio-progress'); if(progEl){
-    progEl.style.display='block';
-    let cancelBtn=g('audio-cancel-btn');
-    if(!cancelBtn){
-      cancelBtn=document.createElement('button');
-      cancelBtn.id='audio-cancel-btn';
-      cancelBtn.className='btn btn-d btn-sm';
-      cancelBtn.style.cssText='margin-left:10px;padding:4px 10px;font-size:11px';
-      cancelBtn.textContent='⏹ Stop';
-      cancelBtn.onclick=cancelAudioUpload;
-      progEl.appendChild(cancelBtn);
-    }
-    cancelBtn.style.display='';
-  }
+  g('audio-progress').style.display='block';
   const skipped=[];let processed=0;const total=audioFiles.length;
   for(let i=0;i<total;i+=3){
-    if(_audioUploadCancel){
-      // Mark remaining as cancelled
-      for(let k=i;k<total;k++){setQS(k,'skipped');}
-      skipped.push(`${total-i} file(s) cancelled by user`);
-      break;
-    }
     const batch=audioFiles.slice(i,i+3);
     await Promise.all(batch.map(async(af,bi)=>{
       const idx=i+bi;
@@ -1683,16 +1650,10 @@ async function submitAudio(){
     }));
     g('audio-prog-bar').style.width=Math.round(Math.min(i+3,total)/total*100)+'%';
   }
-  g('audio-prog-bar').style.width='100%';
-  const wasCancelled=_audioUploadCancel;
-  g('audio-prog-text').textContent= wasCancelled
-    ? `Stopped! ${processed} analyzed before cancel, ${skipped.length} skipped/cancelled`
-    : `Done! ${processed} analyzed${skipped.length?`, ${skipped.length} skipped`:''}`;
+  g('audio-prog-bar').style.width='100%';g('audio-prog-text').textContent=`Done! ${processed} analyzed${skipped.length?`, ${skipped.length} skipped`:''}`;
   if(skipped.length){g('audio-skipped').style.display='block';g('audio-skipped-list').innerHTML=skipped.map(s=>`<div>• ${esc(s)}</div>`).join('');}
   if(processed>0)g('add-audio-msg').innerHTML=`<div class="msg-ok">✓ ${processed} call${processed!==1?'s':''} added!</div>`;
-  const cancelBtn=g('audio-cancel-btn'); if(cancelBtn) cancelBtn.style.display='none';
   btn.disabled=false;btn.textContent='Analyze & Save';audioFiles=[];
-  _audioUploadCancel = false;
 }
 async function submitPaste(){
   const btn=g('paste-btn'),msg=g('paste-msg');
