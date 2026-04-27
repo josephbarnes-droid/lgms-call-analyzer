@@ -308,6 +308,7 @@ textarea.nt:focus{border-color:var(--g)}
   <div id="status-bar" class="status-bar">
     <span class="sb-msg" id="sb-msg">Loading…</span>
     <span id="loc-indicator"></span>
+    <button class="btn btn-d btn-sm" id="stop-all-btn" style="padding:3px 9px;font-size:11px;display:none" onclick="stopAllOperations()" title="Stop all running operations">⏹ Stop all</button>
     <button class="btn btn-g btn-sm" style="padding:3px 9px;font-size:11px" onclick="refreshData()">↺ Refresh</button>
   </div>
   <div class="page" id="page"></div>
@@ -327,7 +328,7 @@ const CK_GROUPS=[
 ];
 const SK=['information_control','price_delivery','closing_attempt','professionalism','rapport_tone','salesmanship','overall'];
 const SL=['Info & Control','Price Delivery','Closing','Professionalism','Rapport & Tone','Salesmanship','Overall'];
-const KWS=['Full Value Protection','confirmation call','hourly','moving boxes','fuel','declared value','Little Guys','spot available','get you on the board','first come first serve','no cancellation fee','save that for you','get you taken care of','get you on the calendar'];
+const KWS=['confirmation call','hourly','moving boxes','Little Guys','spot available','get you on the board','first come first serve','no cancellation fee','save that for you','get you taken care of','get you on the calendar'];
 
 let allCalls=[],reps=[],sharedViews=[],corrections=[];
 let lbKey='overall',lbDir=-1,lbShowAll=false;
@@ -402,6 +403,10 @@ function updateStatusBar(){
   const anyRunning=jobRunning||batchRunning;
   bar.classList.toggle('warn',anyRunning);
 
+  // Show/hide the global Stop All button
+  const stopBtn=g('stop-all-btn');
+  if(stopBtn) stopBtn.style.display = anyRunning ? '' : 'none';
+
   // Build or remove the global progress bar
   let progBar=g('sb-prog-wrap');
   if(anyRunning){
@@ -420,12 +425,18 @@ function updateStatusBar(){
       <div style="flex:1;height:4px;background:rgba(255,183,77,.2);border-radius:4px;min-width:60px;max-width:220px">
         <div style="height:100%;width:${pct}%;background:var(--amber);border-radius:4px;transition:width .5s"></div>
       </div>`;
-    msg.textContent='⚠ Do not delete calls until complete';
+    // Only warn about deletion during re-analyze (not safe to delete a call mid-rescore)
+    // During batch upload, deleting unrelated calls is fine
+    msg.textContent = jobRunning ? '⚠ Do not delete calls until re-analyze completes' : '';
   } else {
     if(progBar)progBar.remove();
     // Show last job result briefly if just completed or stopped
     if(job.status==='stopped'){
-      msg.innerHTML=`⏹ Re-analyze stopped · ${job.processed||0} of ${job.total||'?'} calls processed · <span style="cursor:pointer;text-decoration:underline" onclick="nav('management')">see details</span>`;
+      msg.innerHTML=`⏹ Re-analyze stopped · ${job.processed||0} of ${job.total||'?'} calls processed · <span style="cursor:pointer;text-decoration:underline" onclick="nav('library')">see details</span>`;
+      return;
+    }
+    if(batchJob.status==='stopped'){
+      msg.innerHTML=`⏹ Batch upload stopped · ${batchJob.processed||0} of ${batchJob.total||'?'} files processed`;
       return;
     }
     const justDone=job.status==='complete'&&job.summary;
@@ -434,7 +445,7 @@ function updateStatusBar(){
       if(mins<10){
         const errs=job.summary.errors||0;
         msg.innerHTML=errs>0
-          ?`✓ Re-analyze done: ${job.summary.succeeded} succeeded, <span style="color:var(--red)">${errs} failed</span> · <span style="cursor:pointer;text-decoration:underline" onclick="nav('management')">see details</span>`
+          ?`✓ Re-analyze done: ${job.summary.succeeded} succeeded, <span style="color:var(--red)">${errs} failed</span> · <span style="cursor:pointer;text-decoration:underline" onclick="nav('library')">see details</span>`
           :`✓ Re-analyze done: ${job.summary.succeeded} calls · ${mins<1?'just now':mins+' min ago'}`;
         return;
       }
@@ -461,6 +472,12 @@ function startStatusPoller(){
       // Switch to fast polling (3s) when a job is running, slow (30s) when idle
       if(nowRunning&&!fastMode){fastMode=true;clearInterval(statusPoller);statusPoller=setInterval(poll,3000);}
       else if(!nowRunning&&fastMode){fastMode=false;clearInterval(statusPoller);statusPoller=setInterval(poll,30000);}
+      // While running, update the library page in-place so the progress bar in Bulk Actions panel updates
+      if(nowRunning && currentPage==='library'){
+        const prog=g('reanalyze-prog'); const lbl=g('reanalyze-status');
+        if(prog && rd.total) prog.style.width = Math.round(rd.processed/rd.total*100)+'%';
+        if(lbl && rd.status==='running') lbl.textContent = `Processing ${rd.processed}/${rd.total}: ${rd.current||'…'}`;
+      }
       if(nowDone){await loadCalls();({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement})[currentPage]?.();}
     }catch(e){}
   }
@@ -585,7 +602,7 @@ function navFilter(attn){libFilters.attn=attn;nav('library');}
 function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
 function renderLB(){
   const sc=scc(getFC());
-  const repNames=[...new Set(sc.map(c=>c.rep_name))].filter(r=>r&&sc.filter(c=>c.rep_name===r).length>=5);
+  const repNames=[...new Set(sc.map(c=>c.rep_name))].filter(r=>r&&r!=='Unknown'&&sc.filter(c=>c.rep_name===r).length>=5);
   const repNamesFiltered=repNames.filter(r=>sc.filter(c=>c.rep_name===r).length>=5);
   const data=repNamesFiltered.map(r=>{
     const rc=sc.filter(c=>c.rep_name===r);
@@ -685,7 +702,19 @@ function renderObj(sc){
 function renderLibrary(opts={}){
   if(opts.attn)libFilters.attn=opts.attn;
   const repOpts=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort().map(r=>`<option value="${r}"${libFilters.rep===r?' selected':''}>${r}</option>`).join('');
-  set('page',`<div class="card" style="margin-bottom:0">
+  const job=window._lastJobStatus||{status:'idle'};
+  const bulkBar = SHARE_MODE ? '' : `<div class="card" style="margin-bottom:12px;padding:14px 18px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="font-size:13px;font-weight:700;color:var(--ink2)">⚡ Bulk Actions</div>
+      <button class="btn btn-s btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Start bulk re-analyze'}</button>
+      ${job.status==='running'?'<button class="btn btn-d btn-sm" onclick="stopReanalyze()">⏹ Stop</button>':''}
+      <button class="btn btn-g btn-sm" onclick="checkUnscored()">🔍 Check unscored calls</button>
+      <span style="font-size:11px;color:var(--ink3);margin-left:auto">Re-run Claude on all transcripts (~$0.02/call)</span>
+    </div>
+    ${job.status==='running'?`<div style="background:var(--surface);border-radius:9px;padding:12px;margin-top:10px;border:1px solid var(--border2)"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${job.total?Math.round(job.processed/job.total*100):0}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`:''}
+    <div id="unscored-results" style="margin-top:10px"></div>
+  </div>`;
+  set('page', bulkBar + `<div class="card" style="margin-bottom:0">
     <div class="lib-controls">
       <div class="search-wrap"><span>🔍</span><input type="text" placeholder="Search calls…" value="${esc(libFilters.search)}" oninput="libFilters.search=this.value;renderCallList()" /></div>
       <select class="fsel" onchange="libFilters.rep=this.value;renderCallList()"><option value="">All reps</option>${repOpts}</select>
@@ -753,7 +782,7 @@ function renderCallList(){
     if(libFilters.attn==='onsite'&&!c.onsite_suggested)return false;
     if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
     if(libFilters.attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
-    if(q){const hay=[c.rep_name,c.caller_name,c.call_purpose,c.call_summary,c.transcript].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    if(q){const hay=[c.rep_name,c.caller_name,c.call_purpose,c.call_summary,c.transcript,c.filename].join(' ').toLowerCase();if(!hay.includes(q))return false;}
     return true;
   });
   if(libFilters.sort==='newest')list.sort((a,b)=>new Date(b.call_date||b.created_at)-new Date(a.call_date||a.created_at));
@@ -899,19 +928,6 @@ async function saveTranscriptCorrection(callId){
     if(tx){tx.style.outline='2px solid var(--g)';setTimeout(()=>{tx.style.outline='';},1500);}
     alert('✓ Correction saved! Will apply to all future transcripts.');
   }catch(e){alert('Failed: '+e.message);}
-}
-
-async function reapplyCorrections(callId){
-  if(!confirm('Re-apply corrections and re-analyze this call? This will update the transcript and scores.'))return;
-  const btn=event.target;btn.disabled=true;btn.innerHTML='<span class="spin"></span> Re-analyzing…';
-  try{
-    const r=await fetch(API+'/transcript_corrections/reapply',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({call_id:callId})});
-    const d=await r.json();if(!r.ok)throw new Error(d.error);
-    await loadCalls();
-    if(currentPage==='library')renderCallList();
-    alert('✓ Re-analyzed with corrections applied.');
-  }catch(e){alert('Failed: '+e.message);}finally{btn.disabled=false;btn.innerHTML='↺ Re-analyze';}
 }
 
 function buildTxHtml(c){
@@ -1078,7 +1094,11 @@ async function doAssignRep(callId){
 }
 async function updCall(id,data){
   try{
-    await fetch(API+'/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...data})});
+    const r = await fetch(API+'/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...data})});
+    if(!r.ok){
+      const errText = await r.text().catch(()=>'');
+      throw new Error('Server returned ' + r.status + (errText?': '+errText.substring(0,100):''));
+    }
     const i=allCalls.findIndex(c=>c.id===id);if(i>=0)allCalls[i]={...allCalls[i],...data};
     // In-place update: rebuild just this row if it exists in the DOM, otherwise full re-render
     const row=g('row-'+id);
@@ -1093,7 +1113,10 @@ async function updCall(id,data){
     } else if(currentPage==='overview'){
       renderOverview();
     }
-  }catch(e){alert('Save failed: '+e.message);}
+  }catch(e){
+    if(typeof showToast==='function') showToast('Save failed: '+e.message, 'error');
+    else alert('Save failed: '+e.message);
+  }
 }
 
 // ── REP PROFILES ──
@@ -1112,7 +1135,7 @@ function renderProfiles(opts={}) {
     const rc=allCalls.filter(c=>c.rep_name===r&&!c.exclude_from_scoring);
     const overall=rc.length?(rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length).toFixed(1):'—';
     const rapport=rc.length?(rc.reduce((a,c)=>a+(c.scores?.rapport_tone?.score||0),0)/rc.length).toFixed(1):'—';
-    const sorted=[...rc].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+    const sorted=[...rc].sort((a,b)=>new Date(b.call_date||b.created_at)-new Date(a.call_date||a.created_at));
     const r5=sorted.slice(0,5).map(c=>c.scores?.overall?.score||0),p5=sorted.slice(5,10).map(c=>c.scores?.overall?.score||0);
     const ra=r5.length?r5.reduce((a,b)=>a+b,0)/r5.length:0,pa=p5.length?p5.reduce((a,b)=>a+b,0)/p5.length:0;
     const trend=pa===0?'flat':ra>pa+0.3?'up':ra<pa-0.3?'dn':'flat';
@@ -1267,15 +1290,10 @@ function renderManagement(){
           <div id="dedup-results" style="margin-top:12px"></div>
         </div>
         <div class="card">
-          <div class="card-hdr"><h3>Bulk Re-Analyze</h3></div>
-          <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Re-run all transcripts through updated Claude prompt. Runs in background. ~$0.02/call.</p>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-            <button class="btn btn-s btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Start bulk re-analyze'}</button>
-            ${job.status==='running'?'<button class="btn btn-d btn-sm" onclick="stopReanalyze()">⏹ Stop</button>':''}
-            <button class="btn btn-g btn-sm" onclick="checkUnscored()">🔍 Check unscored calls</button>
-          </div>
+          <div class="card-hdr"><h3>Last Bulk Re-Analyze</h3></div>
+          <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Job results from the most recent bulk re-analyze. The action has moved to the Call Library — <a href="javascript:void(0)" onclick="nav('library')" style="color:var(--blue)">go there</a> to start a new run.</p>
           ${job.status==='complete'&&job.summary?`<div style="background:var(--surface);border-radius:9px;padding:12px 14px;border:1px solid var(--border2);margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Last job completed ${fmt(job.summary.finished_at)}</div>
+            <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Completed ${fmt(job.summary.finished_at)}</div>
             <div style="display:flex;gap:16px;flex-wrap:wrap">
               <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--g)">${job.summary.succeeded}</div><div style="font-size:11px;color:var(--ink3)">succeeded</div></div>
               <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--ink2)">${job.summary.skipped}</div><div style="font-size:11px;color:var(--ink3)">skipped<br>(no transcript)</div></div>
@@ -1283,9 +1301,7 @@ function renderManagement(){
               <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--ink2)">${job.summary.total}</div><div style="font-size:11px;color:var(--ink3)">total</div></div>
             </div>
             ${job.failed_calls&&job.failed_calls.length?`<div style="margin-top:10px;border-top:1px solid var(--border2);padding-top:8px"><div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">Failed calls:</div>${job.failed_calls.map(f=>`<div style="font-size:11px;color:var(--ink3);padding:2px 0">${esc(f.filename)} — ${esc(f.error)}</div>`).join('')}</div>`:''}
-          </div>`:''}
-          ${job.status==='running'?`<div style="background:var(--surface);border-radius:9px;padding:14px;margin-top:4px;border:1px solid var(--border2)"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${job.total?Math.round(job.processed/job.total*100):0}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`:''}
-          <div id="unscored-results" style="margin-top:10px"></div>
+          </div>`:`<div style="font-size:12px;color:var(--ink3);font-style:italic">No completed runs yet.</div>`}
         </div>
       </div>
     </div>
@@ -1390,14 +1406,57 @@ async function checkUnscored(){
     }
   }catch(e){if(el)el.innerHTML=`<div class="msg-err">${e.message}</div>`;}
 }
-async function stopReanalyze(){
-  if(!confirm('Stop the re-analyze job? Progress so far will be saved — you can restart later.'))return;
+async function stopReanalyze(silent){
+  if(!silent && !confirm('Stop the re-analyze job? Progress so far will be saved — you can restart later.'))return false;
   try{
-    await fetch(API+'/reanalyze/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const r = await fetch(API+'/reanalyze/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d = await r.json();
+    if(!r.ok){throw new Error(d.error || 'Server returned ' + r.status);}
     window._lastJobStatus={...window._lastJobStatus,stop_requested:true};
     updateStatusBar();
     if(currentPage==='management')renderManagement();
-  }catch(e){alert('Stop failed: '+e.message);}
+    return true;
+  }catch(e){
+    if(!silent) showToast('Stop failed: '+e.message, 'error');
+    return false;
+  }
+}
+async function stopBatchUpload(silent){
+  if(!silent && !confirm('Stop the batch upload? Files already processed will remain saved.'))return false;
+  try{
+    const r = await fetch(API+'/batch_upload/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d = await r.json();
+    if(!r.ok){throw new Error(d.error || 'Server returned ' + r.status);}
+    window._lastBatchStatus={...window._lastBatchStatus,stop_requested:true};
+    updateStatusBar();
+    return true;
+  }catch(e){
+    if(!silent) showToast('Stop failed: '+e.message, 'error');
+    return false;
+  }
+}
+// Global stop button — stops everything that's currently running
+async function stopAllOperations(){
+  const reanalyzeRunning = window._lastJobStatus && window._lastJobStatus.status === 'running';
+  const batchRunning = window._lastBatchStatus && window._lastBatchStatus.status === 'running';
+  if(!reanalyzeRunning && !batchRunning){
+    showToast('No operations are currently running', 'info');
+    return;
+  }
+  const things = [];
+  if(reanalyzeRunning) things.push('bulk re-analyze');
+  if(batchRunning) things.push('batch upload');
+  if(!confirm('Stop all active operations? (' + things.join(' + ') + ')\n\nProgress so far will be saved.')) return;
+  // Send stop signals in parallel — neither blocks the other
+  const ops = [];
+  if(reanalyzeRunning) ops.push(stopReanalyze(true));
+  if(batchRunning) ops.push(stopBatchUpload(true));
+  const results = await Promise.all(ops);
+  if(results.every(r => r)){
+    showToast('Stop signal sent — operations will halt shortly', 'info');
+  } else {
+    showToast('One or more stop signals failed — check status', 'error');
+  }
 }
 async function startReanalyze(){
   const btn=g('reanalyze-btn');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Starting…';
@@ -1568,12 +1627,39 @@ function setAudioFiles(files){
   if(list)list.innerHTML=files.map((f,i)=>`<div class="q-item" id="qi-${i}"><span class="q-ico" id="qis-${i}">⭕</span><span class="q-name">${esc(f.name)}</span><span class="q-size">${(f.size/1024/1024).toFixed(1)}MB</span></div>`).join('');
 }
 function setQS(i,s){const el=document.getElementById('qis-'+i);if(el)el.innerHTML={processing:'▶',done:'✅',skipped:'⚠️',error:'❌'}[s]||'⭕';}
+// Client-side cancel flag for individual audio file uploads
+let _audioUploadCancel = false;
+function cancelAudioUpload(){
+  _audioUploadCancel = true;
+  showToast('Cancelling — current files will finish, queue will stop', 'info');
+}
 async function submitAudio(){
   if(!audioFiles.length)return;
+  _audioUploadCancel = false;
   const btn=g('add-audio-btn');btn.disabled=true;btn.innerHTML='<span class="spin"></span> Processing…';
-  g('audio-progress').style.display='block';
+  // Show inline cancel button next to progress
+  const progEl=g('audio-progress'); if(progEl){
+    progEl.style.display='block';
+    let cancelBtn=g('audio-cancel-btn');
+    if(!cancelBtn){
+      cancelBtn=document.createElement('button');
+      cancelBtn.id='audio-cancel-btn';
+      cancelBtn.className='btn btn-d btn-sm';
+      cancelBtn.style.cssText='margin-left:10px;padding:4px 10px;font-size:11px';
+      cancelBtn.textContent='⏹ Stop';
+      cancelBtn.onclick=cancelAudioUpload;
+      progEl.appendChild(cancelBtn);
+    }
+    cancelBtn.style.display='';
+  }
   const skipped=[];let processed=0;const total=audioFiles.length;
   for(let i=0;i<total;i+=3){
+    if(_audioUploadCancel){
+      // Mark remaining as cancelled
+      for(let k=i;k<total;k++){setQS(k,'skipped');}
+      skipped.push(`${total-i} file(s) cancelled by user`);
+      break;
+    }
     const batch=audioFiles.slice(i,i+3);
     await Promise.all(batch.map(async(af,bi)=>{
       const idx=i+bi;
@@ -1597,10 +1683,16 @@ async function submitAudio(){
     }));
     g('audio-prog-bar').style.width=Math.round(Math.min(i+3,total)/total*100)+'%';
   }
-  g('audio-prog-bar').style.width='100%';g('audio-prog-text').textContent=`Done! ${processed} analyzed${skipped.length?`, ${skipped.length} skipped`:''}`;
+  g('audio-prog-bar').style.width='100%';
+  const wasCancelled=_audioUploadCancel;
+  g('audio-prog-text').textContent= wasCancelled
+    ? `Stopped! ${processed} analyzed before cancel, ${skipped.length} skipped/cancelled`
+    : `Done! ${processed} analyzed${skipped.length?`, ${skipped.length} skipped`:''}`;
   if(skipped.length){g('audio-skipped').style.display='block';g('audio-skipped-list').innerHTML=skipped.map(s=>`<div>• ${esc(s)}</div>`).join('');}
   if(processed>0)g('add-audio-msg').innerHTML=`<div class="msg-ok">✓ ${processed} call${processed!==1?'s':''} added!</div>`;
+  const cancelBtn=g('audio-cancel-btn'); if(cancelBtn) cancelBtn.style.display='none';
   btn.disabled=false;btn.textContent='Analyze & Save';audioFiles=[];
+  _audioUploadCancel = false;
 }
 async function submitPaste(){
   const btn=g('paste-btn'),msg=g('paste-msg');
@@ -1741,11 +1833,14 @@ async function saveEditedTranscript(callId) {
   const btn = document.querySelector('#edit-tx-modal .btn-p');
   btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Saving…';
   try {
-    await fetch(API + '/transcript_corrections/save', {
+    // Save transcript edit (and optionally a rule). Server allows either or both.
+    const sr = await fetch(API + '/transcript_corrections/save', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ call_id: callId, find_text: findText||'', replace_text: replaceText||'', new_transcript: newTx })
     });
+    if (!sr.ok) { const t = await sr.text().catch(()=>''); throw new Error('Save failed: ' + (t.substring(0,120)||sr.status)); }
     // Re-analyze with corrected transcript
+    btn.innerHTML = '<span class="spin"></span> Re-analyzing…';
     const r = await fetch(API + '/transcript_corrections/reapply', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ call_id: callId })
@@ -1756,7 +1851,7 @@ async function saveEditedTranscript(callId) {
     await loadCalls();
     setTimeout(() => { document.getElementById('edit-tx-modal')?.remove(); if(currentPage==='library')renderCallList(); }, 1200);
   } catch(e) {
-    msg.innerHTML = `<div class="msg-err">${e.message}</div>`;
+    msg.innerHTML = `<div class="msg-err">${esc(e.message)}</div>`;
     btn.disabled = false; btn.innerHTML = 'Save & Re-analyze';
   }
 }
@@ -1771,14 +1866,38 @@ async function reapplyCorrections(callId, btn) {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Failed');
-    await loadCalls();
-    if (currentPage === 'library') renderCallList();
-    btn.innerHTML = '✓';
-    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 1500);
+    // Show success BEFORE the row gets re-rendered (which would collapse it)
+    btn.innerHTML = '✓ Re-analyzed';
+    btn.style.background = '#16a34a';
+    btn.style.color = '#fff';
+    showToast('✓ Call re-analyzed successfully — refreshing data…', 'success');
+    // Brief pause so user sees the confirmation, then reload
+    setTimeout(async () => {
+      await loadCalls();
+      if (currentPage === 'library') renderCallList();
+    }, 800);
   } catch(e) {
     btn.innerHTML = orig; btn.disabled = false;
-    alert('Re-analyze failed: ' + e.message);
+    showToast('Re-analyze failed: ' + e.message, 'error');
   }
+}
+
+// Lightweight toast notification for success/error feedback
+function showToast(msg, kind) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 18px;border-radius:8px;font-size:14px;font-weight:500;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:opacity .3s;max-width:400px';
+    document.body.appendChild(toast);
+  }
+  const colors = {success:'#16a34a', error:'#dc2626', info:'#2563eb'};
+  toast.style.background = colors[kind] || colors.info;
+  toast.style.color = '#fff';
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toast._timeout);
+  toast._timeout = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
 }
 
 
