@@ -2660,6 +2660,678 @@ html, body {
   color: white;
 }
 
+
+/* ============================================ */
+/* PHASE 6 ADDITIONS — Compare Reps page         */
+/* ============================================ */
+
+/* SELECTOR CARD */
+.cmp-selector-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 16px;
+}
+.cmp-selector-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  align-items: end;
+}
+.cmp-selector-col-label {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-selector-col-label.rep-a { color: var(--lg-blue, #0066B3); }
+.cmp-selector-col-label.rep-b { color: var(--lg-gold-dark, #8A6420); }
+.cmp-swap-icon {
+  font-size: 22px;
+  color: var(--ink4);
+  padding-bottom: 6px;
+  user-select: none;
+}
+
+/* HERO STRIP — two reps side by side */
+.cmp-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.cmp-hero-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 24px;
+  position: relative;
+  overflow: hidden;
+}
+.cmp-hero-card.rep-a { border-top: 3px solid var(--lg-blue, #0066B3); }
+.cmp-hero-card.rep-b { border-top: 3px solid var(--lg-gold, #E3B124); }
+.cmp-hero-rep-label {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.cmp-hero-card.rep-a .cmp-hero-rep-label { color: var(--lg-blue, #0066B3); }
+.cmp-hero-card.rep-b .cmp-hero-rep-label { color: var(--lg-gold-dark, #8A6420); }
+.cmp-hero-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+}
+.cmp-hero-score {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.cmp-hero-score-value {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.cmp-hero-score-suffix {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--ink4);
+  font-weight: 500;
+}
+.cmp-hero-score-delta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+.cmp-hero-score-delta.up { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.cmp-hero-score-delta.down { background: var(--lg-red-bg); color: var(--lg-red); }
+.cmp-hero-score-delta.flat { background: var(--surface2); color: var(--ink3); }
+.cmp-hero-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.cmp-hero-stat-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  font-weight: 500;
+  margin-bottom: 3px;
+}
+.cmp-hero-stat-value {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* COMPARE SCORE PROFILE — dual bars per row */
+.cmp-score-profile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 16px;
+}
+.cmp-score-profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cmp-score-profile-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+}
+.cmp-score-profile-legend {
+  display: flex;
+  gap: 14px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink3);
+}
+.cmp-score-profile-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-score-profile-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.cmp-skill-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr 60px;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border2, var(--border));
+}
+.cmp-skill-row:last-child { border-bottom: none; }
+.cmp-skill-label {
+  font-size: 13px;
+  color: var(--ink2);
+  font-weight: 500;
+}
+.cmp-skill-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cmp-skill-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-sunken, var(--surface2));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cmp-skill-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.cmp-skill-bar-fill.rep-a { background: var(--lg-blue, #0066B3); }
+.cmp-skill-bar-fill.rep-b { background: var(--lg-gold, #E3B124); }
+.cmp-skill-bar-value {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  width: 30px;
+  text-align: right;
+  color: var(--ink);
+}
+.cmp-skill-bar-value.empty { color: var(--ink5); font-weight: 400; }
+.cmp-skill-team {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+.cmp-skill-team-val {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+.cmp-skill-row .cmp-skill-bar-cell.winner .cmp-skill-bar-value::after {
+  content: ' ▲';
+  color: var(--lg-green);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* COACHING side-by-side panels */
+.cmp-coach-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.cmp-coach-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 22px;
+}
+.cmp-coach-card.rep-a { border-left: 3px solid var(--lg-blue, #0066B3); }
+.cmp-coach-card.rep-b { border-left: 3px solid var(--lg-gold, #E3B124); }
+.cmp-coach-card-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+.cmp-coach-card.rep-a .cmp-coach-card-title { color: var(--lg-blue, #0066B3); }
+.cmp-coach-card.rep-b .cmp-coach-card-title { color: var(--lg-gold-dark, #8A6420); }
+.cmp-coach-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cmp-coach-list li {
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.5;
+  padding-left: 14px;
+  position: relative;
+}
+.cmp-coach-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink4);
+}
+.cmp-coach-card.rep-a .cmp-coach-list li::before { background: var(--lg-blue, #0066B3); }
+.cmp-coach-card.rep-b .cmp-coach-list li::before { background: var(--lg-gold, #E3B124); }
+.cmp-coach-empty {
+  color: var(--ink4);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+/* COMPLIANCE rows inside collapsible */
+.cmp-compliance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cmp-compliance-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 110px;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border2, var(--border));
+}
+.cmp-compliance-row:last-child { border-bottom: none; }
+.cmp-compliance-label {
+  font-size: 12px;
+  color: var(--ink2);
+}
+.cmp-compliance-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-compliance-bar-track {
+  flex: 1;
+  height: 5px;
+  background: var(--surface-sunken, var(--surface2));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cmp-compliance-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.cmp-compliance-bar-cell.rep-a .cmp-compliance-bar-fill { background: var(--lg-blue, #0066B3); }
+.cmp-compliance-bar-cell.rep-b .cmp-compliance-bar-fill { background: var(--lg-gold, #E3B124); }
+.cmp-compliance-bar-pct {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  width: 32px;
+  text-align: right;
+  color: var(--ink2);
+}
+
+/* RESPONSIVE */
+@media (max-width: 900px) {
+  .cmp-hero-grid,
+  .cmp-coach-grid { grid-template-columns: 1fr; }
+  .cmp-selector-row { grid-template-columns: 1fr; }
+  .cmp-swap-icon { display: none; }
+  .cmp-skill-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .cmp-skill-team { text-align: left; }
+  .cmp-compliance-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+
+/* ============================================ */
+/* PHASE 6 ADDITIONS — Management page           */
+/* ============================================ */
+
+/* PAGE LAYOUT — two columns */
+.mgmt-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.mgmt-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* CARD HEADER — consistent w/ mockup */
+.mgmt-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.mgmt-card-head {
+  padding: 14px 18px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.mgmt-card-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mgmt-card-subtitle {
+  font-size: 12px;
+  color: var(--ink3);
+  padding: 8px 18px 0;
+  margin: 0;
+}
+.mgmt-card-body {
+  padding: 14px 18px 16px;
+}
+.mgmt-card-body.flush { padding: 0; }
+
+/* TABLE WIDTH FIX (Bug 2) — explicit column widths */
+.rmgmt-table-v2 {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.rmgmt-table-v2 col.col-name     { width: auto; }
+.rmgmt-table-v2 col.col-loc      { width: 160px; }
+.rmgmt-table-v2 col.col-calls    { width: 70px; }
+.rmgmt-table-v2 col.col-score    { width: 90px; }
+.rmgmt-table-v2 col.col-status   { width: 80px; }
+.rmgmt-table-v2 col.col-actions  { width: 110px; }
+.rmgmt-table-v2 th,
+.rmgmt-table-v2 td {
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.rmgmt-table-v2 th {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  background: var(--surface-sunken, var(--surface2));
+}
+.rmgmt-table-v2 .col-calls,
+.rmgmt-table-v2 .col-score,
+.rmgmt-table-v2 .col-status,
+.rmgmt-table-v2 .col-actions {
+  text-align: center;
+}
+.rmgmt-table-v2 td.col-actions { text-align: right; }
+.rmgmt-table-v2 tr.rmgmt-row { cursor: pointer; transition: background 0.12s ease; }
+.rmgmt-table-v2 tr.rmgmt-row:hover td { background: var(--surface); }
+.rmgmt-table-v2 tr.rmgmt-row.expanded td { background: var(--surface); }
+.rmgmt-table-v2 tr.rmgmt-row.expanded td:first-child {
+  border-left: 3px solid var(--lg-green);
+  padding-left: 9px;
+}
+.rmgmt-table-v2 tr.rmgmt-edit-row td {
+  padding: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.rmgmt-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rmgmt-name-chev {
+  color: var(--ink4);
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+.rmgmt-row.expanded .rmgmt-name-chev {
+  transform: rotate(90deg);
+  color: var(--lg-green-dark);
+}
+.rmgmt-status-pill {
+  display: inline-block;
+  font-family: var(--font-label);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+}
+.rmgmt-loc-empty {
+  color: var(--lg-gold-dark, #8A6420);
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* EDIT PANEL — three-way grid with detail-section sub-blocks */
+.rmgmt-edit-panel {
+  padding: 14px 18px 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.rmgmt-edit-block {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.rmgmt-edit-block.danger { border-color: var(--lg-red-bg); }
+.rmgmt-edit-block-label {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rmgmt-edit-block.danger .rmgmt-edit-block-label { color: var(--lg-red); }
+.rmgmt-edit-row-controls {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.rmgmt-edit-row-controls .ovr-inp,
+.rmgmt-edit-row-controls .fsel {
+  flex: 1;
+  min-width: 0;
+}
+.rmgmt-edit-hint {
+  font-size: 10.5px;
+  color: var(--ink3);
+  margin-top: 5px;
+}
+.rmgmt-edit-msg {
+  font-size: 11px;
+  margin-top: 5px;
+  min-height: 14px;
+}
+
+/* UNMATCHED REPS PANEL */
+.mgmt-unmatched-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--lg-gold, #E3B124);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.mgmt-unmatched-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  gap: 12px;
+}
+.mgmt-unmatched-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lg-gold-dark, #8A6420);
+  font-weight: 500;
+}
+.mgmt-unmatched-count {
+  font-family: var(--font-label);
+  font-size: 10px;
+  background: rgba(227,177,36,0.18);
+  color: var(--lg-gold-dark, #8A6420);
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.06em;
+}
+.mgmt-unmatched-desc {
+  font-size: 12px;
+  color: var(--ink3);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.mgmt-unmatched-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border2, var(--border));
+  flex-wrap: wrap;
+}
+.mgmt-unmatched-row:last-child { border-bottom: none; }
+.mgmt-unmatched-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--ink);
+  flex: 1;
+  min-width: 100px;
+}
+.mgmt-unmatched-count-meta {
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+}
+
+/* RE-ANALYZE SUMMARY (right column) */
+.mgmt-stat-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 6px;
+}
+.mgmt-stat-cell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.mgmt-stat-cell-value {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.mgmt-stat-cell-value.g { color: var(--lg-green-dark); }
+.mgmt-stat-cell-value.r { color: var(--lg-red); }
+.mgmt-stat-cell-value.n { color: var(--ink2); }
+.mgmt-stat-cell-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-top: 3px;
+  font-weight: 500;
+}
+.mgmt-empty-line {
+  font-size: 12px;
+  color: var(--ink4);
+  font-style: italic;
+}
+.mgmt-failed-list {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--ink3);
+}
+.mgmt-failed-list-title {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--lg-red);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1100px) {
+  .mgmt-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .rmgmt-edit-panel { grid-template-columns: 1fr; }
+  .rmgmt-table-v2 col.col-loc,
+  .rmgmt-table-v2 col.col-status { width: 100px; }
+  .mgmt-stat-row { grid-template-columns: 1fr 1fr; }
+}
+
 </style>
 </head>
 <body>
@@ -4401,6 +5073,7 @@ function renderManagement(){
   // Also show unmatched reps — in calls but no roster record
   const rosterNames=new Set(reps.flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
   const unmatched=repNames.filter(r=>!rosterNames.has(r));
+
   const rows=repNames.map(r=>{
     const cnt=allCalls.filter(c=>c.rep_name===r).length;
     const sc2=allCalls.filter(c=>c.rep_name===r&&!c.exclude_from_scoring);
@@ -4410,88 +5083,138 @@ function renderManagement(){
     const locs=[...new Set(reps.map(rr=>rr.location).filter(Boolean))].sort();
     const locOpts=locs.map(l=>`<option value="${esc(l)}"${l===dbRep?.location?' selected':''}>${esc(l)}</option>`).join('');
     const otherReps=repNames.filter(x=>x!==r).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
-    const expandPanel=isExpanded?`<tr id="panel-${esc(r)}"><td colspan="6" style="padding:0;background:var(--bg2)">
-      <div style="padding:16px 18px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;flex-wrap:wrap">
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Rename</div>
-          <div style="display:flex;gap:6px"><input type="text" id="ren-${esc(r)}" class="ovr-inp" placeholder="New name" style="flex:1" /><button class="btn btn-p btn-xs" onclick="doInlineRename('${esc(r)}')">Save</button></div>
-          <div id="ren-msg-${esc(r)}" style="font-size:11px;margin-top:4px"></div>
+
+    const locCell=dbRep?.location
+      ?`<span class="loc-tag">${esc(dbRep.location)}</span>`
+      :`<span class="rmgmt-loc-empty">⚠ Unset</span>`;
+
+    const editPanel=isExpanded?`<tr class="rmgmt-edit-row" id="panel-${esc(r)}"><td colspan="6">
+      <div class="rmgmt-edit-panel">
+        <div class="rmgmt-edit-block">
+          <div class="rmgmt-edit-block-label">Rename</div>
+          <div class="rmgmt-edit-row-controls">
+            <input type="text" id="ren-${esc(r)}" class="ovr-inp" placeholder="New name" />
+            <button class="btn btn-p btn-xs" onclick="doInlineRename('${esc(r)}')">Save</button>
+          </div>
+          <div class="rmgmt-edit-msg" id="ren-msg-${esc(r)}"></div>
         </div>
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Location</div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input type="text" id="loc-${esc(r)}" class="ovr-inp" value="${esc(dbRep?.location||'')}" placeholder="e.g. Fayetteville" list="loc-dl-${esc(r)}" style="flex:1" />
+        <div class="rmgmt-edit-block">
+          <div class="rmgmt-edit-block-label">Location</div>
+          <div class="rmgmt-edit-row-controls">
+            <input type="text" id="loc-${esc(r)}" class="ovr-inp" value="${esc(dbRep?.location||'')}" placeholder="e.g. Fayetteville" list="loc-dl-${esc(r)}" />
             <datalist id="loc-dl-${esc(r)}">${locOpts}</datalist>
             <button class="btn btn-p btn-xs" onclick="doInlineLoc('${esc(r)}','${esc(dbRep?.id||'')}')">Save</button>
           </div>
-          <div id="loc-msg-${esc(r)}" style="font-size:11px;margin-top:4px"></div>
+          <div class="rmgmt-edit-msg" id="loc-msg-${esc(r)}"></div>
         </div>
-        <div>
-          <div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Merge Into</div>
-          <div style="display:flex;gap:6px">
-            <select id="merge-${esc(r)}" class="fsel" style="flex:1;font-size:12px;padding:6px 8px"><option value="">— select rep —</option>${otherReps}</select>
+        <div class="rmgmt-edit-block danger">
+          <div class="rmgmt-edit-block-label">Merge into</div>
+          <div class="rmgmt-edit-row-controls">
+            <select id="merge-${esc(r)}" class="fsel" style="font-size:12px;padding:6px 8px"><option value="">— select rep —</option>${otherReps}</select>
             <button class="btn btn-d btn-xs" onclick="doInlineMerge('${esc(r)}')">Merge</button>
           </div>
-          <div style="font-size:10px;color:var(--ink3);margin-top:4px">Moves all ${cnt} calls to selected rep</div>
+          <div class="rmgmt-edit-hint">Moves all ${cnt} calls to the selected rep.</div>
         </div>
       </div>
     </td></tr>`:'';
-    return`<tr style="cursor:pointer" onclick="expandedRep=expandedRep==='${esc(r)}'?null:'${esc(r)}';renderManagement()">
-      <td style="font-weight:600">${esc(r)}${isExpanded?' ▲':' ▾'}</td>
-      <td>${dbRep?.location?`<span class="loc-tag">${esc(dbRep.location)}</span>`:'<span style="color:var(--amber);font-size:11px">⚠ unset</span>'}</td>
-      <td>${cnt}</td><td>${chip(avgO)}</td>
-      <td><span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:2px 8px;border-radius:10px">Active</span></td>
-      <td onclick="event.stopPropagation()"><button class="btn btn-g btn-xs" onclick="libFilters.rep='${esc(r)}';nav('library')">View calls</button></td>
-    </tr>${expandPanel}`;
+
+    return`<tr class="rmgmt-row${isExpanded?' expanded':''}" onclick="expandedRep=expandedRep==='${esc(r)}'?null:'${esc(r)}';renderManagement()">
+      <td><div class="rmgmt-name"><span class="rmgmt-name-chev">▶</span>${esc(r)}</div></td>
+      <td class="col-loc">${locCell}</td>
+      <td class="col-calls">${cnt}</td>
+      <td class="col-score">${chip(avgO)}</td>
+      <td class="col-status"><span class="rmgmt-status-pill">Active</span></td>
+      <td class="col-actions" onclick="event.stopPropagation()"><button class="btn btn-g btn-xs" onclick="libFilters.rep='${esc(r)}';nav('library')">View calls</button></td>
+    </tr>${editPanel}`;
   }).join('');
+
   const job=window._lastJobStatus||{status:'idle'};
-  let reanalyzeHtml='';
-  if(job.status==='running'){const pct=job.total?Math.round(job.processed/job.total*100):0;reanalyzeHtml=`<div style="background:var(--surface);border-radius:9px;padding:14px;margin-top:12px;border:1px solid var(--border2)"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${pct}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`;}
-  else if(job.status==='complete')reanalyzeHtml=`<div class="msg-ok" style="margin-top:10px">✓ Done! ${job.processed} calls re-analyzed.</div>`;
-  const unmatchedHtml=unmatched.length?`<div class="card" style="margin-bottom:16px">
-    <div class="card-hdr"><h3>⚠ Unmatched Reps</h3><span class="bdg-amber bdg">${unmatched.length} names</span></div>
-    <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">These names appear in calls but have no roster record. They may be customers misidentified as reps, or reps not yet added.</p>
+
+  // ── UNMATCHED REPS PANEL ──
+  const unmatchedHtml=unmatched.length?`<div class="mgmt-unmatched-card">
+    <div class="mgmt-unmatched-head">
+      <div class="mgmt-unmatched-title">⚠ Unmatched reps</div>
+      <span class="mgmt-unmatched-count">${unmatched.length} ${unmatched.length===1?'name':'names'}</span>
+    </div>
+    <div class="mgmt-unmatched-desc">These names appear in calls but have no roster record. They may be customers misidentified as reps, or reps not yet added.</div>
     ${unmatched.map(r=>{
       const cnt=allCalls.filter(c=>c.rep_name===r).length;
       const otherReps=repNames.filter(x=>x!==r).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
-      return`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);flex-wrap:wrap">
-        <span style="font-weight:600;flex:1">${esc(r)}</span>
-        <span style="font-size:11px;color:var(--ink3)">${cnt} call${cnt!==1?'s':''}</span>
+      return`<div class="mgmt-unmatched-row">
+        <span class="mgmt-unmatched-name">${esc(r)}</span>
+        <span class="mgmt-unmatched-count-meta">${cnt} call${cnt!==1?'s':''}</span>
         <button class="btn btn-p btn-xs" onclick="createRepFromName('${esc(r)}')">+ Add to roster</button>
-        <select id="um-merge-${esc(r)}" class="fsel" style="font-size:11px;padding:4px 7px"><option value="">Merge into…</option>${otherReps}</select>
+        <select id="um-merge-${esc(r)}" class="fsel" style="font-size:11px;padding:4px 7px;max-width:160px"><option value="">Merge into…</option>${otherReps}</select>
         <button class="btn btn-g btn-xs" onclick="doUnmatchedMerge('${esc(r)}')">Merge</button>
       </div>`;
     }).join('')}
   </div>`:'';
+
+  // ── RE-ANALYZE SUMMARY ──
+  const reanalyzeBody=job.status==='complete'&&job.summary?`
+    <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:4px">Completed ${fmt(job.summary.finished_at)}</div>
+    <div class="mgmt-stat-row">
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${job.summary.succeeded}</div><div class="mgmt-stat-cell-label">Succeeded</div></div>
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${job.summary.skipped}</div><div class="mgmt-stat-cell-label">Skipped</div></div>
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${job.summary.errors}</div><div class="mgmt-stat-cell-label">Errors</div></div>
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${job.summary.total}</div><div class="mgmt-stat-cell-label">Total</div></div>
+    </div>
+    ${job.failed_calls&&job.failed_calls.length?`<div class="mgmt-failed-list">
+      <div class="mgmt-failed-list-title">Failed calls</div>
+      ${job.failed_calls.map(f=>`<div style="padding:2px 0">${esc(f.filename)} — ${esc(f.error)}</div>`).join('')}
+    </div>`:''}
+  `:`<div class="mgmt-empty-line">No completed runs yet.</div>`;
+
   set('page',`
     ${unmatchedHtml}
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-hdr"><h3>Rep Roster</h3><button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button></div>
-        <p style="font-size:11.5px;color:var(--ink3);margin-bottom:10px">Click a rep to expand editing options.</p>
-        <table class="rmgmt-table"><thead><tr><th>Name</th><th>Location</th><th>Calls</th><th>Avg Score</th><th>Status</th><th></th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody></table>
-      </div>
-      <div>
-        <div class="card">
-          <div class="card-hdr"><h3>AI Deduplication</h3></div>
-          <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Find rep names that may refer to the same person.</p>
-          <button class="btn btn-s btn-sm" onclick="runDedup()" id="dedup-btn">🔍 Check for duplicates</button>
-          <div id="dedup-results" style="margin-top:12px"></div>
+    <div class="mgmt-grid">
+      <div class="mgmt-card">
+        <div class="mgmt-card-head">
+          <div class="mgmt-card-title">Rep Roster</div>
+          <button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button>
         </div>
-        <div class="card">
-          <div class="card-hdr"><h3>Last Bulk Re-Analyze</h3></div>
-          <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Job results from the most recent bulk re-analyze. The action has moved to the Call Library — <a href="javascript:void(0)" onclick="nav('library')" style="color:var(--blue)">go there</a> to start a new run.</p>
-          ${job.status==='complete'&&job.summary?`<div style="background:var(--surface);border-radius:9px;padding:12px 14px;border:1px solid var(--border2);margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Completed ${fmt(job.summary.finished_at)}</div>
-            <div style="display:flex;gap:16px;flex-wrap:wrap">
-              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--g)">${job.summary.succeeded}</div><div style="font-size:11px;color:var(--ink3)">succeeded</div></div>
-              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--ink2)">${job.summary.skipped}</div><div style="font-size:11px;color:var(--ink3)">skipped<br>(no transcript)</div></div>
-              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--red)">${job.summary.errors}</div><div style="font-size:11px;color:var(--ink3)">errors</div></div>
-              <div style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--ink2)">${job.summary.total}</div><div style="font-size:11px;color:var(--ink3)">total</div></div>
-            </div>
-            ${job.failed_calls&&job.failed_calls.length?`<div style="margin-top:10px;border-top:1px solid var(--border2);padding-top:8px"><div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:6px">Failed calls:</div>${job.failed_calls.map(f=>`<div style="font-size:11px;color:var(--ink3);padding:2px 0">${esc(f.filename)} — ${esc(f.error)}</div>`).join('')}</div>`:''}
-          </div>`:`<div style="font-size:12px;color:var(--ink3);font-style:italic">No completed runs yet.</div>`}
+        <p class="mgmt-card-subtitle">Click a rep to expand editing options.</p>
+        <div class="mgmt-card-body flush">
+          <table class="rmgmt-table-v2">
+            <colgroup>
+              <col class="col-name" />
+              <col class="col-loc" />
+              <col class="col-calls" />
+              <col class="col-score" />
+              <col class="col-status" />
+              <col class="col-actions" />
+            </colgroup>
+            <thead><tr>
+              <th>Name</th>
+              <th class="col-loc">Location</th>
+              <th class="col-calls">Calls</th>
+              <th class="col-score">Avg Score</th>
+              <th class="col-status">Status</th>
+              <th class="col-actions"></th>
+            </tr></thead>
+            <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="mgmt-stack">
+        <div class="mgmt-card">
+          <div class="mgmt-card-head">
+            <div class="mgmt-card-title">AI Deduplication</div>
+          </div>
+          <div class="mgmt-card-body">
+            <p style="font-size:12px;color:var(--ink3);margin:0 0 12px">Find rep names that may refer to the same person.</p>
+            <button class="btn btn-s btn-sm" onclick="runDedup()" id="dedup-btn">🔍 Check for duplicates</button>
+            <div id="dedup-results" style="margin-top:12px"></div>
+          </div>
+        </div>
+        <div class="mgmt-card">
+          <div class="mgmt-card-head">
+            <div class="mgmt-card-title">Last Bulk Re-Analyze</div>
+          </div>
+          <div class="mgmt-card-body">
+            <p style="font-size:12px;color:var(--ink3);margin:0 0 10px">Job results from the most recent bulk re-analyze. The action has moved to the Call Library — <a href="javascript:void(0)" onclick="nav('library')" style="color:var(--lg-green-dark);font-weight:500">go there</a> to start a new run.</p>
+            ${reanalyzeBody}
+          </div>
         </div>
       </div>
     </div>
@@ -4681,10 +5404,15 @@ function renderShared(){
   const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
   const locations=[...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
   set('page',`
-    <div class="card">
-      <div class="card-hdr"><h3>Shared Views</h3><button class="btn btn-p btn-sm" onclick="openCreateShare()">+ Create share link</button></div>
-      <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Read-only scoped views for location managers or reps. Links never expire unless deleted.</p>
+    <div class="mgmt-card">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Shared Views</div>
+        <button class="btn btn-p btn-sm" onclick="openCreateShare()">+ Create share link</button>
+      </div>
+      <p class="mgmt-card-subtitle">Read-only scoped views for location managers or reps. Links never expire unless deleted.</p>
+      <div class="mgmt-card-body">
       ${sharedViews.length?sharedViews.map(v=>{const url=`${origin}/share/${v.token}`;const rc=v.rep_ids?.length||0;return`<div class="sv-item"><span class="sv-type ${v.view_type==='rep'?'sv-loc':'sv-mgr'}">${v.view_type==='rep'?'👤 Rep':'📍 Location'}</span><div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;margin-bottom:2px">${esc(v.label||'Untitled')}</div><div class="sv-url">${url}</div></div><div style="font-size:11px;color:var(--ink3);text-align:right;flex-shrink:0">${rc} rep${rc!==1?'s':''}<br>${fmt(v.created_at)}</div><button class="btn btn-g btn-xs" onclick="copyToClip('${url}')">Copy</button><button class="btn btn-d btn-xs" onclick="deleteShare('${v.id}')">Delete</button></div>`;}).join(''):`<div class="empty"><span class="empty-ico">📤</span><p>No share links yet.</p></div>`}
+      </div>
     </div>
     <div class="modal-bg" id="create-share-modal" style="display:none"><div class="modal-box">
       <h2>Create Share Link</h2>
@@ -4725,17 +5453,25 @@ function copyToClip(url){navigator.clipboard?.writeText(url).then(()=>{alert('Co
 // ── CORRECTIONS ──
 async function renderCorrections(){
   await loadCorrections();
-  set('page',`<div class="card">
-    <div class="card-hdr"><h3>Correction Log</h3><span class="bdg">${corrections.length} corrections</span></div>
-    <p style="font-size:12px;color:var(--ink3);margin-bottom:14px">Score corrections are automatically included in future Claude analysis calls as calibration examples.</p>
-    ${corrections.length?corrections.map(c=>`<div class="corr-item"><div><span style="font-weight:700">${c.category?.replace(/_/g,' ')||'unknown'}</span> <span style="color:var(--red)">${c.original_score}</span> <span style="color:var(--g)">→ ${c.corrected_score}</span> <span style="color:var(--ink3);font-size:11px;margin-left:8px">${fmt(c.created_at)}</span>${c.used_in_prompt?'<span style="font-size:10px;font-weight:700;color:#16a34a;background:#d1fae5;padding:1px 6px;border-radius:8px;margin-left:6px">Active</span>':''}</div>${c.manager_note?`<div style="color:var(--ink3);margin-top:2px;font-size:11px">${esc(c.manager_note)}</div>`:''}</div>`).join(''):`<div class="empty"><span class="empty-ico">✏️</span><p>No corrections yet. Use score override in any call to log a correction.</p></div>`}
+  set('page',`<div class="mgmt-card">
+    <div class="mgmt-card-head">
+      <div class="mgmt-card-title">Correction Log</div>
+      <span class="bdg">${corrections.length} corrections</span>
+    </div>
+    <p class="mgmt-card-subtitle">Score corrections are automatically included in future Claude analysis calls as calibration examples.</p>
+    <div class="mgmt-card-body">
+    ${corrections.length?corrections.map(c=>`<div class="corr-item"><div><span style="font-weight:600">${c.category?.replace(/_/g,' ')||'unknown'}</span> <span style="color:var(--lg-red)">${c.original_score}</span> <span style="color:var(--lg-green-dark)">→ ${c.corrected_score}</span> <span style="color:var(--ink3);font-size:11px;margin-left:8px">${fmt(c.created_at)}</span>${c.used_in_prompt?'<span class="rmgmt-status-pill" style="margin-left:6px">Active</span>':''}</div>${c.manager_note?`<div style="color:var(--ink3);margin-top:2px;font-size:11px">${esc(c.manager_note)}</div>`:''}</div>`).join(''):`<div class="empty"><span class="empty-ico">✏️</span><p>No corrections yet. Use score override in any call to log a correction.</p></div>`}
+    </div>
   </div>`);
 }
 
 // ── ADD CALLS ──
 function renderAdd(){
-  set('page',`<div style="max-width:680px;margin:0 auto"><div class="card">
-    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px">Add Call Analysis</h2>
+  set('page',`<div style="max-width:680px;margin:0 auto"><div class="mgmt-card">
+    <div class="mgmt-card-head">
+      <div class="mgmt-card-title">Add Call Analysis</div>
+    </div>
+    <div class="mgmt-card-body">
     <div class="tabs">
       <div class="tab${addTab==='audio'?' active':''}" onclick="switchAddTab('audio')">🎙 Audio</div>
       <div class="tab${addTab==='paste'?' active':''}" onclick="switchAddTab('paste')">📋 Paste Transcript</div>
@@ -4743,13 +5479,13 @@ function renderAdd(){
       <div class="tab${addTab==='bulk'?' active':''}" onclick="switchAddTab('bulk')">📦 Bulk ZIP Upload</div>
     </div>
     <div id="add-audio" style="display:${addTab==='audio'?'block':'none'}">
-      <div style="background:var(--gl);border:1.5px solid var(--g2);border-radius:9px;padding:10px 14px;font-size:12px;color:var(--gd);margin-bottom:14px;font-weight:500">🎙 Drop multiple files or a ZIP. Processed 3 at a time. Duplicates skipped automatically.</div>
+      <div style="background:var(--lg-green-bg);border:1px solid var(--lg-green-soft);border-radius:9px;padding:10px 14px;font-size:12px;color:var(--lg-green-dark);margin-bottom:14px;font-weight:500">🎙 Drop multiple files or a ZIP. Processed 3 at a time. Duplicates skipped automatically.</div>
       <div class="drop-zone" id="audio-drop" onclick="g('audio-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
         <span class="dz-ico">🎙</span><div class="dz-title">Drop audio files or a ZIP here</div><div class="dz-sub">MP3, M4A, WAV, OGG — or a Vonage ZIP export</div>
       </div>
       <input type="file" id="audio-input" accept="audio/*,.mp3,.m4a,.wav,.ogg,.mp4,.zip" multiple style="display:none" onchange="handleSelect(this.files)" />
-      <div id="audio-queue" style="display:none;margin-top:12px"><div style="font-size:10px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Queue</div><div id="audio-queue-list"></div></div>
-      <div id="audio-progress" style="display:none;margin-top:10px"><div class="prog"><div class="prog-fill" id="audio-prog-bar" style="width:0%"></div></div><div class="prog-label" id="audio-prog-text">Preparing…</div><div id="audio-skipped" style="display:none;margin-top:8px"><div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:4px">Skipped:</div><div id="audio-skipped-list" style="font-size:11px;color:var(--ink3)"></div></div></div>
+      <div id="audio-queue" style="display:none;margin-top:12px"><div style="font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.1em;font-family:var(--font-label);margin-bottom:8px">Queue</div><div id="audio-queue-list"></div></div>
+      <div id="audio-progress" style="display:none;margin-top:10px"><div class="prog"><div class="prog-fill" id="audio-prog-bar" style="width:0%"></div></div><div class="prog-label" id="audio-prog-text">Preparing…</div><div id="audio-skipped" style="display:none;margin-top:8px"><div style="font-size:11px;font-weight:600;color:var(--lg-gold-dark, #8A6420);margin-bottom:4px">Skipped:</div><div id="audio-skipped-list" style="font-size:11px;color:var(--ink3)"></div></div></div>
       <div id="add-audio-msg"></div>
       <div style="margin-top:14px;text-align:right"><button class="btn btn-p" id="add-audio-btn" onclick="submitAudio()" disabled>Analyze & Save</button></div>
     </div>
@@ -4761,14 +5497,14 @@ function renderAdd(){
       <div style="text-align:right;margin-top:10px"><button class="btn btn-p" id="paste-btn" onclick="submitPaste()">Analyze & Save</button></div>
     </div>
     <div id="add-bulk" style="display:${addTab==='bulk'?'block':'none'}">
-      <div style="background:rgba(76,175,80,.06);border:1px solid rgba(76,175,80,.15);border-radius:10px;padding:11px 14px;font-size:12.5px;color:var(--tx2);margin-bottom:16px;line-height:1.6">
+      <div style="background:var(--lg-green-bg);border:1px solid var(--lg-green-soft);border-radius:10px;padding:11px 14px;font-size:12.5px;color:var(--lg-green-dark);margin-bottom:16px;line-height:1.6">
         📦 Upload a ZIP file containing MP3s. Processing runs entirely in the background — you can close this tab and come back. All files are deduplicated automatically.
       </div>
       <div class="drop-zone" id="bulk-drop" onclick="g('bulk-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleBulkDrop(event)">
         <span class="dz-ico">📦</span><div class="dz-title">Drop a Vonage ZIP here</div><div class="dz-sub">All MP3s inside will be queued automatically</div>
       </div>
       <input type="file" id="bulk-input" accept=".zip,application/zip" style="display:none" onchange="handleBulkSelect(this.files[0])" />
-      <div id="bulk-file-info" style="display:none;margin-top:12px;padding:10px 14px;background:var(--bg2);border-radius:10px;border:1px solid var(--border);font-size:13px;color:var(--tx2)"></div>
+      <div id="bulk-file-info" style="display:none;margin-top:12px;padding:10px 14px;background:var(--surface);border-radius:10px;border:1px solid var(--border);font-size:13px;color:var(--ink2)"></div>
       <div id="bulk-progress" style="display:none;margin-top:12px">
         <div class="prog"><div class="prog-fill" id="bulk-prog-bar" style="width:0%"></div></div>
         <div class="prog-label" id="bulk-prog-text" style="margin-top:6px">Waiting…</div>
@@ -4784,6 +5520,7 @@ function renderAdd(){
       <div class="fg"><label>Transcript file (.txt)</label><input type="file" id="file-input" accept=".txt,text/plain" /></div>
       <div id="file-msg"></div>
       <div style="text-align:right;margin-top:10px"><button class="btn btn-p" id="file-btn" onclick="submitFile()">Analyze & Save</button></div>
+    </div>
     </div>
   </div></div>`);
 }
@@ -5069,35 +5806,46 @@ async function loadTxCorrections() {
 
 function renderTxCorrections() {
   loadTxCorrections().then(() => {
-    set('page', `<div class="card">
-      <div class="card-hdr"><h3>Transcript Correction Rules</h3><span class="bdg">${txCorrections.length} rules</span></div>
-      <p style="font-size:13px;color:var(--tx3);margin-bottom:16px;line-height:1.6">
+    set('page', `<div class="mgmt-card">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Transcript Correction Rules</div>
+        <span class="bdg">${txCorrections.length} rules</span>
+      </div>
+      <p class="mgmt-card-subtitle">
         These find/replace rules are automatically applied to every new transcript before Claude analysis.
         They also populate Deepgram's keyterm list to improve recognition at the source.
         Add rules by clicking "Edit Transcript" on any call.
       </p>
-      <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
-        <input type="text" id="new-find" class="ovr-inp" placeholder="Find text…" style="flex:1;min-width:160px" />
-        <input type="text" id="new-replace" class="ovr-inp" placeholder="Replace with…" style="flex:1;min-width:160px" />
-        <button class="btn btn-p btn-sm" onclick="addTxRule()">+ Add Rule</button>
+      <div class="mgmt-card-body">
+        <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <input type="text" id="new-find" class="ovr-inp" placeholder="Find text…" style="flex:1;min-width:160px" />
+          <input type="text" id="new-replace" class="ovr-inp" placeholder="Replace with…" style="flex:1;min-width:160px" />
+          <button class="btn btn-p btn-sm" onclick="addTxRule()">+ Add Rule</button>
+        </div>
+        <div id="tx-rules-msg"></div>
+        ${txCorrections.length ? `
+        <table class="rmgmt-table-v2">
+          <colgroup>
+            <col />
+            <col />
+            <col style="width:130px" />
+            <col style="width:80px" />
+          </colgroup>
+          <thead><tr>
+            <th>Find</th>
+            <th>Replace With</th>
+            <th>Added</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${txCorrections.map(r => `<tr>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--lg-red)">${esc(r.find_text)}</td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--lg-green-dark)">${esc(r.replace_text)}</td>
+            <td style="font-size:12px;color:var(--ink3)">${fmt(r.created_at)}</td>
+            <td style="text-align:right"><button class="btn btn-d btn-xs" onclick="deleteTxRule('${r.id}')">Delete</button></td>
+          </tr>`).join('')}
+          </tbody>
+        </table>` : '<div class="empty"><span class="empty-ico">🔤</span><p>No rules yet.<br>Edit a transcript to add your first correction rule.</p></div>'}
       </div>
-      <div id="tx-rules-msg"></div>
-      ${txCorrections.length ? `
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead><tr>
-          <th style="padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Find</th>
-          <th style="padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Replace With</th>
-          <th style="padding:8px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Added</th>
-          <th style="border-bottom:1px solid var(--border)"></th>
-        </tr></thead>
-        <tbody>${txCorrections.map(r => `<tr>
-          <td style="padding:10px;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--red)">${esc(r.find_text)}</td>
-          <td style="padding:10px;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:12px;color:#66bb6a">${esc(r.replace_text)}</td>
-          <td style="padding:10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--tx3)">${fmt(r.created_at)}</td>
-          <td style="padding:10px;border-bottom:1px solid var(--border)"><button class="btn btn-d btn-xs" onclick="deleteTxRule('${r.id}')">Delete</button></td>
-        </tr>`).join('')}
-        </tbody>
-      </table>` : '<div class="empty"><span class="empty-ico">🔤</span><p>No rules yet.<br>Edit a transcript to add your first correction rule.</p></div>'}
     </div>`);
   });
 }
@@ -5258,29 +6006,29 @@ function renderCostCalc(fc) {
   const projected = month.total / dayOfMonth * daysInMonth;
   const perCall = allTimeCalls.length ? allTime.total / allTimeCalls.length : 0;
 
-  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
-    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
-      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">This Month</div>
-      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${(month.total + RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2)}</div>
-      <div style="font-size:11px;color:var(--tx3);margin-top:4px">${month.calls} calls · ${Math.round(month.mins)} min audio</div>
+  el.innerHTML = `<div class="mgmt-stat-row" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">This Month</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${(month.total + RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${month.calls} calls · ${Math.round(month.mins)} min audio</div>
     </div>
-    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
-      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Projected Monthly</div>
-      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${(projected + RENDER_MONTHLY).toFixed(2)}</div>
-      <div style="font-size:11px;color:var(--tx3);margin-top:4px">incl. $${RENDER_MONTHLY} Render</div>
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">Projected Monthly</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${(projected + RENDER_MONTHLY).toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">incl. $${RENDER_MONTHLY} Render</div>
     </div>
-    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
-      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Per Call</div>
-      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${perCall.toFixed(3)}</div>
-      <div style="font-size:11px;color:var(--tx3);margin-top:4px">avg all time</div>
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">Per Call</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${perCall.toFixed(3)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">avg all time</div>
     </div>
-    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border)">
-      <div style="font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">All Time</div>
-      <div style="font-size:24px;font-weight:800;color:var(--tx)">$${allTime.total.toFixed(2)}</div>
-      <div style="font-size:11px;color:var(--tx3);margin-top:4px">${allTimeCalls.length} calls analyzed</div>
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">All Time</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${allTime.total.toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${allTimeCalls.length} calls analyzed</div>
     </div>
   </div>
-  <div style="display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--tx3)">
+  <div style="display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--ink3)">
     <span>Deepgram: $${month.deepgram.toFixed(3)}/mo est.</span>
     <span>Claude: $${month.claude.toFixed(2)}/mo est.</span>
     <span>Render: $${RENDER_MONTHLY}/mo flat</span>
@@ -5313,7 +6061,7 @@ function renderCosts(){
   });
   const repRows=Object.entries(repCosts).sort((a,b)=>b[1].calls-a[1].calls).map(([r,d])=>{
     const cost=d.mins*DEEPGRAM_PER_MIN+d.calls*CLAUDE_PER_CALL;
-    return`<tr><td style="font-weight:600">${esc(r)}</td><td>${d.calls}</td><td>${Math.round(d.mins)} min</td><td>$${cost.toFixed(2)}</td></tr>`;
+    return`<tr><td><div class="rmgmt-name">${esc(r)}</div></td><td class="col-calls">${d.calls}</td><td class="col-calls">${Math.round(d.mins)} min</td><td class="col-calls">$${cost.toFixed(2)}</td></tr>`;
   }).join('');
   set('page',`
     <div class="metric-grid" style="margin-bottom:20px">
@@ -5322,28 +6070,42 @@ function renderCosts(){
       <div class="mc amber"><div class="mc-label">Per Call Avg</div><div class="mc-val">$${perCall.toFixed(3)}</div><div class="mc-sub">all time average</div></div>
       <div class="mc green"><div class="mc-label">All Time</div><div class="mc-val">$${allTime.total.toFixed(2)}</div><div class="mc-sub">${allTimeCalls.length} calls analyzed</div></div>
     </div>
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-hdr"><h3>This Month Breakdown</h3></div>
-        <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="mgmt-grid">
+      <div class="mgmt-card">
+        <div class="mgmt-card-head">
+          <div class="mgmt-card-title">This Month Breakdown</div>
+        </div>
+        <div class="mgmt-card-body">
+          <div style="display:flex;flex-direction:column;gap:10px">
           ${[['Deepgram (transcription)','$'+month.deepgram.toFixed(3),'$0.0043/min'],['Claude (analysis)','$'+month.claude.toFixed(2),'$0.023/call'],['Render (hosting)','$'+(RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2),'$25/mo flat'],['Total','$'+(month.total+RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2),'']].map(([label,val,note])=>`
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg2);border-radius:9px;border:1px solid var(--border)">
-            <div><div style="font-size:12.5px;font-weight:600">${label}</div>${note?`<div style="font-size:11px;color:var(--ink3)">${note}</div>`:''}</div>
-            <div style="font-size:18px;font-weight:700;color:var(--g)">${val}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:9px;border:1px solid var(--border)">
+            <div><div style="font-size:12.5px;font-weight:600;color:var(--ink)">${label}</div>${note?`<div style="font-size:11px;color:var(--ink3);margin-top:2px">${note}</div>`:''}</div>
+            <div style="font-size:18px;font-weight:600;color:var(--lg-green-dark);font-family:var(--font-display)">${val}</div>
           </div>`).join('')}
+          </div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-hdr"><h3>Cost by Rep — This Month</h3></div>
-        ${repRows?`<table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <div class="mgmt-card">
+        <div class="mgmt-card-head">
+          <div class="mgmt-card-title">Cost by Rep — This Month</div>
+        </div>
+        <div class="mgmt-card-body flush">
+        ${repRows?`<table class="rmgmt-table-v2">
+          <colgroup>
+            <col />
+            <col style="width:70px" />
+            <col style="width:90px" />
+            <col style="width:90px" />
+          </colgroup>
           <thead><tr>
-            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Rep</th>
-            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Calls</th>
-            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Audio</th>
-            <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)">Cost</th>
+            <th>Rep</th>
+            <th class="col-calls">Calls</th>
+            <th class="col-calls">Audio</th>
+            <th class="col-calls">Cost</th>
           </tr></thead>
           <tbody>${repRows}</tbody>
         </table>`:'<div class="empty"><p>No calls this month</p></div>'}
+        </div>
       </div>
     </div>`);
 }
@@ -5356,6 +6118,8 @@ function renderCompare(opts={}){
   const repNames=[...new Set(allCalls.filter(c=>!c.exclude_from_scoring).map(c=>c.rep_name))].filter(Boolean).sort();
   const repOpts=r=>repNames.map(n=>`<option value="${esc(n)}"${n===r?' selected':''}>${esc(n)}</option>`).join('');
   const teamSc=scc(getFC());
+  const initials=n=>(n||'').split(/\s+/).map(p=>p[0]).filter(Boolean).slice(0,2).join('').toUpperCase()||'—';
+
   function repStats(name){
     if(!name)return null;
     const sc=allCalls.filter(c=>c.rep_name===name&&!c.exclude_from_scoring);
@@ -5364,92 +6128,172 @@ function renderCompare(opts={}){
     const ckPcts=CK.map(k=>sc.length?Math.round(sc.filter(c=>c.checklist?.[k]).length/sc.length*100):0);
     const booked=sc.filter(c=>c.call_outcome==='booked').length;
     const br=Math.round(booked/sc.length*100);
+    // compliance %
+    const compHits=sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]===true).length,0);
+    const compPossible=sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]!=='na').length,0);
+    const compPct=compPossible?Math.round(compHits/compPossible*100):0;
+    // trend: split scored calls in half and compare overall
+    const oldest=[...sc].sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
+    const half=Math.floor(oldest.length/2);
+    const overall=avgK('overall');
+    const firstHalfAvg=half>0?oldest.slice(0,half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/half:0;
+    const recentHalfAvg=half>0?oldest.slice(half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/(oldest.length-half):overall;
+    const trendDelta=recentHalfAvg-firstHalfAvg;
+    const trend=trendDelta>0.3?'up':trendDelta<-0.3?'down':'flat';
     const coachMap={};sc.forEach(c=>(c.coaching_points||[]).forEach(p=>{coachMap[p]=(coachMap[p]||0)+1;}));
     const topCoach=Object.entries(coachMap).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([p])=>p);
-    const sorted=[...sc].sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
-    return{sc,scores:SK.map(k=>({k,avg:avgK(k)})),ckPcts,br,topCoach,sorted};
+    return{name,sc,scores:SK.map(k=>({k,avg:avgK(k)})),overall,ckPcts,br,compPct,trend,trendDelta,topCoach};
   }
+
   const A=repStats(compareRepA),B=repStats(compareRepB);
   const teamAvgK=k=>teamSc.length?(teamSc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/teamSc.length):0;
-  function scoreGrid(){
-    if(!A&&!B)return'';
-    return`<div class="card" style="margin-bottom:16px">
-      <div class="card-hdr"><h3>Score Comparison</h3><span class="bdg">vs team avg</span></div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
-        <thead><tr>
-          <th style="padding:9px 12px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">Category</th>
-          ${A?`<th style="padding:9px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepA)}</th>`:''}
-          ${B?`<th style="padding:9px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepB)}</th>`:''}
-          <th style="padding:9px 12px;text-align:center;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">Team Avg</th>
-        </tr></thead>
-        <tbody>${SK.map((k,i)=>{
-          const ta=teamAvgK(k);
-          const av=A?A.scores[i].avg:null;
-          const bv=B?B.scores[i].avg:null;
-          const winner=av!==null&&bv!==null?(av>bv?'A':bv>av?'B':'tie'):null;
-          return`<tr>
-            <td style="padding:10px 12px;border-bottom:1px solid var(--border2);font-size:12px;font-weight:600">${SL[i]}</td>
-            ${A?`<td style="padding:10px 12px;border-bottom:1px solid var(--border2);text-align:center">${chip(av.toFixed(1))}${winner==='A'?'<span style="color:#16a34a;font-size:10px;margin-left:4px">▲</span>':''}</td>`:''}
-            ${B?`<td style="padding:10px 12px;border-bottom:1px solid var(--border2);text-align:center">${chip(bv.toFixed(1))}${winner==='B'?'<span style="color:#16a34a;font-size:10px;margin-left:4px">▲</span>':''}</td>`:''}
-            <td style="padding:10px 12px;border-bottom:1px solid var(--border2);text-align:center;color:var(--ink3);font-size:12px">${ta.toFixed(1)}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table></div>
-    </div>`;
-  }
-  function complianceGrid(){
-    if(!A&&!B)return'';
-    return`<div class="card" style="margin-bottom:16px">
-      <div class="card-hdr"><h3>22-Step Compliance</h3></div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">
-        <thead><tr>
-          <th style="padding:7px 10px;text-align:left;font-size:9px;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">Step</th>
-          ${A?`<th style="padding:7px 10px;text-align:center;font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepA)}</th>`:''}
-          ${B?`<th style="padding:7px 10px;text-align:center;font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border)">${esc(compareRepB)}</th>`:''}
-        </tr></thead>
-        <tbody>${CK.map((k,i)=>{
-          const ap=A?A.ckPcts[i]:null;
-          const bp=B?B.ckPcts[i]:null;
-          const mkBar=p=>{const col=p>=80?'#16a34a':p>=50?'#d97706':'#dc2626';return`<div style="display:flex;align-items:center;gap:6px;justify-content:center"><div style="width:60px;height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${p}%;height:100%;background:${col};border-radius:3px"></div></div><span style="font-size:10.5px;font-weight:700;color:${col};min-width:28px">${p}%</span></div>`;};
-          return`<tr>
-            <td style="padding:7px 10px;border-bottom:1px solid var(--border2);color:var(--ink2)">${CKFULL[i]}</td>
-            ${A?`<td style="padding:7px 10px;border-bottom:1px solid var(--border2)">${mkBar(ap)}</td>`:''}
-            ${B?`<td style="padding:7px 10px;border-bottom:1px solid var(--border2)">${mkBar(bp)}</td>`:''}
-          </tr>`;
-        }).join('')}</tbody>
-      </table></div>
-    </div>`;
-  }
-  function coachGrid(){
-    if(!A&&!B)return'';
-    return`<div class="grid-2" style="margin-bottom:16px">
-      ${A?`<div class="card"><div class="card-hdr"><h3 style="color:var(--blue)">${esc(compareRepA)} — Coaching Focus</h3></div><ul class="info-list">${A.topCoach.map(p=>`<li><span>⚡</span>${esc(p)}</li>`).join('')||'<li style="color:var(--ink3)">Not enough data</li>'}</ul></div>`:''}
-      ${B?`<div class="card"><div class="card-hdr"><h3 style="color:var(--amber)">${esc(compareRepB)} — Coaching Focus</h3></div><ul class="info-list">${B.topCoach.map(p=>`<li><span>⚡</span>${esc(p)}</li>`).join('')||'<li style="color:var(--ink3)">Not enough data</li>'}</ul></div>`:''}
-    </div>`;
-  }
-  set('page',`
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-hdr"><h3>Select Reps to Compare</h3></div>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
-        <div style="flex:1;min-width:180px">
-          <div style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Rep A</div>
-          <select class="fsel" style="width:100%" onchange="compareRepA=this.value;renderCompare()"><option value="">— select rep —</option>${repOpts(compareRepA)}</select>
-        </div>
-        <div style="font-size:20px;color:var(--ink3);padding-bottom:8px">⚖️</div>
-        <div style="flex:1;min-width:180px">
-          <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px">Rep B</div>
-          <select class="fsel" style="width:100%" onchange="compareRepB=this.value;renderCompare()"><option value="">— select rep —</option>${repOpts(compareRepB)}</select>
-        </div>
-        ${A&&B?`<div style="display:flex;gap:16px;padding-bottom:8px;flex-shrink:0">
-          <div style="text-align:center"><div style="font-size:9px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${esc(compareRepA)}</div><div style="font-size:22px;font-weight:800;color:${scCol(A.scores[8].avg)}">${A.scores[8].avg.toFixed(1)}</div><div style="font-size:11px;color:var(--ink3)">${A.sc.length} calls</div></div>
-          <div style="text-align:center"><div style="font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${esc(compareRepB)}</div><div style="font-size:22px;font-weight:800;color:${scCol(B.scores[8].avg)}">${B.scores[8].avg.toFixed(1)}</div><div style="font-size:11px;color:var(--ink3)">${B.sc.length} calls</div></div>
-        </div>`:''}
+
+  // ── SELECTOR CARD ──
+  const selectorCard=`<div class="cmp-selector-card">
+    <div class="cmp-selector-row">
+      <div>
+        <div class="cmp-selector-col-label rep-a">● Rep A</div>
+        <select class="fsel" style="width:100%" onchange="compareRepA=this.value;renderCompare()">
+          <option value="">— select rep —</option>${repOpts(compareRepA)}
+        </select>
+      </div>
+      <div class="cmp-swap-icon">⇄</div>
+      <div>
+        <div class="cmp-selector-col-label rep-b">● Rep B</div>
+        <select class="fsel" style="width:100%" onchange="compareRepB=this.value;renderCompare()">
+          <option value="">— select rep —</option>${repOpts(compareRepB)}
+        </select>
       </div>
     </div>
-    ${(!compareRepA&&!compareRepB)?`<div class="empty"><span class="empty-ico">⚖️</span><p>Select two reps above to compare their performance side by side.</p></div>`:''}
-    ${scoreGrid()}
-    ${complianceGrid()}
-    ${coachGrid()}`);
+  </div>`;
+
+  // ── EMPTY STATE ──
+  if(!A&&!B){
+    set('page',selectorCard+`<div class="empty"><span class="empty-ico">⚖️</span><p>Select two reps above to compare their performance side by side.</p></div>`);
+    return;
+  }
+
+  // ── HERO STRIP (one card per rep) ──
+  function heroCard(R,role){
+    if(!R)return`<div class="cmp-hero-card ${role}" style="display:flex;align-items:center;justify-content:center;color:var(--ink4);font-style:italic;min-height:200px">Select a rep…</div>`;
+    const trendCls=R.trend==='up'?'up':R.trend==='down'?'down':'flat';
+    const trendArrow=R.trend==='up'?'↑':R.trend==='down'?'↓':'→';
+    const trendVal=R.trendDelta>=0?'+'+R.trendDelta.toFixed(1):R.trendDelta.toFixed(1);
+    const scoreColor=R.overall>=8?'var(--lg-green-dark)':R.overall>=5?'var(--lg-gold-dark, #8A6420)':'var(--lg-red)';
+    return`<div class="cmp-hero-card ${role}">
+      <div class="cmp-hero-rep-label">${role==='rep-a'?'Rep A':'Rep B'}</div>
+      <div class="cmp-hero-name">${esc(R.name)}</div>
+      <div class="cmp-hero-score">
+        <div class="cmp-hero-score-value" style="color:${scoreColor}">${R.overall.toFixed(1)}<span class="cmp-hero-score-suffix">/10</span></div>
+        <div class="cmp-hero-score-delta ${trendCls}">${trendArrow} ${trendVal}</div>
+      </div>
+      <div class="cmp-hero-stats">
+        <div>
+          <div class="cmp-hero-stat-label">Calls</div>
+          <div class="cmp-hero-stat-value">${R.sc.length}</div>
+        </div>
+        <div>
+          <div class="cmp-hero-stat-label">Booking</div>
+          <div class="cmp-hero-stat-value">${R.br}%</div>
+        </div>
+        <div>
+          <div class="cmp-hero-stat-label">Compliance</div>
+          <div class="cmp-hero-stat-value">${R.compPct}%</div>
+        </div>
+      </div>
+    </div>`;
+  }
+  const heroStrip=`<div class="cmp-hero-grid">
+    ${heroCard(A,'rep-a')}
+    ${heroCard(B,'rep-b')}
+  </div>`;
+
+  // ── SCORE PROFILE (dual bars per skill) ──
+  // Skip 'overall' here since hero strip already shows it
+  const skillSkIndices=SK.map((k,i)=>({k,i})).filter(x=>x.k!=='overall');
+  const scoreProfile=`<div class="cmp-score-profile">
+    <div class="cmp-score-profile-head">
+      <div class="cmp-score-profile-title">Score Profile</div>
+      <div class="cmp-score-profile-legend">
+        <div class="cmp-score-profile-legend-item"><span class="cmp-score-profile-legend-dot" style="background:var(--lg-blue, #0066B3)"></span>${A?esc(A.name):'Rep A'}</div>
+        <div class="cmp-score-profile-legend-item"><span class="cmp-score-profile-legend-dot" style="background:var(--lg-gold, #E3B124)"></span>${B?esc(B.name):'Rep B'}</div>
+        <div class="cmp-score-profile-legend-item">Team avg →</div>
+      </div>
+    </div>
+    ${skillSkIndices.map(({k,i})=>{
+      const av=A?A.scores[i].avg:null;
+      const bv=B?B.scores[i].avg:null;
+      const ta=teamAvgK(k);
+      const winner=av!==null&&bv!==null?(av>bv+0.05?'A':bv>av+0.05?'B':null):null;
+      const aWidth=av!==null?(av*10):0;
+      const bWidth=bv!==null?(bv*10):0;
+      return`<div class="cmp-skill-row">
+        <div class="cmp-skill-label">${SL[i]}</div>
+        <div class="cmp-skill-bar-cell ${winner==='A'?'winner':''}">
+          <div class="cmp-skill-bar-track">${av!==null?`<div class="cmp-skill-bar-fill rep-a" style="width:${aWidth}%"></div>`:''}</div>
+          <div class="cmp-skill-bar-value ${av===null?'empty':''}">${av!==null?av.toFixed(1):'—'}</div>
+        </div>
+        <div class="cmp-skill-bar-cell ${winner==='B'?'winner':''}">
+          <div class="cmp-skill-bar-track">${bv!==null?`<div class="cmp-skill-bar-fill rep-b" style="width:${bWidth}%"></div>`:''}</div>
+          <div class="cmp-skill-bar-value ${bv===null?'empty':''}">${bv!==null?bv.toFixed(1):'—'}</div>
+        </div>
+        <div class="cmp-skill-team">team<br><span class="cmp-skill-team-val">${ta.toFixed(1)}</span></div>
+      </div>`;
+    }).join('')}
+  </div>`;
+
+  // ── COACHING (side-by-side panels) ──
+  function coachPanel(R,role){
+    const label=role==='rep-a'?'Coaching focus':'Coaching focus';
+    if(!R)return'';
+    const items=R.topCoach.length?R.topCoach.map(p=>`<li>${esc(p)}</li>`).join(''):'<li class="cmp-coach-empty">Not enough data yet.</li>';
+    return`<div class="cmp-coach-card ${role}">
+      <div class="cmp-coach-card-title">${esc(R.name)} — ${label}</div>
+      <ul class="cmp-coach-list">${items}</ul>
+    </div>`;
+  }
+  const coachGrid=(A||B)?`<div class="cmp-coach-grid">
+    ${coachPanel(A,'rep-a')}
+    ${coachPanel(B,'rep-b')}
+  </div>`:'';
+
+  // ── 22-STEP COMPLIANCE (collapsible) ──
+  function complianceSection(){
+    if(!A&&!B)return'';
+    const hits=A&&B?Math.abs(A.compPct-B.compPct):0;
+    const pillCls=hits<=5?'':hits<=15?'mid':'low';
+    const pillText=A&&B?`Δ ${hits}%`:`${(A||B).compPct}% avg`;
+    return`<div class="detail-section" id="cmp-compliance-section">
+      <div class="detail-section-head" onclick="document.getElementById('cmp-compliance-section').classList.toggle('open')">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="detail-section-title">22-Step Compliance</div>
+          <span class="detail-section-pill ${pillCls}">${pillText}</span>
+        </div>
+        <div class="detail-section-chev">▶</div>
+      </div>
+      <div class="detail-section-body">
+        <div class="cmp-compliance-list">
+          ${CK.map((k,i)=>{
+            const ap=A?A.ckPcts[i]:null;
+            const bp=B?B.ckPcts[i]:null;
+            return`<div class="cmp-compliance-row">
+              <div class="cmp-compliance-label">${CKFULL[i]}</div>
+              <div class="cmp-compliance-bar-cell rep-a">
+                <div class="cmp-compliance-bar-track">${ap!==null?`<div class="cmp-compliance-bar-fill" style="width:${ap}%"></div>`:''}</div>
+                <div class="cmp-compliance-bar-pct">${ap!==null?ap+'%':'—'}</div>
+              </div>
+              <div class="cmp-compliance-bar-cell rep-b">
+                <div class="cmp-compliance-bar-track">${bp!==null?`<div class="cmp-compliance-bar-fill" style="width:${bp}%"></div>`:''}</div>
+                <div class="cmp-compliance-bar-pct">${bp!==null?bp+'%':'—'}</div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  set('page',selectorCard+heroStrip+scoreProfile+coachGrid+complianceSection());
 }
 
 function exportCSV(){window.open(API+'/export/csv','_blank');}
