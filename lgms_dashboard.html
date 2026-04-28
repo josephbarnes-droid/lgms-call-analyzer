@@ -1111,6 +1111,14 @@ html, body {
   --ink-4: var(--ink4);
   --ink-5: var(--ink5);
   --lg-red-bg: #FAE3E1;
+  /* Phase 6 brand color aliases — keep in sync with --red, --amber above */
+  --lg-red: #C9252C;
+  --lg-red-light: #F2625F;
+  --lg-red-dark: #A71D23;
+  --lg-gold: #E3B124;
+  --lg-gold-light: #F1CB6E;
+  --lg-gold-dark: #8A6420;
+  --lg-gold-bg: rgba(227, 177, 36, .14);
   --shadow-sm: var(--sh);
   --shadow-md: var(--sh2);
 }
@@ -1269,7 +1277,7 @@ html, body {
 /* CHART ROW */
 .chart-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -1545,11 +1553,9 @@ html, body {
 
 /* RESPONSIVE — mockup row collapses */
 @media (max-width: 1100px) {
-  .chart-row { grid-template-columns: 1fr 1fr; }
   .two-col { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
-  .chart-row { grid-template-columns: 1fr; }
   .hero-grid.hero-2up { grid-template-columns: 1fr; }
 }
 
@@ -3352,6 +3358,7 @@ html, body {
     <button class="sb-btn" onclick="nav('shared')" id="nav-shared"><span class="sb-ico">📤</span>Shared Views</button>
     <button class="sb-btn" onclick="nav('corrections')" id="nav-corrections"><span class="sb-ico">✏️</span>Correction Log</button>
     <button class="sb-btn" onclick="nav('txcorrections')" id="nav-txcorrections"><span class="sb-ico">🔤</span>Transcript Rules</button>
+    <button class="sb-btn" onclick="nav('vonage')" id="nav-vonage"><span class="sb-ico">📞</span>Vonage Sync</button>
     <div class="sb-sep"></div>
     <button class="sb-btn" onclick="nav('costs')" id="nav-costs"><span class="sb-ico">💰</span>Running Costs</button>
     <button class="sb-btn" onclick="nav('compare')" id="nav-compare"><span class="sb-ico">⚖️</span>Rep Comparison</button>
@@ -3419,7 +3426,7 @@ async function init(){
   if(SHARE_MODE){
     g('share-banner').style.display='flex';
     g('share-banner-label').textContent=SHARE_LABEL||'Shared View';
-    ['sb-g2','nav-management','nav-shared','nav-corrections','nav-txcorrections','nav-costs','nav-compare','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
+    ['sb-g2','nav-management','nav-shared','nav-corrections','nav-txcorrections','nav-vonage','nav-costs','nav-compare','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
     g('tb-right').innerHTML='';
     g('status-bar').style.display='none';
   }
@@ -3561,7 +3568,7 @@ function nav(page,opts={}){
   // Only rebuild tb-right in share mode (location dropdown lives there in normal mode, managed via HTML)
   if(SHARE_MODE)g('tb-right').innerHTML='';
   closeMob();
-  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,txcorrections:renderTxCorrections,costs:renderCosts,compare:renderCompare,add:renderAdd})[page]?.(opts);
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,txcorrections:renderTxCorrections,vonage:renderVonage,costs:renderCosts,compare:renderCompare,add:renderAdd})[page]?.(opts);
 }
 function openMob(){g('sidebar').classList.add('mobile-open');g('mob-overlay').classList.add('on');}
 function closeMob(){g('sidebar').classList.remove('mobile-open');g('mob-overlay').classList.remove('on');}
@@ -3674,12 +3681,12 @@ function buildDonutCard(title, meta, items, centerLabel) {
 function buildMoveTypeChart(scoredCalls) {
   const palette = {
     standard: 'var(--lg-green)',
-    specialty: 'var(--blue)',
-    long_distance: 'var(--lg-gold)',
-    commercial: 'var(--lg-red-light)',
-    unload_only: 'var(--lg-green-light)',
-    in_house: '#8FAE9B',
-    storage: '#9BAFC9',
+    specialty: '#7B61C9',          // purple — distinct from blue
+    long_distance: 'var(--blue)',
+    commercial: 'var(--lg-red)',   // brand red — full saturation, very distinct
+    unload_only: 'var(--lg-gold)',
+    in_house: '#3B8C8C',           // teal
+    storage: '#9BAFC9',            // warm gray-blue
     non_move: 'var(--ink5)'
   };
   const labels = {
@@ -3736,11 +3743,40 @@ function buildLossReasonChart(scoredCalls) {
   return buildDonutCard('Why we lost', total > 0 ? `${total} lost deals` : 'No lost deals categorized', items, 'LOST DEALS');
 }
 
+function buildPricingModelChart(scoredCalls) {
+  const palette = {
+    pointed: 'var(--lg-green)',
+    hourly: 'var(--blue)',
+  };
+  const labels = {
+    pointed: 'Pointed / Flat-Rate',
+    hourly: 'Hourly',
+  };
+  const counts = { pointed: 0, hourly: 0 };
+  scoredCalls.forEach(c => {
+    const m = c.pricing_model;
+    if (m === 'pointed') counts.pointed++;
+    else if (m === 'hourly') counts.hourly++;
+    // 'unknown' and missing values intentionally skipped — only show
+    // calls where the rep clearly used one model or the other.
+  });
+  const items = Object.entries(counts)
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => ({ label: labels[k], value: v, color: palette[k] }))
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  return buildDonutCard('Pricing model', total > 0 ? `${total} categorized` : 'No pricing detected', items, 'CALLS');
+}
+
 function buildObjectionsCard(scoredCalls) {
   const counts = {};
   scoredCalls.forEach(c => {
-    if (!c.objections) return;
-    let arr = c.objections;
+    // Schema field is objections_detected (array of strings).
+    // Older code referenced c.objections; keep that as a fallback for
+    // any legacy records that might still use the old shape.
+    let arr = c.objections_detected;
+    if (!arr) arr = c.objections;
+    if (!arr) return;
     if (typeof arr === 'string') {
       try { arr = JSON.parse(arr); } catch(e) { arr = []; }
     }
@@ -3791,10 +3827,11 @@ function scoreClass(s) {
 
 // Outcome distribution bar for the Calls hero card
 function buildOutcomeBar(sc) {
-  const counts = { booked: 0, soft_pipeline: 0, lost: 0, other: 0 };
+  const counts = { booked: 0, estimate_sent: 0, soft_pipeline: 0, lost: 0, other: 0 };
   sc.forEach(c => {
     const o = c.call_outcome;
     if (o === 'booked') counts.booked++;
+    else if (o === 'estimate_sent') counts.estimate_sent++;
     else if (o === 'soft_pipeline') counts.soft_pipeline++;
     else if (o === 'lost') counts.lost++;
     else counts.other++;
@@ -3803,14 +3840,17 @@ function buildOutcomeBar(sc) {
   if (total === 0) return '';
   const pct = k => total ? (counts[k] / total * 100) : 0;
   const segments = [];
-  if (counts.booked > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('booked')}%;background:var(--lg-green)"></div>`);
+  if (counts.booked > 0)        segments.push(`<div class="outcome-bar-segment" style="width:${pct('booked')}%;background:var(--lg-green)"></div>`);
+  if (counts.estimate_sent > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('estimate_sent')}%;background:var(--blue)"></div>`);
   if (counts.soft_pipeline > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('soft_pipeline')}%;background:var(--lg-gold)"></div>`);
-  if (counts.lost > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('lost')}%;background:var(--lg-red-light)"></div>`);
-  if (counts.other > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('other')}%;background:var(--ink5)"></div>`);
+  if (counts.lost > 0)          segments.push(`<div class="outcome-bar-segment" style="width:${pct('lost')}%;background:var(--lg-red-light)"></div>`);
+  if (counts.other > 0)         segments.push(`<div class="outcome-bar-segment" style="width:${pct('other')}%;background:var(--ink5)"></div>`);
   const legend = [];
-  if (counts.booked) legend.push(`<span style="--c:var(--lg-green)">${counts.booked} booked</span>`);
+  if (counts.booked)        legend.push(`<span style="--c:var(--lg-green)">${counts.booked} booked</span>`);
+  if (counts.estimate_sent) legend.push(`<span style="--c:var(--blue)">${counts.estimate_sent} estimate</span>`);
   if (counts.soft_pipeline) legend.push(`<span style="--c:var(--lg-gold)">${counts.soft_pipeline} pipeline</span>`);
-  if (counts.lost) legend.push(`<span style="--c:var(--lg-red-light)">${counts.lost} lost</span>`);
+  if (counts.lost)          legend.push(`<span style="--c:var(--lg-red-light)">${counts.lost} lost</span>`);
+  if (counts.other)         legend.push(`<span style="--c:var(--ink5)">${counts.other} other</span>`);
   return `<div class="outcome-bar">${segments.join('')}</div>
     <div class="outcome-bar-legend">${legend.join('')}</div>`;
 }
@@ -3878,6 +3918,7 @@ function renderOverview(){
 
     <div class="chart-row">
       ${buildMoveTypeChart(sc)}
+      ${buildPricingModelChart(sc)}
       ${buildLossReasonChart(sc)}
       ${buildObjectionsCard(sc)}
     </div>
@@ -4180,6 +4221,80 @@ function buildVerdictText(c){
   if (s >= 5) return 'Mixed performance — some highlights, some coaching opportunities.';
   if (s > 0) return 'Several coaching opportunities identified — review recommended.';
   return 'No score available.';
+}
+
+// ── AUDIO PLAYBACK ──
+// Fetches a fresh signed URL from /audio_url/<callId>, replaces the play button's
+// container with a native <audio controls> element, and starts playback. Click the
+// button again to pause; if the page re-renders, the player is rebuilt fresh.
+async function playAudio(callId, btnEl) {
+  if (!btnEl) return;
+  const wrap = btnEl.closest('.audio-player-mockup');
+  if (!wrap) return;
+
+  // If we already have a player attached for this call, toggle play/pause
+  const existing = wrap.querySelector('audio.lg-audio-el');
+  if (existing) {
+    if (existing.paused) {
+      existing.play();
+      btnEl.innerHTML = '⏸';
+    } else {
+      existing.pause();
+      btnEl.innerHTML = '▶';
+    }
+    return;
+  }
+
+  // Fetch a fresh signed URL
+  btnEl.innerHTML = '<span class="spin"></span>';
+  btnEl.disabled = true;
+  let url = '';
+  try {
+    const r = await fetch(API + '/audio_url/' + encodeURIComponent(callId));
+    if (!r.ok) {
+      const errBody = await r.text();
+      throw new Error(r.status + ' ' + errBody.substring(0, 100));
+    }
+    const data = await r.json();
+    url = data.url;
+  } catch (e) {
+    btnEl.innerHTML = '▶';
+    btnEl.disabled = false;
+    // Show an inline error replacing the meta block, but keep the play button visible
+    const meta = wrap.querySelector('.audio-meta');
+    if (meta) meta.innerHTML = `<span style="color:var(--lg-red);font-size:11px">Audio unavailable: ${esc(e.message)}</span>`;
+    return;
+  }
+  if (!url) {
+    btnEl.innerHTML = '▶';
+    btnEl.disabled = false;
+    return;
+  }
+
+  // Create audio element and add it to the player wrap
+  const audio = document.createElement('audio');
+  audio.className = 'lg-audio-el';
+  audio.controls = true;
+  audio.src = url;
+  audio.style.cssText = 'flex:1;height:36px;outline:none';
+  // Stop click on audio bubbling up to the row toggle
+  audio.onclick = (e) => e.stopPropagation();
+  audio.onended = () => { btnEl.innerHTML = '▶'; };
+  audio.onpause = () => { if (!audio.ended) btnEl.innerHTML = '▶'; };
+  audio.onplay = () => { btnEl.innerHTML = '⏸'; };
+
+  // Replace the meta block with the audio element so the player looks tidy
+  const meta = wrap.querySelector('.audio-meta');
+  if (meta) meta.style.display = 'none';
+  wrap.appendChild(audio);
+
+  btnEl.disabled = false;
+  try {
+    await audio.play();
+  } catch (e) {
+    // Autoplay can be blocked — that's fine, the user can press the native control
+    btnEl.innerHTML = '▶';
+  }
 }
 
 function buildRow(c){
@@ -4705,10 +4820,9 @@ function renderProfiles(opts={}) {
     const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
     return rc.length ? rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length : 0;
   };
+  // Only open a rep profile if explicitly requested via opts.rep.
+  // (Previously auto-selected top performer on first load — removed by user request.)
   let selectedRep = opts.rep && allReps.includes(opts.rep) ? opts.rep : null;
-  if (!selectedRep && allReps.length) {
-    selectedRep = allReps.slice().sort((a,b) => overall(b) - overall(a))[0];
-  }
 
   // Helper to compute a sparkline from a rep's last N scored calls
   const buildCard = (r) => {
@@ -5500,10 +5614,10 @@ function renderAdd(){
         <span class="dz-ico">🎙</span><div class="dz-title">Drop audio files or a ZIP here</div><div class="dz-sub">MP3, M4A, WAV, OGG — or a Vonage ZIP export</div>
       </div>
       <input type="file" id="audio-input" accept="audio/*,.mp3,.m4a,.wav,.ogg,.mp4,.zip" multiple style="display:none" onchange="handleSelect(this.files)" />
+      <div style="margin-top:14px;display:flex;justify-content:flex-end"><button class="btn btn-p" id="add-audio-btn" onclick="submitAudio()" disabled>Analyze & Save</button></div>
       <div id="audio-queue" style="display:none;margin-top:12px"><div style="font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.1em;font-family:var(--font-label);margin-bottom:8px">Queue</div><div id="audio-queue-list"></div></div>
       <div id="audio-progress" style="display:none;margin-top:10px"><div class="prog"><div class="prog-fill" id="audio-prog-bar" style="width:0%"></div></div><div class="prog-label" id="audio-prog-text">Preparing…</div><div id="audio-skipped" style="display:none;margin-top:8px"><div style="font-size:11px;font-weight:600;color:var(--lg-gold-dark, #8A6420);margin-bottom:4px">Skipped:</div><div id="audio-skipped-list" style="font-size:11px;color:var(--ink3)"></div></div></div>
       <div id="add-audio-msg"></div>
-      <div style="margin-top:14px;text-align:right"><button class="btn btn-p" id="add-audio-btn" onclick="submitAudio()" disabled>Analyze & Save</button></div>
     </div>
     <div id="add-paste" style="display:${addTab==='paste'?'block':'none'}">
       <div class="fg"><label>Rep Name</label><input type="text" id="paste-rep" placeholder="Will auto-detect from transcript" /></div>
@@ -5520,15 +5634,15 @@ function renderAdd(){
         <span class="dz-ico">📦</span><div class="dz-title">Drop a Vonage ZIP here</div><div class="dz-sub">All MP3s inside will be queued automatically</div>
       </div>
       <input type="file" id="bulk-input" accept=".zip,application/zip" style="display:none" onchange="handleBulkSelect(this.files[0])" />
+      <div style="margin-top:14px;display:flex;justify-content:flex-end">
+        <button class="btn btn-p" id="bulk-btn" onclick="startBulkUpload()" disabled>Start Background Upload</button>
+      </div>
       <div id="bulk-file-info" style="display:none;margin-top:12px;padding:10px 14px;background:var(--surface);border-radius:10px;border:1px solid var(--border);font-size:13px;color:var(--ink2)"></div>
       <div id="bulk-progress" style="display:none;margin-top:12px">
         <div class="prog"><div class="prog-fill" id="bulk-prog-bar" style="width:0%"></div></div>
         <div class="prog-label" id="bulk-prog-text" style="margin-top:6px">Waiting…</div>
       </div>
       <div id="bulk-msg"></div>
-      <div style="margin-top:16px;text-align:right">
-        <button class="btn btn-p" id="bulk-btn" onclick="startBulkUpload()" disabled>Start Background Upload</button>
-      </div>
     </div>
     <div id="add-file" style="display:${addTab==='file'?'block':'none'}">
       <div class="fg"><label>Rep Name</label><input type="text" id="file-rep" placeholder="Will auto-detect" /></div>
@@ -5892,6 +6006,262 @@ async function deleteTxRule(id) {
     txCorrections = txCorrections.filter(r => r.id !== id);
     renderTxCorrections();
   } catch(e) { alert(e.message); }
+}
+
+
+// ── VONAGE SYNC PAGE ──
+let vonageStatusPoller = null;
+
+async function renderVonage() {
+  // Stop any prior poller before re-rendering
+  if (vonageStatusPoller) { clearInterval(vonageStatusPoller); vonageStatusPoller = null; }
+
+  // Fetch status, mapping, and recent ingestions in parallel
+  let status = null, mapping = [], recent = [];
+  try {
+    const [s, m, r] = await Promise.all([
+      fetch(API + '/vonage/status').then(r => r.json()),
+      fetch(API + '/vonage/extension_map').then(r => r.json()),
+      fetch(API + '/vonage/recent').then(r => r.json()),
+    ]);
+    status = s; mapping = m || []; recent = r || [];
+  } catch (e) {
+    set('page', `<div class="mgmt-card"><div class="mgmt-card-body"><div class="msg-err">Failed to load Vonage status: ${esc(e.message)}</div></div></div>`);
+    return;
+  }
+
+  set('page', vonagePageHtml(status, mapping, recent));
+
+  // Auto-refresh status every 15 seconds while page is open
+  vonageStatusPoller = setInterval(async () => {
+    if (currentPage !== 'vonage') {
+      clearInterval(vonageStatusPoller); vonageStatusPoller = null; return;
+    }
+    try {
+      const s = await fetch(API + '/vonage/status').then(r => r.json());
+      const el = g('vonage-status-block');
+      if (el) el.outerHTML = vonageStatusBlockHtml(s);
+    } catch (e) { /* ignore polling errors */ }
+  }, 15000);
+}
+
+function vonageStatusBlockHtml(s) {
+  if (!s) return `<div id="vonage-status-block"></div>`;
+
+  let statusPill = '', actionBtns = '';
+  const cfg = s.configured;
+  const st = s.status;
+
+  if (!cfg) {
+    statusPill = `<span class="rmgmt-loc-empty">⚠ Not configured</span>`;
+    actionBtns = `<span style="font-size:12px;color:var(--ink3)">Set VONAGE_CLIENT_ID, VONAGE_CLIENT_SECRET, and VONAGE_ACCOUNT_ID in Render env vars to enable.</span>`;
+  } else if (st === 'running') {
+    statusPill = `<span class="rmgmt-status-pill">● Running</span>`;
+    actionBtns = `
+      <button class="btn btn-g btn-sm" onclick="vonagePause()">⏸ Pause</button>
+      <button class="btn btn-g btn-sm" onclick="vonagePollNow()">↻ Poll now</button>
+      <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
+  } else if (st === 'paused') {
+    statusPill = `<span class="rmgmt-status-pill" style="background:rgba(227,177,36,0.18);color:var(--lg-gold-dark, #8A6420)">⏸ Paused</span>`;
+    actionBtns = `
+      <button class="btn btn-p btn-sm" onclick="vonageResume()">▶ Resume</button>
+      <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
+  } else if (st === 'error') {
+    statusPill = `<span class="rmgmt-status-pill" style="background:var(--lg-red-bg);color:var(--lg-red)">⚠ Error</span>`;
+    actionBtns = `
+      <button class="btn btn-p btn-sm" onclick="vonageStart()">▶ Restart</button>
+      <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
+  } else {
+    // idle / disabled
+    statusPill = `<span class="rmgmt-loc-empty">○ Idle</span>`;
+    actionBtns = `<button class="btn btn-p btn-sm" onclick="vonageStart()">▶ Start polling</button>`;
+  }
+
+  const lastPoll = s.last_poll_at ? fmt(s.last_poll_at) : '—';
+  const lastPollOk = s.last_poll_succeeded;
+  const lastPollLabel = lastPollOk === true ? 'OK' : lastPollOk === false ? 'failed' : '—';
+  const lastPollColor = lastPollOk === true ? 'var(--lg-green-dark)' : lastPollOk === false ? 'var(--lg-red)' : 'var(--ink3)';
+  const interval = s.poll_interval_seconds ? Math.round(s.poll_interval_seconds / 60) + ' min' : '—';
+  const last24 = s.last_24h || { done: 0, skipped: 0, failed: 0, pending: 0 };
+
+  return `<div id="vonage-status-block" class="mgmt-card" style="margin-bottom:16px">
+    <div class="mgmt-card-head">
+      <div class="mgmt-card-title">Polling Status</div>
+      ${statusPill}
+    </div>
+    <div class="mgmt-card-body">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">${actionBtns}</div>
+      <div class="mgmt-stat-row">
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${last24.done}</div><div class="mgmt-stat-cell-label">Ingested 24h</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${last24.skipped}</div><div class="mgmt-stat-cell-label">Skipped 24h</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${last24.failed}</div><div class="mgmt-stat-cell-label">Failed 24h</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${last24.pending}</div><div class="mgmt-stat-cell-label">Pending 24h</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:3px">Last poll</div>
+          <div style="font-size:13px;color:var(--ink2)">${lastPoll} <span style="color:${lastPollColor};font-weight:500">${lastPollLabel}</span></div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:3px">Interval</div>
+          <div style="font-size:13px;color:var(--ink2)">Every ${interval}</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:3px">Auto-start</div>
+          <div style="font-size:13px;color:var(--ink2)">${s.autostart_enabled ? 'On' : 'Off'}</div>
+        </div>
+      </div>
+      ${s.last_error ? `<div class="msg-err" style="margin-top:14px">Last error: ${esc(s.last_error)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function vonagePageHtml(status, mapping, recent) {
+  // ── Mapping table ──
+  const mapRows = mapping.length
+    ? mapping.map(m => `<tr>
+        <td><span style="font-family:'JetBrains Mono',monospace;font-size:13px">${esc(m.extension_id)}</span></td>
+        <td>${esc(m.rep_name)}</td>
+        <td style="color:var(--ink3);font-size:12px">${esc(m.notes || '')}</td>
+        <td style="text-align:right">
+          <button class="btn btn-d btn-xs" onclick="vonageDeleteExt('${esc(m.extension_id)}')">Delete</button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;color:var(--ink3);padding:14px;font-style:italic">No mappings yet. Add one above to attribute calls to reps.</td></tr>';
+
+  // ── Recent ingestions table ──
+  const recentRows = recent.length
+    ? recent.map(r => {
+        const statusCls = r.status === 'done' ? 'g' : r.status === 'failed' ? 'r' : 'n';
+        const statusBadge = `<span style="font-family:var(--font-label);font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border-radius:999px;background:${statusCls==='g'?'var(--lg-green-bg)':statusCls==='r'?'var(--lg-red-bg)':'var(--surface)'};color:${statusCls==='g'?'var(--lg-green-dark)':statusCls==='r'?'var(--lg-red)':'var(--ink3)'}">${esc(r.status)}</span>`;
+        const repName = r.call_rep_name || (r.extension_id ? `(ext ${esc(r.extension_id)})` : '—');
+        const errCell = r.error_message ? `<div style="color:var(--lg-red);font-size:11px;margin-top:2px">${esc(r.error_message.substring(0, 100))}</div>` : '';
+        return `<tr>
+          <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${esc((r.recording_id || '').substring(0, 20))}${r.recording_id && r.recording_id.length > 20 ? '…' : ''}</span></td>
+          <td>${esc(repName)}</td>
+          <td>${r.duration_seconds ? Math.round(r.duration_seconds / 60) + ' min' : '—'}</td>
+          <td style="font-size:12px;color:var(--ink3)">${r.ingested_at ? fmt(r.ingested_at) : '—'}</td>
+          <td>${statusBadge}${errCell}</td>
+          <td style="text-align:right">${r.call_id ? `<button class="btn btn-g btn-xs" onclick="libFilters={rep:'',out:'',score:'',search:'${esc((r.call_filename||'').substring(0,30))}',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};nav('library')">View call</button>` : ''}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:14px;font-style:italic">No recordings ingested yet.</td></tr>';
+
+  return `
+    ${vonageStatusBlockHtml(status)}
+
+    <div class="mgmt-card" style="margin-bottom:16px">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Extension → Rep Mapping</div>
+      </div>
+      <p class="mgmt-card-subtitle">Map Vonage extension IDs to reps. Calls coming from a mapped extension will be attributed to that rep automatically. Unmapped extensions ingest as "Unknown — ext &lt;id&gt;" so you can map them later.</p>
+      <div class="mgmt-card-body">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:end">
+          <div style="flex:0 0 140px">
+            <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:5px">Extension</div>
+            <input type="text" id="vonage-new-ext" class="ovr-inp" placeholder="e.g. 101" />
+          </div>
+          <div style="flex:1;min-width:160px">
+            <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:5px">Rep name</div>
+            <input type="text" id="vonage-new-rep" class="ovr-inp" placeholder="e.g. Caleb" />
+          </div>
+          <div style="flex:1;min-width:160px">
+            <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:5px">Notes (optional)</div>
+            <input type="text" id="vonage-new-notes" class="ovr-inp" placeholder="" />
+          </div>
+          <button class="btn btn-p btn-sm" onclick="vonageSaveExt()">+ Add mapping</button>
+        </div>
+        <div id="vonage-map-msg" style="font-size:12px;margin-bottom:8px"></div>
+        <table class="rmgmt-table-v2">
+          <colgroup>
+            <col style="width:120px" />
+            <col />
+            <col />
+            <col style="width:100px" />
+          </colgroup>
+          <thead><tr><th>Extension</th><th>Rep</th><th>Notes</th><th></th></tr></thead>
+          <tbody>${mapRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mgmt-card">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Recent Ingestions</div>
+        <span class="bdg">${recent.length} shown</span>
+      </div>
+      <p class="mgmt-card-subtitle">Last 50 recordings the polling worker has touched. Click a row to jump to the corresponding call in the Library.</p>
+      <div class="mgmt-card-body flush">
+        <table class="rmgmt-table-v2">
+          <colgroup>
+            <col style="width:170px" />
+            <col />
+            <col style="width:80px" />
+            <col style="width:130px" />
+            <col style="width:140px" />
+            <col style="width:100px" />
+          </colgroup>
+          <thead><tr><th>Recording ID</th><th>Rep / Ext</th><th>Duration</th><th>Ingested</th><th>Status</th><th></th></tr></thead>
+          <tbody>${recentRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function vonageStart()    { await vonageAction('/vonage/start'); }
+async function vonageStop()     { if (!confirm('Stop the polling worker? It will need to be restarted manually.')) return; await vonageAction('/vonage/stop'); }
+async function vonagePause()    { await vonageAction('/vonage/pause'); }
+async function vonageResume()   { await vonageAction('/vonage/resume'); }
+async function vonagePollNow()  { await vonageAction('/vonage/poll_now', 'Polling now…'); }
+
+async function vonageAction(path, statusMsg) {
+  const block = g('vonage-status-block');
+  if (statusMsg && block) {
+    // Show transient status message
+    const orig = block.innerHTML;
+    block.innerHTML = `<div class="mgmt-card-body"><div style="font-size:13px;color:var(--ink3)">${statusMsg}</div></div>`;
+  }
+  try {
+    await fetch(API + path, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+  } catch (e) {
+    alert('Action failed: ' + e.message);
+  }
+  // Re-render whole page to refresh status, mapping, and recent ingestions
+  setTimeout(() => renderVonage(), 800);
+}
+
+async function vonageSaveExt() {
+  const ext = g('vonage-new-ext')?.value?.trim();
+  const rep = g('vonage-new-rep')?.value?.trim();
+  const notes = g('vonage-new-notes')?.value?.trim() || '';
+  const msg = g('vonage-map-msg');
+  if (!ext || !rep) {
+    if (msg) msg.innerHTML = '<span style="color:var(--lg-red)">Extension and rep name are required.</span>';
+    return;
+  }
+  try {
+    const r = await fetch(API + '/vonage/extension_map/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ extension_id: ext, rep_name: rep, notes: notes }),
+    });
+    if (!r.ok) throw new Error('Server returned ' + r.status);
+    if (msg) msg.innerHTML = '<span style="color:var(--lg-green-dark)">✓ Saved</span>';
+    setTimeout(() => renderVonage(), 600);
+  } catch (e) {
+    if (msg) msg.innerHTML = `<span style="color:var(--lg-red)">${esc(e.message)}</span>`;
+  }
+}
+
+async function vonageDeleteExt(extId) {
+  if (!confirm(`Delete mapping for extension ${extId}? Future calls from this extension will ingest as "Unknown".`)) return;
+  try {
+    await fetch(API + '/vonage/extension_map/delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ extension_id: extId }),
+    });
+    renderVonage();
+  } catch (e) { alert(e.message); }
 }
 
 
