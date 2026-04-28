@@ -4507,8 +4507,18 @@ function jumpTx(evt,spanId){
   // Find which call this belongs to
   const span=document.getElementById(spanId);if(!span)return;
   const txBox=span.closest('.txb');if(!txBox)return;
-  // Open row if closed
-  const row=txBox.closest('.crow');if(row&&!row.classList.contains('open'))row.classList.add('open');
+  // The .txb lives inside .call-detail (id="detail-${callId}"). Find the matching .call-row and ensure it's open.
+  const detail=txBox.closest('.call-detail');
+  let row=null,wasOpen=true;
+  if(detail&&detail.id.startsWith('detail-')){
+    const callId=detail.id.replace('detail-','');
+    row=document.getElementById('row-'+callId);
+    if(row&&!row.classList.contains('expanded')){
+      wasOpen=false;
+      row.classList.add('expanded');
+      detail.style.display='grid';
+    }
+  }
   // Clear any previously active spans in this box
   txBox.querySelectorAll('.tx-kw.active,.tx-obj.active,.tx-obj-abandoned.active').forEach(el=>el.classList.remove('active'));
   span.classList.add('active');
@@ -4516,7 +4526,7 @@ function jumpTx(evt,spanId){
   setTimeout(()=>{
     span.scrollIntoView({behavior:'smooth',block:'center'});
     setTimeout(()=>span.classList.remove('active'),2500);
-  },row&&!row.classList.contains('open')?200:50);
+  },wasOpen?50:200);
 }
 function toggleRow(id){
   const r=g('row-'+id);
@@ -4529,7 +4539,7 @@ function toggleRow(id){
 function toggleSel(id){if(selected.has(id))selected.delete(id);else selected.add(id);updateBB();const r=g('row-'+id);if(r){const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=selected.has(id);}}
 function updateBB(){const b=g('bulk-bar');if(!b)return;const n=selected.size;b.classList.toggle('on',n>0);const c=g('bulk-cnt');if(c)c.textContent=`${n} call${n!==1?'s':''} selected`;}
 function clearSel(){selected.clear();updateBB();renderCallList();}
-function toggleSelAll(){const rows=document.querySelectorAll('#call-list .crow');const ids=[...rows].map(el=>el.id.replace('row-',''));const allSel=ids.every(id=>selected.has(id));if(allSel)ids.forEach(id=>selected.delete(id));else ids.forEach(id=>selected.add(id));updateBB();renderCallList();}
+function toggleSelAll(){const rows=document.querySelectorAll('#call-list .call-row');const ids=[...rows].map(el=>el.id.replace('row-',''));const allSel=ids.every(id=>selected.has(id));if(allSel)ids.forEach(id=>selected.delete(id));else ids.forEach(id=>selected.add(id));updateBB();renderCallList();}
 async function bulkDel(){const n=selected.size;if(!n||!confirm(`Delete ${n} call${n!==1?'s':''}?`))return;try{await fetch(API+'/bulk_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...selected]})});allCalls=allCalls.filter(c=>!selected.has(c.id));selected.clear();renderCallList();}catch(e){alert(e.message);}}
 async function bulkDelExcluded(){
   const base=locationFilter?getFC():allCalls;
@@ -4632,12 +4642,18 @@ async function updCall(id,data){
     // In-place update: rebuild just this row if it exists in the DOM, otherwise full re-render
     const row=g('row-'+id);
     if(row&&currentPage==='library'){
-      const wasOpen=row.classList.contains('open');
-      const newHtml=buildRow(allCalls[i]);
-      const tmp=document.createElement('div');tmp.innerHTML=newHtml;
-      const newRow=tmp.firstElementChild;
-      if(wasOpen)newRow.classList.add('open');
-      row.replaceWith(newRow);
+      const wasOpen=row.classList.contains('expanded');
+      const oldDetail=g('detail-'+id);
+      // buildRow returns row + detail as two sibling top-level elements
+      const tmp=document.createElement('div');tmp.innerHTML=buildRow(allCalls[i]);
+      const newRow=tmp.querySelector('#row-'+CSS.escape(id));
+      const newDetail=tmp.querySelector('#detail-'+CSS.escape(id));
+      if(wasOpen&&newRow){
+        newRow.classList.add('expanded');
+        if(newDetail)newDetail.style.display='grid';
+      }
+      if(newRow)row.replaceWith(newRow);
+      if(oldDetail&&newDetail)oldDetail.replaceWith(newDetail);
       updateBB();
     } else if(currentPage==='overview'){
       renderOverview();
