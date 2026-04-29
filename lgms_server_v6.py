@@ -55,6 +55,54 @@ _batch_job = {
 _batch_lock = threading.Lock()
 
 # ──────────────────────────────────────────────
+# VONAGE VBC INTEGRATION
+# ──────────────────────────────────────────────
+# Env vars (all optional — integration is dormant if any are missing):
+#   VONAGE_CLIENT_ID       — OAuth client ID from VBC API dashboard
+#   VONAGE_CLIENT_SECRET   — OAuth client secret
+#   VONAGE_ACCOUNT_ID      — VBC account identifier (used in API URL paths)
+#   VONAGE_API_BASE        — Base URL for VBC API
+#                            (default https://api.vonage.com — confirm in dashboard)
+#   VONAGE_TOKEN_URL       — OAuth token endpoint
+#                            (default https://api.vonage.com/oauth2/token — confirm)
+#   VONAGE_POLL_INTERVAL   — Seconds between polls (default 1800 = 30 min)
+#   VONAGE_AUTOSTART       — "1" to auto-start polling at boot (default "1")
+
+VONAGE_CLIENT_ID     = os.environ.get("VONAGE_CLIENT_ID", "")
+VONAGE_CLIENT_SECRET = os.environ.get("VONAGE_CLIENT_SECRET", "")
+VONAGE_ACCOUNT_ID    = os.environ.get("VONAGE_ACCOUNT_ID", "")
+VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.vonage.com").rstrip("/")
+VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://api.vonage.com/oauth2/token")
+VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 1800))  # 30 min default
+VONAGE_AUTOSTART     = os.environ.get("VONAGE_AUTOSTART", "1") == "1"
+
+# OAuth token cache. Refreshed automatically when expired or on 401.
+_vonage_token_cache = {"token": None, "expires_at": 0}
+_vonage_token_lock = threading.Lock()
+
+# Polling worker state. Mirrors the pattern used by _reanalyze_job and _batch_job.
+_vonage_job = {
+    "status": "idle",        # idle | running | paused | error | disabled
+    "started_at": None,
+    "last_poll_at": None,
+    "last_poll_succeeded": None,
+    "last_error": None,
+    "ingested_total": 0,     # since worker started
+    "ingested_today": 0,
+    "skipped_total": 0,
+    "errors_total": 0,
+    "stop_requested": False,
+    "pause_requested": False,
+}
+_vonage_lock = threading.Lock()
+_vonage_thread = None  # Holds the background thread reference; check if alive before spawning
+
+# Whether VBC env is configured at all
+def _vonage_configured():
+    return bool(VONAGE_CLIENT_ID and VONAGE_CLIENT_SECRET and VONAGE_ACCOUNT_ID)
+
+
+# ──────────────────────────────────────────────
 # CLAUDE PROMPT
 # ──────────────────────────────────────────────
 
@@ -716,20 +764,35 @@ def transcribe_audio_deepgram(audio_bytes, filename, keyterms=None):
     utterances = result.get("results", {}).get("utterances", [])
     if utterances:
         lines = []
+        words_flat = []  # Flat list of {w, s, e, sp} for click-to-seek transcript
         for u in utterances:
             speaker = u.get("speaker", 0)
             text = u.get("transcript", "").strip()
             if text:
                 lines.append(f"Speaker {speaker}: {text}")
+            for w in u.get("words", []):
+                words_flat.append({
+                    "w": w.get("punctuated_word", w.get("word", "")),
+                    "s": round(float(w.get("start", 0)), 3),
+                    "e": round(float(w.get("end", 0)), 3),
+                    "sp": w.get("speaker", speaker),
+                })
         transcript = "\n".join(lines)
-        log(f"  Diarized via utterances: {len(utterances)} turns")
-        return transcript, True
+        log(f"  Diarized via utterances: {len(utterances)} turns, {len(words_flat)} words timestamped")
+        return transcript, True, words_flat
 
     # Fallback: try word-level diarization from channels
     channels = result.get("results", {}).get("channels", [])
     if channels:
         words = channels[0].get("alternatives", [{}])[0].get("words", [])
         plain = channels[0].get("alternatives", [{}])[0].get("transcript", "")
+
+        words_flat = [{
+            "w": w.get("punctuated_word", w.get("word", "")),
+            "s": round(float(w.get("start", 0)), 3),
+            "e": round(float(w.get("end", 0)), 3),
+            "sp": w.get("speaker", 0),
+        } for w in words]
 
         if words and any("speaker" in w for w in words):
             # Build diarized transcript from word-level speaker tags
@@ -749,14 +812,14 @@ def transcribe_audio_deepgram(audio_bytes, filename, keyterms=None):
             if current_words:
                 lines.append(f"Speaker {current_speaker}: {' '.join(current_words)}")
             transcript = "\n".join(lines)
-            log(f"  Diarized via word-level: {len(lines)} turns")
-            return transcript, True
+            log(f"  Diarized via word-level: {len(lines)} turns, {len(words_flat)} words timestamped")
+            return transcript, True, words_flat
         else:
-            log(f"  No diarization data, using plain transcript ({len(plain)} chars)")
-            return plain, False
+            log(f"  No diarization data, using plain transcript ({len(plain)} chars), {len(words_flat)} words timestamped")
+            return plain, False, words_flat
 
     log("  Deepgram returned no usable transcript")
-    return "", False
+    return "", False, []
 
 # Fallback Whisper transcription if Deepgram unavailable
 def transcribe_audio_whisper(audio_bytes, filename):
@@ -781,7 +844,7 @@ def transcribe_audio_whisper(audio_bytes, filename):
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=300) as r:
-        return r.read().decode("utf-8"), False
+        return r.read().decode("utf-8"), False, []
 
 def transcribe_audio(audio_bytes, filename, keyterms=None):
     """Transcribe using Deepgram, fall back to Whisper if needed."""
@@ -1172,7 +1235,7 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
         pass
 
     # Transcribe
-    transcript, is_diarized = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
+    transcript, is_diarized, word_timestamps = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
     if not transcript or not transcript.strip():
         return None, "empty transcript"
 
@@ -1184,6 +1247,8 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
     result["transcript"] = clean_transcript
     result["filename"] = filename
     result["is_diarized"] = is_diarized
+    if word_timestamps:
+        result["word_timestamps"] = word_timestamps
 
     # Upload audio to storage
     try:
@@ -1268,6 +1333,7 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
         "output_tokens": result.get("output_tokens", 0),
         "pricing_model": result.get("pricing_model", "unknown"),
         "move_timeline": result.get("move_timeline", "unknown"),
+        "word_timestamps": result.get("word_timestamps") or None,
     }
 
     # Save to Supabase
@@ -1377,6 +1443,502 @@ def _batch_upload_worker(zip_bytes):
         log(f"  Batch upload worker error: {e}")
 
 # ──────────────────────────────────────────────
+# VONAGE VBC — OAUTH, API CLIENT, POLLING WORKER
+# ──────────────────────────────────────────────
+# Implementation notes:
+#
+# This is "scaffolded" code. The structure (token caching, polling loop,
+# idempotency, error handling) is solid and won't change. But the exact
+# endpoint URLs, OAuth grant type, response field names, and pagination
+# style need to be confirmed against the actual VBC API docs (visible
+# from the user's developer dashboard at vbcdeveloper.vonage.com).
+#
+# Every place that depends on a specific endpoint detail is marked with
+# a # TODO(vbc) comment. Find them all by grepping for "TODO(vbc)" before
+# going live.
+
+def _vonage_get_token(force_refresh=False):
+    """Get a valid OAuth bearer token, refreshing if needed.
+
+    Caches the token in _vonage_token_cache. Refreshes 60 seconds before
+    actual expiry to avoid edge-case 401s. Thread-safe.
+    """
+    if not _vonage_configured():
+        raise RuntimeError("Vonage not configured (missing client ID, secret, or account ID)")
+
+    with _vonage_token_lock:
+        now = time.time()
+        cached = _vonage_token_cache
+        if not force_refresh and cached.get("token") and cached.get("expires_at", 0) > now + 60:
+            return cached["token"]
+
+        # TODO(vbc): Confirm the OAuth grant type. Most likely "client_credentials"
+        # for server-to-server VBC integrations, but VBC docs may specify otherwise.
+        # If they require Basic auth in the header instead of body, swap to that.
+        body = urllib.parse.urlencode({
+            "grant_type": "client_credentials",
+            "client_id": VONAGE_CLIENT_ID,
+            "client_secret": VONAGE_CLIENT_SECRET,
+        }).encode()
+        req = urllib.request.Request(
+            VONAGE_TOKEN_URL,
+            data=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                resp = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")[:500]
+            raise RuntimeError(f"OAuth token request failed: HTTP {e.code} — {err}")
+
+        token = resp.get("access_token")
+        expires_in = int(resp.get("expires_in", 3600))
+        if not token:
+            raise RuntimeError(f"OAuth token response missing access_token: {resp}")
+
+        cached["token"] = token
+        cached["expires_at"] = now + expires_in
+        return token
+
+
+def _vonage_api(method, path, params=None, retry_on_401=True):
+    """Call a VBC API endpoint and return the parsed JSON response.
+
+    `path` should start with "/" and be relative to VONAGE_API_BASE.
+    Automatically refreshes token on 401 and retries once.
+    """
+    token = _vonage_get_token()
+    qs = ""
+    if params:
+        qs = "?" + urllib.parse.urlencode(params)
+    url = f"{VONAGE_API_BASE}{path}{qs}"
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = r.read()
+            if not data:
+                return None
+            return json.loads(data.decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 401 and retry_on_401:
+            log("  Vonage API 401 — refreshing token and retrying")
+            _vonage_get_token(force_refresh=True)
+            return _vonage_api(method, path, params=params, retry_on_401=False)
+        err_body = e.read().decode("utf-8", errors="replace")[:500] if e.fp else ""
+        raise RuntimeError(f"Vonage API {method} {path} failed: HTTP {e.code} — {err_body}")
+
+
+def _vonage_list_recordings(since_iso):
+    """List recordings created since the given ISO timestamp.
+
+    Returns a list of dicts. Each dict represents one recording.
+    Pagination is handled internally (follows next-page links until
+    exhausted).
+    """
+    # TODO(vbc): Confirm the actual endpoint path. Educated guess:
+    #   /vbc/v1/accounts/{account_id}/call_recordings
+    #   /api/v1/accounts/{account_id}/recordings
+    # The path will include the account ID. Filter param for time-bounded
+    # queries is typically called "start" or "from" — adjust to match docs.
+    endpoint = f"/vbc/v1/accounts/{VONAGE_ACCOUNT_ID}/call_recordings"
+
+    all_items = []
+    next_page = None
+    page_count = 0
+    while True:
+        page_count += 1
+        if page_count > 50:  # Safety brake — never paginate forever
+            log("  Vonage list paginated past 50 pages, stopping for safety")
+            break
+        params = {"start": since_iso, "page_size": 100}
+        if next_page:
+            params["page"] = next_page
+        try:
+            resp = _vonage_api("GET", endpoint, params=params)
+        except Exception as e:
+            log(f"  Vonage list error on page {page_count}: {e}")
+            raise
+
+        # TODO(vbc): The response shape is unknown until we see the real one.
+        # Most VBC APIs return either:
+        #   {"items": [...], "_links": {"next": {"href": "..."}}}
+        # or
+        #   {"data": [...], "next_cursor": "..."}
+        # Adjust these two lines once the real shape is known:
+        items = resp.get("items") or resp.get("data") or []
+        all_items.extend(items)
+
+        # Pagination cursor extraction — also needs confirmation:
+        next_link = (resp.get("_links") or {}).get("next") or {}
+        next_page = next_link.get("href") or resp.get("next_cursor")
+        if not next_page:
+            break
+
+    return all_items
+
+
+def _vonage_download_recording(recording_id):
+    """Download the audio bytes for a single recording.
+
+    Returns (audio_bytes, mime_type). Raises on error.
+    """
+    # TODO(vbc): Confirm download endpoint. Could be:
+    #   /vbc/v1/accounts/{account_id}/call_recordings/{recording_id}/download
+    #   /vbc/v1/recordings/{recording_id}/audio
+    # And it may require a separate signed URL fetch first. Adjust as needed.
+    endpoint = f"/vbc/v1/accounts/{VONAGE_ACCOUNT_ID}/call_recordings/{recording_id}/download"
+    token = _vonage_get_token()
+    url = f"{VONAGE_API_BASE}{endpoint}"
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Accept": "audio/mpeg, audio/*"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            audio = r.read()
+            mime = r.headers.get("Content-Type", "audio/mpeg")
+            return audio, mime
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            _vonage_get_token(force_refresh=True)
+            return _vonage_download_recording(recording_id)
+        err = e.read().decode("utf-8", errors="replace")[:300] if e.fp else ""
+        raise RuntimeError(f"Recording download failed: HTTP {e.code} — {err}")
+
+
+def _vonage_recording_seen(recording_id):
+    """Check the idempotency table — have we already processed this recording?"""
+    try:
+        rows = supa("GET", f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}&limit=1")
+        return bool(rows)
+    except Exception:
+        return False  # On lookup error, treat as unseen (we'll dedupe again at insert via PK constraint)
+
+
+def _vonage_record_status(recording_id, status, **fields):
+    """Insert or update the idempotency row for a recording.
+
+    Uses an explicit check-then-insert/update pattern rather than PostgREST's
+    upsert (which requires conflicting Prefer headers vs. the rest of the
+    codebase). The recording_id is the PK so this is race-safe enough for
+    a single-worker setup.
+    """
+    record = {
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    record.update({k: v for k, v in fields.items() if v is not None})
+    try:
+        existing = supa("GET", f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}&limit=1")
+        if existing:
+            supa("PATCH", f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}", record, prefer_minimal=True)
+        else:
+            record["recording_id"] = recording_id
+            supa("POST", "vonage_recordings", record, prefer_minimal=True)
+    except Exception as e:
+        log(f"  Failed to update vonage_recordings row for {recording_id}: {e}")
+
+
+def _vonage_get_extension_map():
+    """Fetch the full extension → rep_name map. Returns dict."""
+    try:
+        rows = supa("GET", "vonage_extension_map?select=extension_id,rep_name")
+        return {r["extension_id"]: r["rep_name"] for r in rows}
+    except Exception as e:
+        log(f"  Failed to load extension map: {e}")
+        return {}
+
+
+def _vonage_process_one(recording, ext_map, keyterms, tx_corrections):
+    """Process a single recording: dedupe, download, hand off to existing
+    pipeline, attribute to rep based on extension mapping. Returns one of
+    'ingested', 'skipped', 'duplicate', 'failed'.
+    """
+    # TODO(vbc): These field names are guesses. Confirm against real API response.
+    recording_id    = recording.get("id") or recording.get("recording_id")
+    extension_id    = recording.get("extension_id") or recording.get("extension") or ""
+    started_at      = recording.get("start_time") or recording.get("call_started_at") or recording.get("created_at")
+    duration_secs   = recording.get("duration") or recording.get("duration_seconds") or 0
+    filename_hint   = recording.get("filename") or f"vonage_{recording_id}.mp3"
+
+    if not recording_id:
+        log(f"  Vonage: recording missing ID, skipping: {recording}")
+        return "skipped"
+
+    # Idempotency check
+    if _vonage_recording_seen(recording_id):
+        return "duplicate"
+
+    # Mark as pending so we have a record even if download fails
+    _vonage_record_status(
+        recording_id, "pending",
+        extension_id=str(extension_id) if extension_id else None,
+        call_started_at=started_at,
+        duration_seconds=int(duration_secs) if duration_secs else None,
+    )
+
+    # Skip overly-long calls early to avoid wasting download bandwidth
+    skip, reason = should_skip_by_duration(int(duration_secs) if duration_secs else 0)
+    if skip:
+        _vonage_record_status(recording_id, "skipped", error_message=reason)
+        return "skipped"
+
+    # Download audio
+    try:
+        audio_bytes, mime = _vonage_download_recording(recording_id)
+    except Exception as e:
+        _vonage_record_status(recording_id, "failed", error_message=str(e)[:500])
+        log(f"  Vonage download failed for {recording_id}: {e}")
+        return "failed"
+
+    # Bytes-level skip if file is too big for downstream transcription
+    if len(audio_bytes) > 25 * 1024 * 1024:
+        _vonage_record_status(
+            recording_id, "skipped",
+            error_message=f"Audio file too large ({len(audio_bytes)//(1024*1024)}MB > 25MB cap)",
+        )
+        return "skipped"
+
+    _vonage_record_status(recording_id, "downloaded")
+
+    # Build a sensible filename — Vonage-style date format that the existing
+    # parse_call_date_from_filename() helper already understands. Falls back
+    # to the API-provided filename hint if we can't construct one.
+    filename = filename_hint
+    if started_at:
+        try:
+            dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            ts = dt.strftime("%Y_%m_%d_%I_%M%p")
+            ext_suffix = f"_ext{extension_id}" if extension_id else ""
+            filename = f"{ts}{ext_suffix}_vonage.mp3"
+        except Exception:
+            pass
+
+    # Hand off to the existing transcription/analysis pipeline
+    try:
+        with _analysis_semaphore:
+            saved, skip_reason = _process_single_file(audio_bytes, filename, keyterms, tx_corrections)
+    except Exception as e:
+        _vonage_record_status(recording_id, "failed", error_message=f"Process error: {str(e)[:400]}")
+        log(f"  Vonage processing failed for {recording_id}: {e}")
+        return "failed"
+
+    if skip_reason:
+        _vonage_record_status(recording_id, "skipped", error_message=skip_reason)
+        return "skipped"
+
+    # `saved` from supa POST is typically a list with one record
+    call_id = None
+    if saved:
+        if isinstance(saved, list) and saved:
+            call_id = saved[0].get("id")
+        elif isinstance(saved, dict):
+            call_id = saved.get("id")
+
+    # Override rep_name from extension mapping. Extension ID is more reliable
+    # than transcript inference because it's tied to the Vonage user account.
+    if call_id and extension_id:
+        ext_str = str(extension_id)
+        mapped_name = ext_map.get(ext_str)
+        if mapped_name:
+            try:
+                supa("PATCH", f"calls?id=eq.{call_id}", {"rep_name": mapped_name})
+            except Exception as e:
+                log(f"  Vonage: failed to apply rep mapping for ext {ext_str}: {e}")
+        else:
+            # Auto-create "Unknown" rep_name including the extension so it shows
+            # up in the Unmatched Reps panel in Management for easy mapping.
+            unknown_name = f"Unknown — ext {ext_str}"
+            try:
+                supa("PATCH", f"calls?id=eq.{call_id}", {"rep_name": unknown_name})
+            except Exception as e:
+                log(f"  Vonage: failed to set unknown rep name: {e}")
+
+    _vonage_record_status(recording_id, "done", call_id=call_id)
+    return "ingested"
+
+
+def _vonage_poll_once():
+    """Run a single polling cycle. Returns (ingested, skipped, errors)."""
+    # Compute "since" timestamp — the most recent call_started_at we've seen,
+    # or 1 hour ago for the very first poll. We deliberately *don't* use
+    # ingested_at because Vonage may publish recordings out of order or with
+    # delays.
+    try:
+        latest = supa("GET", "vonage_recordings?order=call_started_at.desc.nullslast&limit=1&select=call_started_at")
+        if latest and latest[0].get("call_started_at"):
+            since_iso = latest[0]["call_started_at"]
+        else:
+            since_iso = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    except Exception:
+        since_iso = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+    log(f"  Vonage poll: listing recordings since {since_iso}")
+    try:
+        recordings = _vonage_list_recordings(since_iso)
+    except Exception as e:
+        log(f"  Vonage poll list failed: {e}")
+        raise
+
+    if not recordings:
+        log("  Vonage poll: no new recordings")
+        return 0, 0, 0
+
+    log(f"  Vonage poll: found {len(recordings)} recording(s) to evaluate")
+
+    # Build context once per cycle
+    ext_map = _vonage_get_extension_map()
+    try:
+        keyterms = get_cached_keyterms()
+    except Exception:
+        keyterms = []
+    try:
+        tx_corrections = get_transcript_corrections()
+    except Exception:
+        tx_corrections = []
+
+    ingested = skipped = errors = 0
+    for rec in recordings:
+        # Respect pause/stop between recordings
+        with _vonage_lock:
+            if _vonage_job.get("stop_requested") or _vonage_job.get("pause_requested"):
+                break
+        try:
+            outcome = _vonage_process_one(rec, ext_map, keyterms, tx_corrections)
+        except Exception as e:
+            outcome = "failed"
+            log(f"  Vonage process loop error: {e}")
+        if outcome == "ingested":
+            ingested += 1
+        elif outcome in ("skipped", "duplicate"):
+            skipped += 1
+        elif outcome == "failed":
+            errors += 1
+
+    return ingested, skipped, errors
+
+
+def _vonage_poll_worker():
+    """Background loop that polls Vonage on a regular interval."""
+    log(f"  Vonage poll worker starting (interval: {VONAGE_POLL_INTERVAL}s)")
+    with _vonage_lock:
+        _vonage_job["status"] = "running"
+        _vonage_job["started_at"] = datetime.now(timezone.utc).isoformat()
+        _vonage_job["stop_requested"] = False
+        _vonage_job["pause_requested"] = False
+
+    today = datetime.now(timezone.utc).date()
+
+    while True:
+        # Check stop flag at top of loop
+        with _vonage_lock:
+            if _vonage_job.get("stop_requested"):
+                _vonage_job["status"] = "idle"
+                log("  Vonage poll worker stopped by request")
+                return
+            paused = _vonage_job.get("pause_requested", False)
+            if paused:
+                _vonage_job["status"] = "paused"
+
+        # When paused, sleep in short increments and re-check rather than
+        # blocking on the full interval — so resume reacts within ~5s.
+        if paused:
+            time.sleep(5)
+            continue
+
+        # Reset today counter on day rollover
+        cur_day = datetime.now(timezone.utc).date()
+        if cur_day != today:
+            today = cur_day
+            with _vonage_lock:
+                _vonage_job["ingested_today"] = 0
+
+        # Run one poll cycle
+        try:
+            ingested, skipped, errors = _vonage_poll_once()
+            with _vonage_lock:
+                _vonage_job["last_poll_at"] = datetime.now(timezone.utc).isoformat()
+                _vonage_job["last_poll_succeeded"] = True
+                _vonage_job["ingested_total"] += ingested
+                _vonage_job["ingested_today"] += ingested
+                _vonage_job["skipped_total"] += skipped
+                _vonage_job["errors_total"] += errors
+                _vonage_job["status"] = "running"
+                if ingested or errors:
+                    log(f"  Vonage poll cycle: +{ingested} ingested, {skipped} skipped, {errors} errors")
+        except Exception as e:
+            with _vonage_lock:
+                _vonage_job["last_poll_at"] = datetime.now(timezone.utc).isoformat()
+                _vonage_job["last_poll_succeeded"] = False
+                _vonage_job["last_error"] = str(e)[:500]
+                _vonage_job["status"] = "error"
+            log(f"  Vonage poll cycle error: {e}")
+            # Don't kill the worker on a single failed cycle — just back off
+            # and try again next interval.
+
+        # Sleep in 5-second chunks so stop/pause requests are honored quickly
+        slept = 0
+        while slept < VONAGE_POLL_INTERVAL:
+            with _vonage_lock:
+                if _vonage_job.get("stop_requested") or _vonage_job.get("pause_requested"):
+                    break
+            time.sleep(5)
+            slept += 5
+
+
+def _vonage_start_worker():
+    """Start the background polling thread if not already running.
+    Returns True if started, False if already running or not configured.
+    """
+    global _vonage_thread
+    if not _vonage_configured():
+        log("  Vonage worker not started: integration not configured (missing env vars)")
+        with _vonage_lock:
+            _vonage_job["status"] = "disabled"
+            _vonage_job["last_error"] = "Vonage env vars not set"
+        return False
+    with _vonage_lock:
+        if _vonage_thread and _vonage_thread.is_alive():
+            log("  Vonage worker already running, ignoring start request")
+            return False
+        _vonage_job["stop_requested"] = False
+        _vonage_job["pause_requested"] = False
+    _vonage_thread = threading.Thread(target=_vonage_poll_worker, daemon=True, name="vonage-poll")
+    _vonage_thread.start()
+    return True
+
+
+def _vonage_stop_worker():
+    """Signal the worker to stop. Returns True if a stop was signaled."""
+    with _vonage_lock:
+        if _vonage_job.get("status") not in ("running", "paused", "error"):
+            return False
+        _vonage_job["stop_requested"] = True
+    return True
+
+
+def _vonage_pause_worker():
+    """Pause the worker (does not kill the thread; resumes on demand)."""
+    with _vonage_lock:
+        _vonage_job["pause_requested"] = True
+    return True
+
+
+def _vonage_resume_worker():
+    """Resume a paused worker."""
+    with _vonage_lock:
+        _vonage_job["pause_requested"] = False
+    return True
+
+
+# ──────────────────────────────────────────────
 # HTTP HANDLER
 # ──────────────────────────────────────────────
 
@@ -1414,6 +1976,12 @@ class Handler(BaseHTTPRequestHandler):
             self._get_transcript_corrections_endpoint()
         elif path.startswith("/audio_url/"):
             self._get_audio_url()
+        elif path == "/vonage/status":
+            self._vonage_status()
+        elif path == "/vonage/extension_map":
+            self._vonage_get_extension_map_endpoint()
+        elif path == "/vonage/recent":
+            self._vonage_get_recent()
         else:
             html = read_html()
             self.send_response(200)
@@ -1455,6 +2023,13 @@ class Handler(BaseHTTPRequestHandler):
             "/transcript_corrections/reapply": self._reapply_corrections,
             "/batch_upload/start": self._batch_upload_start,
             "/batch_upload/stop": self._batch_upload_stop,
+            "/vonage/start": self._vonage_start_endpoint,
+            "/vonage/stop": self._vonage_stop_endpoint,
+            "/vonage/pause": self._vonage_pause_endpoint,
+            "/vonage/resume": self._vonage_resume_endpoint,
+            "/vonage/poll_now": self._vonage_poll_now_endpoint,
+            "/vonage/extension_map/save": self._vonage_save_extension,
+            "/vonage/extension_map/delete": self._vonage_delete_extension,
         }
         fn = routes.get(path)
         if fn:
@@ -1538,10 +2113,10 @@ class Handler(BaseHTTPRequestHandler):
                     tx_corrections = []
 
                 log(f"  Transcribing {filename} ({len(audio_bytes)} bytes) via {'Deepgram' if DEEPGRAM_KEY else 'Whisper'}...")
-                transcript, is_diarized = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
+                transcript, is_diarized, word_timestamps = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
                 if not transcript or not transcript.strip():
                     self._err(400, "Transcription empty — audio may be silent"); return
-                log(f"  Transcription done: {len(transcript)} chars, diarized={is_diarized}")
+                log(f"  Transcription done: {len(transcript)} chars, diarized={is_diarized}, timestamps={len(word_timestamps)}")
 
                 # Apply corrections
                 clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
@@ -1551,6 +2126,8 @@ class Handler(BaseHTTPRequestHandler):
             result["transcript"] = clean_transcript
             result["filename"] = filename
             result["is_diarized"] = is_diarized
+            if word_timestamps:
+                result["word_timestamps"] = word_timestamps
 
             # Upload audio to storage (best effort)
             try:
@@ -1703,6 +2280,7 @@ class Handler(BaseHTTPRequestHandler):
                 "output_tokens": p.get("output_tokens", 0),
                 "pricing_model": p.get("pricing_model", "unknown"),
                 "move_timeline": p.get("move_timeline", "unknown"),
+                "word_timestamps": p.get("word_timestamps") or None,
             }
             result = supa("POST", "calls", record)
             self._ok(result)
@@ -2232,6 +2810,137 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         except Exception as e:
             self._err(500, str(e))
 
+    # ── VONAGE ──
+
+    def _vonage_status(self):
+        """Return current polling worker state plus a recent-activity summary."""
+        try:
+            with _vonage_lock:
+                state = dict(_vonage_job)
+            state["configured"] = _vonage_configured()
+            state["poll_interval_seconds"] = VONAGE_POLL_INTERVAL
+            state["autostart_enabled"] = VONAGE_AUTOSTART
+            # Add a count of recent ingestions for at-a-glance UI
+            try:
+                cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+                rows = supa("GET", f"vonage_recordings?ingested_at=gte.{cutoff}&select=status")
+                state["last_24h"] = {
+                    "done":      sum(1 for r in rows if r.get("status") == "done"),
+                    "skipped":   sum(1 for r in rows if r.get("status") == "skipped"),
+                    "failed":    sum(1 for r in rows if r.get("status") == "failed"),
+                    "pending":   sum(1 for r in rows if r.get("status") in ("pending", "downloaded")),
+                }
+            except Exception:
+                state["last_24h"] = None
+            self._ok(state)
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_get_extension_map_endpoint(self):
+        try:
+            rows = supa("GET", "vonage_extension_map?order=extension_id.asc")
+            self._ok(rows)
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_get_recent(self):
+        """Recent ingestions joined with call info for the dashboard table."""
+        try:
+            rows = supa("GET", "vonage_recordings?order=ingested_at.desc&limit=50")
+            # Optionally enrich with rep_name from the linked call
+            call_ids = [r["call_id"] for r in rows if r.get("call_id")]
+            calls_by_id = {}
+            if call_ids:
+                ids_csv = ",".join(call_ids)
+                try:
+                    cs = supa("GET", f"calls?id=in.({ids_csv})&select=id,rep_name,filename")
+                    calls_by_id = {c["id"]: c for c in cs}
+                except Exception:
+                    pass
+            for r in rows:
+                cid = r.get("call_id")
+                if cid and cid in calls_by_id:
+                    r["call_rep_name"] = calls_by_id[cid].get("rep_name")
+                    r["call_filename"] = calls_by_id[cid].get("filename")
+            self._ok(rows)
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_start_endpoint(self, body):
+        try:
+            started = _vonage_start_worker()
+            self._ok({"started": started})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_stop_endpoint(self, body):
+        try:
+            stopped = _vonage_stop_worker()
+            self._ok({"stopped": stopped})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_pause_endpoint(self, body):
+        try:
+            _vonage_pause_worker()
+            self._ok({"paused": True})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_resume_endpoint(self, body):
+        try:
+            _vonage_resume_worker()
+            self._ok({"resumed": True})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_poll_now_endpoint(self, body):
+        """Trigger a single poll cycle on demand. Useful for testing."""
+        if not _vonage_configured():
+            self._err(400, "Vonage not configured")
+            return
+        try:
+            ingested, skipped, errors = _vonage_poll_once()
+            self._ok({"ingested": ingested, "skipped": skipped, "errors": errors})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_save_extension(self, body):
+        try:
+            p = json.loads(body)
+            extension_id = str(p.get("extension_id", "")).strip()
+            rep_name = str(p.get("rep_name", "")).strip()
+            notes = p.get("notes", "")
+            if not extension_id or not rep_name:
+                self._err(400, "extension_id and rep_name required")
+                return
+            record = {
+                "rep_name": rep_name,
+                "notes": notes,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            existing = supa("GET", f"vonage_extension_map?extension_id=eq.{urllib.parse.quote(extension_id)}&limit=1")
+            if existing:
+                supa("PATCH", f"vonage_extension_map?extension_id=eq.{urllib.parse.quote(extension_id)}", record, prefer_minimal=True)
+            else:
+                record["extension_id"] = extension_id
+                supa("POST", "vonage_extension_map", record, prefer_minimal=True)
+            self._ok({"saved": True})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _vonage_delete_extension(self, body):
+        try:
+            p = json.loads(body)
+            extension_id = str(p.get("extension_id", "")).strip()
+            if not extension_id:
+                self._err(400, "extension_id required")
+                return
+            supa("DELETE", f"vonage_extension_map?extension_id=eq.{urllib.parse.quote(extension_id)}")
+            self._ok({"deleted": True})
+        except Exception as e:
+            self._err(500, str(e))
+
     # ── HELPERS ──
 
     def _ok(self, data):
@@ -2265,6 +2974,17 @@ if __name__ == "__main__":
         log("\n  WARNING: Missing env vars: " + ", ".join(missing))
     else:
         log("\n  All environment variables loaded")
+
+    # Vonage VBC integration — auto-start worker if configured
+    if _vonage_configured():
+        if VONAGE_AUTOSTART:
+            log("  Vonage VBC: configured, auto-starting polling worker")
+            _vonage_start_worker()
+        else:
+            log("  Vonage VBC: configured but autostart disabled — start manually from dashboard")
+    else:
+        log("  Vonage VBC: not configured (env vars missing) — integration dormant")
+
     log(f"  Running at http://127.0.0.1:{PORT}")
     log("  Press Ctrl+C to stop\n")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
