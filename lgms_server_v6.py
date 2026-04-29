@@ -220,12 +220,87 @@ Detect when customer wants to move. Classify move_timeline:
 - "three_plus_months": 3+ months → attempt appreciated, soft pipeline acceptable
 - "unknown": no clear timeline — look for clues (seasons, life events, vague references)
 
-STEP 7 — PRICING MODEL:
-Detect whether move was quoted as hourly or pointed (flat-rate).
-pricing_model:
-- "pointed": rep used "flat rate", "based on inventory", "fixed price", or gave a single dollar figure for the job
-- "hourly": rep mentioned a per-hour rate, per-guy rate, or estimated number of hours
-- "unknown": unclear
+STEP 7 — PRICING MODEL DETECTION (CRITICAL — read carefully):
+
+Output one of: "hourly", "pointed", or "unknown"
+
+SCAN THE ENTIRE TRANSCRIPT for pricing language before deciding.
+Pricing might be discussed for only 30 seconds in a long call.
+
+═══════════════════════════════════════════════════════════════════
+HOURLY INDICATORS (any one of these = hourly):
+═══════════════════════════════════════════════════════════════════
+
+Strong signals:
+- Rep says "hourly rate", "hourly", "per hour", "an hour",
+  "$X an hour", "$X per hour"
+- Rep mentions an "X hour minimum" (2-hour, 1.5-hour, etc.)
+- Rep mentions "rated for the quarter hour" or proration
+- Rep says "if it takes less than X hours you'll pay less"
+- Rep mentions a mileage fee separate from the rate
+- Rep gives an estimated number of hours the job will take
+  ("about 2 hours", "should take 2 to 3 hours", "predicting 4 hours")
+- Rep gives a per-guy rate ("$1.30 an hour for two guys")
+
+Combined signal pattern (both must be present):
+- Quote includes a time component (e.g. "for 2 hours, that's $X")
+  even if no explicit per-hour rate is stated, AND
+- Cash/card price split given for that time-bounded quote
+
+═══════════════════════════════════════════════════════════════════
+POINTED / FLAT-RATE INDICATORS (any one of these = pointed):
+═══════════════════════════════════════════════════════════════════
+
+Strong signals:
+- Rep says "flat fee", "flat rate", "fixed price", "exact price",
+  "exact cost"
+- Rep says "based on inventory", "based on what we discussed",
+  "based on what we move"
+- Rep says "time doesn't affect that", "regardless of how long",
+  "whether it takes 2 hours or 5"
+- Single dollar figure quoted for the entire job with NO time
+  component mentioned at all
+- Multiple price options that differ only by per-item add-on
+  (e.g., "$1,210 without boxes, $1,398 with 50 boxes" where the
+  difference is a fixed per-box amount and NO time impact discussed)
+
+Default rules:
+- Long-distance / interstate moves are POINTED unless the rep
+  explicitly quotes hourly mechanics (federal regs essentially
+  require flat-rate for interstate)
+- Multi-day moves are POINTED unless explicitly hourly
+
+═══════════════════════════════════════════════════════════════════
+DISAMBIGUATION (when both kinds of language appear):
+═══════════════════════════════════════════════════════════════════
+
+Look at HOW THE FINAL QUOTE WAS DELIVERED. Tiebreaker priority:
+
+1. Mileage fee mentioned → HOURLY (only exists on hourly jobs)
+2. Quarter-hour proration mentioned → HOURLY
+3. "Time doesn't affect" or "regardless of how long" → POINTED
+4. "Flat" or "exact" used as adjective for the price → POINTED
+5. Multi-quote with per-item differential → POINTED
+6. Quote tied to specific number of hours → HOURLY
+7. Quote stated as fixed total with no time framing → POINTED
+
+═══════════════════════════════════════════════════════════════════
+UNKNOWN — use ONLY in these cases:
+═══════════════════════════════════════════════════════════════════
+
+- No price was given on the call at all
+- Price was discussed only in the abstract ("we'd need to do an
+  estimate") with no numbers
+- Rep gave a price but FAILED to anchor it as either model AND none
+  of the above patterns apply (this case requires a coaching point —
+  see scoring section)
+- Audio quality too poor to determine
+
+DO NOT use "unknown" just because the rep didn't say a magic word.
+If a price was given, work through the indicators above to decide.
+If after working through them the model is still genuinely unclear,
+unknown is correct AND a coaching point should be added noting that
+the rep needs to clearly anchor the pricing model.
 
 STEP 8 — CLOSING ANALYSIS:
 COUNT close_attempts — how many times did rep explicitly try to book/schedule?
@@ -358,8 +433,52 @@ CLOSING ATTEMPT (25% weight):
 Timeline adjustment: exact date or this week = not booking after real attempt is NOT penalized, not attempting IS penalized
 
 PRICE DELIVERY (15% weight):
-POINTED: 1-3 no price, 4-6 price without framing, 7-8 confident with inventory context, 9-10 confident + value framed + handled objection
-HOURLY: missing estimated hours when giving rate = coaching point + cap score at 6. 7-8 rate+hours confidently, 9-10 rate+hours+value framing
+
+═══ POINTED quotes ═══
+- 1-3: No price given on the call
+- 4-6: Price given, but with no inventory/value framing — just a number
+- 7-8: Confident delivery with inventory context (price is based on
+       what was discussed)
+- 9-10: Confident, value-framed, AND price objections handled effectively
+
+═══ HOURLY quotes — four mechanics expected ═══
+The rep should explain ALL FOUR pieces of how hourly works:
+  1. Per-hour rate stated explicitly ($X an hour for X guys)
+  2. Quarter-hour rounding / proration mentioned
+  3. Mileage fee mentioned
+  4. Clock starts when work starts (not drive time, not arrival)
+
+Scoring:
+- 1-3: No rate given, or job hours estimate completely missing
+- 4-6: Rate given but missing 2+ of the four mechanics. Auto-cap at 6
+       if estimated hours not given (unfair to customer).
+- 7-8: Rate, hours estimate, and 2-3 of the four mechanics explained
+       confidently
+- 9-10: All four mechanics explained AND value framing (only paying
+        for time used, flexibility, etc.)
+
+For each missing mechanic on an hourly call, add a coaching point
+naming the specific mechanic ("did not mention the mileage fee",
+"did not explain quarter-hour rounding", etc.)
+
+═══ MODEL ANCHORING (applies to both) ═══
+
+Whether pointed or hourly, the rep should explicitly state which
+pricing model is being used. Phrases like "this is a flat-rate quote,
+time doesn't affect it" or "we charge hourly with a 2-hour minimum"
+should appear when pricing is delivered.
+
+If the rep gives a price WITHOUT anchoring it to a model, this is a
+coaching point — UNLESS:
+- The customer has used LGMS before (mentioned in call, or system
+  found them), OR
+- The customer themselves explicitly used pricing model language
+  first ("I'm looking for an hourly rate"), making the model already
+  clear
+
+When the anchoring coaching point applies, include in coaching_points
+phrasing like: "Did not explicitly anchor the quote as [hourly/pointed].
+Should clarify pricing model when delivering price for new customers."
 
 RAPPORT & TONE (15% weight):
 - 1-3: Flat, missed emotional moments
@@ -381,29 +500,41 @@ CONFIDENCE SCORE (1-10):
 
 TALK RATIO: speaker labels if diarized, otherwise estimate.
 
-KEYWORDS — detect if rep said (concept not exact words):
-- "confirmation call"
-- "hourly" or "per hour"
-- "moving boxes"
-- "fuel" or "fuel charge"
-- "Little Guys" or "Little Guys Movers"
-- "spot available" or "have a spot"
-- "get you on the board/schedule/calendar"
-- "first come first serve"
-- "no cancellation fee"
-- "save/hold that for you"
-- "get you taken care of"
-- "go ahead and book/get you"
-- "background checked" or "background screened"
-- "no day labor"
-- "we show up" or "we don't miss"
-- "clothes in the dresser"
-- "disassemble" or "reassemble"
-- "flat rate" or "fixed price" or "based on inventory"
-- "no deposit"
-- "estimated hours" or "should take about" or "probably looking at"
+KEYWORDS — detect when the rep used the CONCEPT (not exact words).
 
-Return CHARACTER POSITION of first occurrence for each keyword and objection.
+CRITICAL: Return the canonical key from the list below, NOT the rep's
+actual phrasing. The dashboard groups by canonical key. If you return
+"background checks" instead of "background checked", the call won't
+appear on the chart. ALWAYS use the canonical form on the left.
+
+CLOSING / URGENCY:
+- "spot available" — rep mentioned having a spot, opening, slot
+- "get you on the board" — rep offered to put on schedule/calendar/board
+- "first come first serve" — rep mentioned FCFS booking
+- "no cancellation fee" — rep noted they don't charge cancellation fees
+  (use singular form even if rep said "fees")
+- "save that for you" — rep offered to hold/save the spot
+- "go ahead and book" — assumptive close language
+- "no deposit" — rep noted no deposit needed (use singular "deposit"
+  even if rep said "deposits")
+
+VALUE PROPS:
+- "background checked" — rep mentioned crew is background-checked,
+  background-screened, "guys pass background checks", or similar
+- "no day labor" — rep distinguished from day labor / temps
+- "we show up" — rep emphasized reliability, "don't miss appointments"
+- "clothes in the dresser" — rep mentioned this specific service
+- "disassemble" — rep mentioned disassembly/reassembly of furniture
+  (use canonical "disassemble" even if rep said "take apart" or
+  "disassembling")
+
+PROCESS:
+- "confirmation call" — rep mentioned the day-of or week-of
+  confirmation call
+
+Return CHARACTER POSITION of first occurrence in the transcript.
+ONLY include keywords actually said by the REP. Don't include things
+the customer said unless the rep agreed and repeated them.
 
 OBJECTIONS: Price too high, Need to think about it, Already have another quote, Wrong timing, Need to check with partner, Other
 
