@@ -799,6 +799,24 @@ html, body {
   color: var(--ink3);
   text-decoration: line-through;
 }
+.tx-search {
+  display: inline-block;
+  font-size: 11.5px;
+  background: #fef08a;
+  color: #713f12;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin: 2px 4px 2px 0;
+}
+.tx-word.tx-search {
+  display: inline;
+  background: #fef08a;
+  color: #713f12;
+  padding: 1px 4px;
+  margin: 0;
+  font-size: inherit;
+  border-radius: 3px;
+}
 
 /* Word-level transcript (when word_timestamps are present) */
 .tx-speaker {
@@ -3479,6 +3497,7 @@ const CK_GROUPS=[
 ];
 const SK=['information_control','price_delivery','closing_attempt','professionalism','rapport_tone','salesmanship','overall'];
 const SL=['Info & Control','Price Delivery','Closing','Professionalism','Rapport & Tone','Salesmanship','Overall'];
+const SW={information_control:15,price_delivery:15,closing_attempt:25,professionalism:10,rapport_tone:15,salesmanship:20};
 // Curated keyword list — these are surfaced in the Keywords chart on Overview.
 // Names must match the canonical strings Claude returns in keywords_detected.
 // Prompt source: lgms_server_v12_audio.py "KEYWORDS" section.
@@ -4485,8 +4504,9 @@ function buildRow(c){
     const lbl = SL[i] || k.replace(/_/g,' ');
     const fillCls = v>=8 ? '' : v>=5 ? 'mid' : 'low';
     const valCls = scoreClass(v);
+    const wt = SW[k] ? `<span style="font-size:10px;color:var(--ink4);font-weight:400;margin-left:4px">${SW[k]}%</span>` : '';
     return `<div class="score-row">
-      <div class="score-row-label">${esc(lbl)}</div>
+      <div class="score-row-label">${esc(lbl)}${wt}</div>
       <div class="score-bar"><div class="score-bar-fill ${fillCls}" style="width:${v*10}%"></div></div>
       <div class="score-row-value ${valCls}">${v || '—'}</div>
     </div>`;
@@ -4708,6 +4728,8 @@ function buildTxHtmlTimed(c){
   (c.keywords_detected||[]).forEach(k=>{
     if(k)highlightPhrases.push({phrase:k.toLowerCase(),cls:'tx-kw',label:k});
   });
+  const _srchTerm=(libFilters.search||'').trim().toLowerCase();
+  if(_srchTerm.length>=2)highlightPhrases.push({phrase:_srchTerm,cls:'tx-search',label:_srchTerm});
   (c.objections_detected||[]).forEach(o=>{
     if(!o)return;
     const cls=abandoned.has(o)?'tx-obj-abandoned':'tx-obj';
@@ -4787,6 +4809,15 @@ function buildTxHtmlLegacy(c){
     if(start<0)return;
     marks.push({start,end:start+o.length,cls:'tx-obj-abandoned',id:`txs-${c.id}-abn-${i}`,label:o});
   });
+  // Highlight search term if active
+  const _sq=(libFilters.search||'').trim().toLowerCase();
+  if(_sq.length>=2){
+    let _si=tx.toLowerCase().indexOf(_sq,0);
+    while(_si>=0){
+      marks.push({start:_si,end:_si+_sq.length,cls:'tx-search',id:`txs-${c.id}-srch-${_si}`,label:_sq});
+      _si=tx.toLowerCase().indexOf(_sq,_si+1);
+    }
+  }
   if(!marks.length)return escHtml(tx);
   marks.sort((a,b)=>a.start-b.start);
   const filtered=[];let cursor=0;
@@ -5089,7 +5120,7 @@ function renderProfiles(opts={}) {
 
     const isActive = r === selectedRep;
 
-    return `<div class="rep-card-v2${isActive?' active':''}" onclick="renderProfiles({rep:'${esc(r)}'${storeFilter?`,store:'${esc(storeFilter)}'`:''}})">
+    return `<div class="rep-card-v2${isActive?' active':''}" data-rep="${esc(r)}" data-store="${esc(storeFilter)}" onclick="handleRepCardClick(this)">
       <div class="rep-card-head">
         <div class="rep-card-avatar">${ini(r)}</div>
         <div style="flex:1;min-width:0">
@@ -5147,6 +5178,12 @@ function renderProfiles(opts={}) {
   if (selectedRep) openRepProfile(selectedRep);
 }
 
+function handleRepCardClick(el){
+  const rep = el.getAttribute('data-rep');
+  const store = el.getAttribute('data-store');
+  if(!rep) return;
+  renderProfiles({rep, store: store||undefined});
+}
 function openRepProfile(repName){
   const rc = allCalls.filter(c => c.rep_name===repName);
   const sc = rc.filter(c => !c.exclude_from_scoring);
