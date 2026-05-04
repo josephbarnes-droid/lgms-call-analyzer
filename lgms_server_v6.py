@@ -2978,7 +2978,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
             status = dict(_batch_job)
         self._ok(status)
 
-    def _batch_cleanup_empty(self):
+    def _batch_cleanup_empty(self, body=None):
         """Delete calls that have no transcript — broken records from failed uploads."""
         try:
             from datetime import date
