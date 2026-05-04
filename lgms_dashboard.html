@@ -3456,6 +3456,35 @@ html, body {
       <select id="loc-filter" class="fsel" style="font-size:11.5px;padding:5px 9px" onchange="setLocationFilter(this.value)">
         <option value="">All Locations</option>
       </select>
+      <div style="display:flex;align-items:center;gap:4px;position:relative">
+        <button class="btn btn-g btn-sm" id="date-filter-btn" onclick="toggleDatePicker()" style="font-size:11px;padding:3px 9px;display:flex;align-items:center;gap:4px">
+          📅 <span id="date-filter-label">Last 30 days</span>
+        </button>
+        <div id="date-picker-panel" style="display:none;position:absolute;top:32px;right:0;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;z-index:1000;box-shadow:0 6px 24px rgba(0,0,0,.13);min-width:260px">
+          <div style="font-size:11px;font-weight:600;color:var(--ink3);letter-spacing:.05em;margin-bottom:10px">DATE RANGE</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="font-size:12px;color:var(--ink2)">Quick select
+              <select id="date-quick" class="fsel" style="width:100%;margin-top:3px;font-size:12px" onchange="applyQuickDate(this.value)">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="365">Last 12 months</option>
+                <option value="0">All time</option>
+                <option value="custom">Custom range…</option>
+              </select>
+            </label>
+            <div id="date-custom-range" style="display:none;gap:6px;flex-direction:column">
+              <label style="font-size:12px;color:var(--ink2)">From
+                <input type="date" id="date-from-input" class="fsel" style="width:100%;margin-top:3px;font-size:12px" onchange="applyCustomDate()">
+              </label>
+              <label style="font-size:12px;color:var(--ink2)">To
+                <input type="date" id="date-to-input" class="fsel" style="width:100%;margin-top:3px;font-size:12px" onchange="applyCustomDate()">
+              </label>
+            </div>
+            <button class="btn btn-g btn-sm" style="width:100%;margin-top:4px" onclick="clearDateFilter()">Clear filter</button>
+          </div>
+        </div>
+      </div>
       <button class="btn btn-g btn-sm" onclick="exportCSV()">↓ CSV</button>
       <button class="btn btn-p btn-sm" onclick="nav('add')">+ Add Calls</button>
     </div>
@@ -3517,6 +3546,9 @@ let reanalyzePoller=null,statusPoller=null;
 let libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};
 let dateFilter=30;
 let locationFilter='';
+let dateFrom='';  // ISO date string e.g. '2026-01-01' — empty means no start bound
+let dateTo='';    // ISO date string e.g. '2026-04-30' — empty means no end bound
+let dateFilter=30; // legacy relative filter — kept for Overview panel compat; overridden by dateFrom/dateTo when set
 let dataLoadedAt=null;
 
 const SHARE_MODE=!!(window.SHARE_TOKEN);
@@ -3578,6 +3610,71 @@ function populateLocFilter(){
   const cur=locationFilter;
   sel.innerHTML=`<option value="">All Locations</option>`+locs.map(l=>`<option value="${esc(l)}"${l===cur?' selected':''}>${esc(l)}</option>`).join('');
 }
+function toggleDatePicker(){
+  const panel=g('date-picker-panel');
+  if(!panel)return;
+  panel.style.display=panel.style.display==='none'?'block':'none';
+  // Close when clicking outside
+  if(panel.style.display==='block'){
+    setTimeout(()=>{
+      const close=(e)=>{if(!panel.contains(e.target)&&e.target!==g('date-filter-btn')){panel.style.display='none';document.removeEventListener('click',close);}};
+      document.addEventListener('click',close);
+    },10);
+  }
+}
+
+function applyQuickDate(val){
+  const customDiv=g('date-custom-range');
+  if(val==='custom'){
+    if(customDiv)customDiv.style.display='flex';
+    return;
+  }
+  if(customDiv)customDiv.style.display='none';
+  dateFrom='';dateTo='';
+  dateFilter=parseInt(val)||0;
+  updateDateLabel();
+  g('date-picker-panel').style.display='none';
+  rerenderCurrentPage();
+}
+
+function applyCustomDate(){
+  const from=g('date-from-input')?.value||'';
+  const to=g('date-to-input')?.value||'';
+  if(!from&&!to)return;
+  dateFrom=from;dateTo=to;dateFilter=0;
+  updateDateLabel();
+  rerenderCurrentPage();
+}
+
+function clearDateFilter(){
+  dateFrom='';dateTo='';dateFilter=30;
+  const q=g('date-quick');if(q)q.value='30';
+  const customDiv=g('date-custom-range');if(customDiv)customDiv.style.display='none';
+  const fi=g('date-from-input');if(fi)fi.value='';
+  const ti=g('date-to-input');if(ti)ti.value='';
+  updateDateLabel();
+  g('date-picker-panel').style.display='none';
+  rerenderCurrentPage();
+}
+
+function updateDateLabel(){
+  const lbl=g('date-filter-label');
+  if(!lbl)return;
+  if(dateFrom||dateTo){
+    const f=dateFrom||'…';
+    const t=dateTo||'…';
+    lbl.textContent=`${f} → ${t}`;
+  } else if(dateFilter===0){
+    lbl.textContent='All time';
+  } else {
+    lbl.textContent=`Last ${dateFilter} days`;
+  }
+}
+
+function rerenderCurrentPage(){
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement})[currentPage]?.();
+}
+
 function setLocationFilter(val){
   locationFilter=val;
   updateLocIndicator();
@@ -3587,6 +3684,7 @@ function setLocationFilter(val){
 function updateLocIndicator(){
   const el=g('loc-indicator');if(!el)return;
   el.innerHTML=locationFilter?`<span class="loc-pill" onclick="setLocationFilter('');g('loc-filter').value=''">📍 ${esc(locationFilter)} ✕</span>`:'';
+  updateDateLabel();
 }
 
 // ── STATUS BAR ──
@@ -3771,12 +3869,19 @@ function openMob(){g('sidebar').classList.add('mobile-open');g('mob-overlay').cl
 function closeMob(){g('sidebar').classList.remove('mobile-open');g('mob-overlay').classList.remove('on');}
 
 function getFC(attn=''){
-  const now=new Date(),cutoff=dateFilter>0?new Date(now-dateFilter*86400000):null;
-  // Build rep→location map from reps table
   const repLocMap={};reps.forEach(r=>{if(r.location){if(r.full_name)repLocMap[r.full_name]=r.location;if(r.nickname)repLocMap[r.nickname]=r.location;}});
+  // Date bounds: explicit calendar range takes priority over relative dateFilter
+  let fromDt=null,toDt=null;
+  if(dateFrom||dateTo){
+    if(dateFrom) fromDt=new Date(dateFrom+'T00:00:00');
+    if(dateTo)   toDt=new Date(dateTo+'T23:59:59');
+  } else if(dateFilter>0){
+    fromDt=new Date(new Date()-dateFilter*86400000);
+  }
   return allCalls.filter(c=>{
     const dt=new Date(c.call_date||c.created_at);
-    if(cutoff&&dt<cutoff)return false;
+    if(fromDt&&dt<fromDt)return false;
+    if(toDt&&dt>toDt)return false;
     if(locationFilter&&repLocMap[c.rep_name]!==locationFilter)return false;
     if(attn==='decline'&&!c.availability_decline)return false;
     if(attn==='onsite'&&!c.onsite_suggested)return false;
@@ -4166,13 +4271,7 @@ function renderOverview(){
       <div class="card"><div class="card-hdr"><h3>Talk Ratio</h3></div><div id="talk-viz"></div></div>
       <div class="card"><div class="card-hdr"><h3>Keywords</h3></div><div id="kw-viz"></div></div>
       <div class="card"><div class="card-hdr"><h3>Date Filter</h3></div>
-        <select class="fsel" onchange="dateFilter=parseInt(this.value);renderOverview()" style="width:100%;font-size:13px">
-          <option value="7" ${dateFilter===7?'selected':''}>Last 7 days</option>
-          <option value="30" ${dateFilter===30?'selected':''}>Last 30 days</option>
-          <option value="90" ${dateFilter===90?'selected':''}>Last 90 days</option>
-          <option value="0" ${dateFilter===0?'selected':''}>All time</option>
-        </select>
-        <div style="margin-top:12px;font-size:12px;color:var(--ink3)">Filtering ${fc.length} calls · ${dateRangeLabel}</div>
+        <div style="font-size:12px;color:var(--ink3)">Showing ${fc.length} calls · <span style="cursor:pointer;text-decoration:underline" onclick="toggleDatePicker()">change date range</span></div>
       </div>
     </div>`);
   renderLB();renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);
