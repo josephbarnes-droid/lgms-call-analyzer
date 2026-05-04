@@ -597,7 +597,9 @@ def supa(method, path, body=None, extra_headers=None, prefer_minimal=False):
         for k, v in extra_headers.items():
             req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        # Timeout: 60s for writes (POST/PATCH/DELETE), 30s for reads
+        _timeout = 60 if method in ("POST", "PATCH", "DELETE") else 30
+        with urllib.request.urlopen(req, timeout=_timeout) as r:
             body_bytes = r.read()
             if not body_bytes or body_bytes == b'':
                 return {}
@@ -667,14 +669,33 @@ def supa_storage_delete(bucket, paths):
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())
 
-def enforce_storage_cap():
+# Storage cap cache — one list per batch, not per file
+_storage_cap_cache = {"files": None, "total_bytes": None, "checked_at": 0}
+_storage_cap_lock = threading.Lock()
+
+def enforce_storage_cap(cached_files=None):
+    """Check and enforce 900MB storage cap. Pass cached_files during batch to avoid repeated list calls."""
     try:
-        files = supa_storage_list("call-audio")
+        if cached_files is not None:
+            files = cached_files
+        else:
+            # Outside batch context — check cache (valid for 5 min)
+            with _storage_cap_lock:
+                if time.time() - _storage_cap_cache["checked_at"] < 300 and _storage_cap_cache["files"] is not None:
+                    files = _storage_cap_cache["files"]
+                    total_bytes = _storage_cap_cache["total_bytes"]
+                else:
+                    files = supa_storage_list("call-audio")
+                    total_bytes = sum(f.get("metadata", {}).get("size", 0) for f in files if isinstance(f, dict))
+                    _storage_cap_cache["files"] = files
+                    _storage_cap_cache["total_bytes"] = total_bytes
+                    _storage_cap_cache["checked_at"] = time.time()
         if not files:
             return
         total_bytes = sum(f.get("metadata", {}).get("size", 0) for f in files if isinstance(f, dict))
         if total_bytes <= 900 * 1024 * 1024:
             return
+        log(f"  Storage cap: {total_bytes//(1024*1024)}MB used, cleaning up oldest files")
         calls_with_audio = supa("GET", "calls?audio_url=neq.&order=created_at.asc&select=id,audio_url&limit=200")
         for call in (calls_with_audio or []):
             if total_bytes <= 800 * 1024 * 1024:
@@ -1354,7 +1375,7 @@ def _reanalyze_worker():
 # BATCH UPLOAD WORKER
 # ──────────────────────────────────────────────
 
-def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
+def _process_single_file(audio_bytes, filename, keyterms, tx_corrections, cached_files=None, cached_reps=None):
     """Process one audio file — transcribe, analyze, save. Returns (saved_record, skip_reason)."""
     # Check duplicate
     try:
@@ -1383,7 +1404,7 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
 
     # Upload audio to storage
     try:
-        enforce_storage_cap()
+        enforce_storage_cap(cached_files=cached_files)
         safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
         supa_storage_upload("call-audio", safe_filename, audio_bytes, "audio/mpeg")
         result["audio_url"] = supa_storage_signed_url("call-audio", safe_filename)
@@ -1397,7 +1418,7 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
     call_date = parse_call_date_from_filename(filename)
     rep_name_raw = result.get("rep_name_detected") or "Unknown"
     try:
-        rep_list = supa("GET", "reps?active=eq.true")
+        rep_list = cached_reps if cached_reps is not None else supa("GET", "reps?active=eq.true")
         matched_name, confidence = fuzzy_match_rep(rep_name_raw, rep_list)
         rep_name = matched_name if confidence >= 0.90 else rep_name_raw
     except Exception:
@@ -1467,28 +1488,48 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections):
         "word_timestamps": result.get("word_timestamps") or None,
     }
 
-    # Save to Supabase
-    try:
-        saved = supa("POST", "calls", record)
-        return saved, None
-    except Exception as e:
-        log(f"  Save error for {filename}: {e}")
-        raise
+    # Save to Supabase — retry once on timeout/transient error
+    last_err = None
+    for attempt in range(2):
+        try:
+            saved = supa("POST", "calls", record)
+            return saved, None
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                log(f"  Save attempt 1 failed for {filename}: {e} — retrying in 3s")
+                time.sleep(3)
+    log(f"  Save failed after 2 attempts for {filename}: {last_err}")
+    raise last_err
 
 def _batch_upload_worker(zip_bytes):
     """Background worker — extract ZIP, process each audio file, save to DB."""
     global _batch_job
     try:
-        # Get cached keyterms and corrections once for the whole batch
+        # ── One-time setup: cache everything that is constant across the batch ──
         keyterms = get_cached_keyterms()
         tx_corrections = get_transcript_corrections()
 
-        # Extract audio files from ZIP
+        # Cache the storage file list ONCE — saves one 30s API call per file
+        try:
+            cached_files = supa_storage_list("call-audio")
+            log(f"  Batch: cached {len(cached_files)} storage files")
+        except Exception as e:
+            log(f"  Batch: storage list failed ({e}), will skip audio storage for this batch")
+            cached_files = None  # Non-fatal: calls save fine without audio
+
+        # Cache active reps list ONCE — saves one DB round-trip per file
+        try:
+            cached_reps = supa("GET", "reps?active=eq.true")
+        except Exception:
+            cached_reps = []
+
+        # ── Extract audio files from ZIP ──
         audio_exts = {".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".webm", ".mpeg", ".mpga"}
         audio_files = []
         try:
             with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-                for name in zf.namelist():
+                for name in sorted(zf.namelist()):  # Sort for deterministic ordering
                     if name.startswith("__") or name.startswith(".") or name.endswith("/"):
                         continue
                     ext = os.path.splitext(name)[1].lower()
@@ -1514,11 +1555,14 @@ def _batch_upload_worker(zip_bytes):
         with _batch_lock:
             _batch_job["total"] = total
 
-        log(f"  Batch upload: {total} files extracted from ZIP")
+        log(f"  Batch upload: {total} files to process")
 
-        # Process in batches of 3
-        for i in range(0, total, 3):
-            # Check for stop request before each group
+        # ── Process sequentially — semaphore already limits concurrency ──
+        # Running 3 threads that all block on the same semaphore wastes thread
+        # overhead with no real parallelism benefit. Sequential is clearer and
+        # makes progress reporting accurate.
+        for idx, (fname, fdata) in enumerate(audio_files):
+            # Check for stop request
             with _batch_lock:
                 if _batch_job.get("stop_requested"):
                     _batch_job["status"] = "stopped"
@@ -1526,52 +1570,53 @@ def _batch_upload_worker(zip_bytes):
                     _batch_job["current"] = ""
                     log(f"  Batch upload stopped by user: {_batch_job['processed']} processed before halt")
                     return
-            batch = audio_files[i:i+3]
-            threads = []
-            results = [None] * len(batch)
 
-            def process_file(idx, fname, fdata):
+            with _batch_lock:
+                _batch_job["current"] = fname
+
+            log(f"  Batch [{idx+1}/{total}] processing: {fname}")
+            try:
+                with _analysis_semaphore:
+                    saved, skip_reason = _process_single_file(
+                        fdata, fname, keyterms, tx_corrections,
+                        cached_files=cached_files,
+                        cached_reps=cached_reps,
+                    )
+                if skip_reason:
+                    with _batch_lock:
+                        _batch_job["skipped"] += 1
+                        if skip_reason != "duplicate":
+                            _batch_job["error_list"].append(f"{fname} — {skip_reason}")
+                    log(f"  Batch [{idx+1}/{total}] skipped ({skip_reason}): {fname}")
+                else:
+                    with _batch_lock:
+                        _batch_job["processed"] += 1
+                    log(f"  Batch [{idx+1}/{total}] saved: {fname}")
+            except Exception as e:
+                import traceback
+                log(f"  Batch [{idx+1}/{total}] ERROR for {fname}: {e}")
+                log(f"  Traceback: {traceback.format_exc()[-600:]}")
                 with _batch_lock:
-                    _batch_job["current"] = fname
-                try:
-                    with _analysis_semaphore:
-                        saved, skip_reason = _process_single_file(fdata, fname, keyterms, tx_corrections)
-                    if skip_reason:
-                        with _batch_lock:
-                            _batch_job["skipped"] += 1
-                            if skip_reason != "duplicate":
-                                _batch_job["error_list"].append(f"{fname} — {skip_reason}")
-                    else:
-                        with _batch_lock:
-                            _batch_job["processed"] += 1
-                except Exception as e:
-                    log(f"  Batch error for {fname}: {e}")
-                    with _batch_lock:
-                        _batch_job["errors"] += 1
-                        _batch_job["error_list"].append(f"{fname} — {str(e)[:80]}")
-                finally:
-                    with _batch_lock:
-                        if _batch_job["current"] == fname:
-                            _batch_job["current"] = ""
-
-            for j, (fname, fdata) in enumerate(batch):
-                t = threading.Thread(target=process_file, args=(j, fname, fdata), daemon=True)
-                threads.append(t)
-                t.start()
-            for t in threads:
-                t.join()
+                    _batch_job["errors"] += 1
+                    _batch_job["error_list"].append(f"{fname} — {str(e)[:120]}")
+            finally:
+                with _batch_lock:
+                    if _batch_job["current"] == fname:
+                        _batch_job["current"] = ""
 
         with _batch_lock:
             _batch_job["status"] = "complete"
             _batch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
             _batch_job["current"] = ""
-        log(f"  Batch upload complete: {_batch_job['processed']} processed, {_batch_job['skipped']} skipped, {_batch_job['errors']} errors")
+        log(f"  Batch upload complete: {_batch_job['processed']} saved, {_batch_job['skipped']} skipped, {_batch_job['errors']} errors")
 
     except Exception as e:
+        import traceback
         with _batch_lock:
             _batch_job["status"] = "error"
             _batch_job["current"] = str(e)
         log(f"  Batch upload worker error: {e}")
+        log(f"  Traceback: {traceback.format_exc()[-600:]}")
 
 # ──────────────────────────────────────────────
 # VONAGE VBC — OAUTH, API CLIENT, POLLING WORKER
@@ -2101,6 +2146,8 @@ class Handler(BaseHTTPRequestHandler):
             self._reanalyze_stop()
         elif path == "/batch_upload/status":
             self._batch_upload_status()
+        elif path == "/batch_upload/errors":
+            self._batch_upload_errors()
         elif path == "/corrections":
             self._get_corrections()
         elif path == "/transcript_corrections":
@@ -2847,6 +2894,16 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
             status = dict(_batch_job)
         self._ok(status)
 
+    def _batch_upload_errors(self):
+        """Return full error list for the last batch job."""
+        with _batch_lock:
+            errors = list(_batch_job.get("error_list", []))
+            status = _batch_job.get("status", "idle")
+            total = _batch_job.get("total", 0)
+            processed = _batch_job.get("processed", 0)
+            skipped = _batch_job.get("skipped", 0)
+        self._ok({"status": status, "total": total, "processed": processed, "skipped": skipped, "errors": errors})
+
     def _batch_upload_stop(self, body=None):
         with _batch_lock:
             if _batch_job.get("status") != "running":
@@ -3098,7 +3155,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
 
 if __name__ == "__main__":
     log("=" * 55)
-    log("  Little Guys Movers — Call Analyzer Server v12")
+    log("  Little Guys Movers — Call Analyzer Server v13")
     log("=" * 55)
     missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","DEEPGRAM_API_KEY"] if not os.environ.get(v)]
     if missing:
