@@ -3544,11 +3544,10 @@ let trendChart=null,repTrendChart=null;
 let shareType='location';
 let reanalyzePoller=null,statusPoller=null;
 let libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};
-let dateFilter=30;
 let locationFilter='';
-let dateFrom='';  // ISO date string e.g. '2026-01-01' — empty means no start bound
-let dateTo='';    // ISO date string e.g. '2026-04-30' — empty means no end bound
-let dateFilter=30; // legacy relative filter — kept for Overview panel compat; overridden by dateFrom/dateTo when set
+let dateFrom='';  // ISO date string '2026-01-01' — empty means no start bound
+let dateTo='';    // ISO date string '2026-04-30' — empty means no end bound
+let dateFilter=30; // relative days filter — 0=all time; overridden by dateFrom/dateTo when set
 let dataLoadedAt=null;
 
 const SHARE_MODE=!!(window.SHARE_TOKEN);
