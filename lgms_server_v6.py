@@ -2200,6 +2200,8 @@ class Handler(BaseHTTPRequestHandler):
             self._batch_upload_status()
         elif path == "/batch_upload/errors":
             self._batch_upload_errors()
+        elif path == "/batch_upload/cleanup_empty":
+            self._batch_cleanup_empty()
         elif path == "/corrections":
             self._get_corrections()
         elif path == "/transcript_corrections":
@@ -2275,12 +2277,30 @@ class Handler(BaseHTTPRequestHandler):
             # Optional ?slim=1 strips transcript text from response (for list views)
             qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
             slim = qs.get("slim", ["0"])[0] == "1"
-            if slim:
-                # Select all columns except transcript
-                calls = supa("GET", "calls?order=created_at.desc&limit=2000&select=id,filename,storage_filename,rep_name,rep_name_detected,caller_name,call_purpose,call_type,move_type,move_category,call_outcome,loss_reason,soft_pipeline_reason,word_count,exclude_from_scoring,exclusion_reason,call_summary,key_details,talk_ratio_rep,talk_ratio_customer,keywords_detected,keyword_positions,objections_detected,objection_positions,customer_sentiment,scores,checklist,strengths,coaching_points,tags,manager_notes,score_overrides,call_date,audio_url,share_token,availability_decline,turned_away,onsite_suggested,call_quality,is_continuation,continuation_group_id,evaluation_confidence,is_diarized,close_attempts,objections_overcome,objections_abandoned,pipeline_recovery_quality,salesmanship_score,value_props_used,missed_rapport_opportunities,input_tokens,output_tokens,pricing_model,move_timeline,created_at")
-            else:
-                calls = supa("GET", "calls?order=created_at.desc&limit=2000")
-            self._ok(calls)
+
+            slim_select = "id,filename,storage_filename,rep_name,rep_name_detected,caller_name,call_purpose,call_type,move_type,move_category,call_outcome,loss_reason,soft_pipeline_reason,word_count,exclude_from_scoring,exclusion_reason,call_summary,key_details,talk_ratio_rep,talk_ratio_customer,keywords_detected,keyword_positions,objections_detected,objection_positions,customer_sentiment,scores,checklist,strengths,coaching_points,tags,manager_notes,score_overrides,call_date,audio_url,share_token,availability_decline,turned_away,onsite_suggested,call_quality,is_continuation,continuation_group_id,evaluation_confidence,is_diarized,close_attempts,objections_overcome,objections_abandoned,pipeline_recovery_quality,salesmanship_score,value_props_used,missed_rapport_opportunities,input_tokens,output_tokens,pricing_model,move_timeline,created_at"
+
+            # Supabase caps at 1000 rows per request — paginate to get all calls
+            PAGE_SIZE = 1000
+            all_calls = []
+            offset = 0
+            while True:
+                if slim:
+                    page = supa("GET", f"calls?order=created_at.desc&limit={PAGE_SIZE}&offset={offset}&select={slim_select}")
+                else:
+                    page = supa("GET", f"calls?order=created_at.desc&limit={PAGE_SIZE}&offset={offset}")
+                if not page:
+                    break
+                all_calls.extend(page)
+                if len(page) < PAGE_SIZE:
+                    break  # Last page — no more rows
+                offset += PAGE_SIZE
+                if offset > 20000:
+                    log(f"  Warning: _get_calls hit 20k row safety cap at offset {offset}")
+                    break
+
+            log(f"  _get_calls: returning {len(all_calls)} calls (paginated)")
+            self._ok(all_calls)
         except Exception as e:
             self._err(500, str(e))
 
@@ -2956,6 +2976,34 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         with _batch_lock:
             status = dict(_batch_job)
         self._ok(status)
+
+    def _batch_cleanup_empty(self):
+        """Delete calls that have no transcript — these are broken records from failed uploads."""
+        try:
+            # Find calls with empty or null transcript, created today
+            from datetime import date
+            today = date.today().isoformat()
+            # Get calls with empty transcript created today
+            empty_calls = supa("GET", f"calls?transcript=eq.&created_at=gte.{today}T00:00:00&select=id,filename,created_at&limit=500")
+            if not empty_calls:
+                # Try null transcript
+                empty_calls = []
+            null_calls = supa("GET", f"calls?transcript=is.null&created_at=gte.{today}T00:00:00&select=id,filename,created_at&limit=500")
+            all_empty = (empty_calls or []) + (null_calls or [])
+            if not all_empty:
+                self._ok({"deleted": 0, "message": "No empty records found from today"})
+                return
+            deleted = 0
+            for call in all_empty:
+                try:
+                    supa("DELETE", f"calls?id=eq.{call['id']}")
+                    deleted += 1
+                    log(f"  Cleanup: deleted empty record {call.get('filename','?')} (id={call['id']})")
+                except Exception as e:
+                    log(f"  Cleanup: failed to delete {call.get('id')}: {e}")
+            self._ok({"deleted": deleted, "total_found": len(all_empty), "message": f"Deleted {deleted} empty call records from today"})
+        except Exception as e:
+            self._err(500, f"Cleanup failed: {e}")
 
     def _batch_upload_errors(self):
         """Return full error list for the last batch job."""
