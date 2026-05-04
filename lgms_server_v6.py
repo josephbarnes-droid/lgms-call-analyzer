@@ -50,6 +50,7 @@ _batch_job = {
     "status": "idle",
     "total": 0, "processed": 0, "skipped": 0, "errors": 0,
     "current": "", "started_at": None, "finished_at": None,
+    "last_heartbeat": None,  # Updated on every file iteration — lets dashboard detect stalled workers
     "error_list": [],
 }
 _batch_lock = threading.Lock()
@@ -900,12 +901,34 @@ def transcribe_audio_deepgram(audio_bytes, filename, keyterms=None):
                 "mpeg": "audio/mpeg", "mpga": "audio/mpeg"}
     mime = mime_map.get(ext, "audio/mpeg")
 
-    req = urllib.request.Request(url, data=audio_bytes, method="POST")
-    req.add_header("Authorization", f"Token {DEEPGRAM_KEY}")
-    req.add_header("Content-Type", mime)
-
-    with urllib.request.urlopen(req, timeout=300) as r:
-        result = json.loads(r.read())
+    last_err = None
+    result = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, data=audio_bytes, method="POST")
+            req.add_header("Authorization", f"Token {DEEPGRAM_KEY}")
+            req.add_header("Content-Type", mime)
+            with urllib.request.urlopen(req, timeout=300) as r:
+                result = json.loads(r.read())
+            break  # Success
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 502, 503, 504) and attempt < 2:
+                wait = (2 ** attempt) * 4  # 4s, 8s
+                log(f"  Deepgram HTTP {e.code} (attempt {attempt+1}/3) — retrying in {wait}s")
+                time.sleep(wait)
+                last_err = e
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            if attempt < 2:
+                wait = (2 ** attempt) * 3
+                log(f"  Deepgram network error (attempt {attempt+1}/3): {e} — retrying in {wait}s")
+                time.sleep(wait)
+                last_err = e
+                continue
+            raise
+    if result is None:
+        raise Exception(f"Deepgram failed after 3 attempts: {last_err}")
 
     # Log Deepgram response structure for debugging
     has_utterances = bool(result.get("results", {}).get("utterances"))
@@ -1067,6 +1090,41 @@ def normalize_objection(raw):
         return "Already have another quote"
     return raw.strip()
 
+def _call_claude_api(req_body, headers, max_retries=3):
+    """Call Anthropic API with exponential backoff retry for transient errors (429, 529, timeouts)."""
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(
+                "https://api.anthropic.com/v1/messages", data=req_body,
+                headers=headers, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=180) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8", errors="replace")
+            # 429 = rate limit, 529 = overloaded, 502/503/504 = transient gateway errors
+            if e.code in (429, 502, 503, 504, 529) and attempt < max_retries - 1:
+                wait = (2 ** attempt) * 5  # 5s, 10s, 20s
+                log(f"  Claude API HTTP {e.code} (attempt {attempt+1}/{max_retries}) — retrying in {wait}s")
+                time.sleep(wait)
+                last_err = Exception(f"Anthropic API HTTP {e.code}: {error_body[:300]}")
+                continue
+            # Non-retryable error or last attempt
+            raise Exception(f"Anthropic API HTTP {e.code}: {error_body[:500]}")
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            if attempt < max_retries - 1:
+                wait = (2 ** attempt) * 3  # 3s, 6s, 12s
+                log(f"  Claude API network error (attempt {attempt+1}/{max_retries}): {e} — retrying in {wait}s")
+                time.sleep(wait)
+                last_err = e
+                continue
+            raise Exception(f"Anthropic API network error: {e}")
+    if last_err:
+        raise last_err
+    raise Exception("Claude API failed after all retries")
+
+
 def run_claude_analysis(transcript, filename, model="claude-sonnet-4-20250514", is_diarized=False):
     corrections = get_recent_corrections()
     # Truncate very long transcripts to prevent exceeding Claude's token limit
@@ -1087,17 +1145,8 @@ def run_claude_analysis(transcript, filename, model="claude-sonnet-4-20250514", 
         "max_tokens": 4096,
         "messages": [{"role": "user", "content": prompt}]
     }).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages", data=req_body,
-        headers={"Content-Type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"},
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            resp = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8', errors='replace')
-        raise Exception(f"Anthropic API HTTP {e.code}: {error_body[:500]}")
+    headers = {"Content-Type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"}
+    resp = _call_claude_api(req_body, headers, max_retries=3)
     tb = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
     if not tb:
         raise Exception("No response from Claude")
@@ -1556,6 +1605,8 @@ def _batch_upload_worker(zip_bytes):
             _batch_job["total"] = total
 
         log(f"  Batch upload: {total} files to process")
+        with _batch_lock:
+            _batch_job["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
 
         # ── Process sequentially — semaphore already limits concurrency ──
         # Running 3 threads that all block on the same semaphore wastes thread
@@ -1573,6 +1624,7 @@ def _batch_upload_worker(zip_bytes):
 
             with _batch_lock:
                 _batch_job["current"] = fname
+                _batch_job["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
 
             log(f"  Batch [{idx+1}/{total}] processing: {fname}")
             try:
@@ -2880,6 +2932,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
                 "current": "Extracting ZIP...",
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "finished_at": None,
+                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
                 "error_list": [],
                 "stop_requested": False,
             }
@@ -3155,7 +3208,7 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
 
 if __name__ == "__main__":
     log("=" * 55)
-    log("  Little Guys Movers — Call Analyzer Server v13")
+    log("  Little Guys Movers — Call Analyzer Server v14")
     log("=" * 55)
     missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","DEEPGRAM_API_KEY"] if not os.environ.get(v)]
     if missing:
@@ -3176,3 +3229,4 @@ if __name__ == "__main__":
     log(f"  Running at http://127.0.0.1:{PORT}")
     log("  Press Ctrl+C to stop\n")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+
