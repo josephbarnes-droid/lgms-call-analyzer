@@ -6626,35 +6626,65 @@ function handleBulkSelect(f) {
 async function startBulkUpload() {
   if (!bulkZipFile) return;
   const btn = g('bulk-btn');
+  const progText = g('bulk-prog-text');
+  const progWrap = g('bulk-progress');
+  const msg = g('bulk-msg');
+
+  // Lock UI immediately so user knows something is happening
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span> Uploading…';
-  g('bulk-progress').style.display = 'block';
-  g('bulk-prog-text').textContent = 'Sending ZIP to server…';
+  btn.innerHTML = '<span class="spin"></span> Sending to server…';
+  if (progWrap) progWrap.style.display = 'block';
+  if (progText) progText.textContent = `Sending ${(bulkZipFile.size/1024/1024).toFixed(1)}MB to server…`;
+  if (msg) msg.innerHTML = '';
+
+  // Pre-populate the global status bar immediately so it shows even if user navigates away
+  window._lastBatchStatus = { status: 'running', total: 0, processed: 0, skipped: 0, errors: 0, current: 'Sending ZIP…' };
+  updateStatusBar();
+
   try {
-    // Read file as base64 and send as JSON
-    const b64 = await new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = () => res(reader.result.split(',')[1]);
-      reader.onerror = () => rej(new Error('Read failed'));
-      reader.readAsDataURL(bulkZipFile);
+    // Send as multipart/form-data — no base64, no browser freeze, no 33% size inflation
+    const form = new FormData();
+    form.append('zip', bulkZipFile, bulkZipFile.name);
+
+    // Use XMLHttpRequest so we can track upload progress
+    const uploadPct = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', API + '/batch_upload/start');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && progText) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          progText.textContent = `Sending: ${pct}% of ${(bulkZipFile.size/1024/1024).toFixed(1)}MB…`;
+          // Also update global status bar current field
+          if (window._lastBatchStatus) window._lastBatchStatus.current = `Sending ZIP: ${pct}%`;
+          updateStatusBar();
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch(e) { resolve({}); }
+        } else {
+          try { reject(new Error(JSON.parse(xhr.responseText).error || `Server error ${xhr.status}`)); }
+          catch(e) { reject(new Error(`Server error ${xhr.status}`)); }
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network error — check your connection'));
+      xhr.send(form);
     });
-    const r = await fetch(API + '/batch_upload/start', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({zip: b64})
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Upload failed');
-    g('bulk-msg').innerHTML = '<div class="msg-ok">✓ Upload started — processing in background. Status bar at the top updates live on any page.</div>';
+
+    // ZIP is on the server, background processing has started
+    if (msg) msg.innerHTML = '<div class="msg-ok">✓ ZIP received — processing in background. You can navigate away freely.</div>';
     btn.innerHTML = '<span class="spin"></span> Processing in background…';
-    // Pre-populate status so the bar shows immediately without waiting for first poll
-    window._lastBatchStatus = { status: 'running', total: 0, processed: 0, skipped: 0, errors: 0, current: 'Starting…' };
+    window._lastBatchStatus = { status: 'running', total: 0, processed: 0, skipped: 0, errors: 0, current: 'Extracting files…' };
     updateStatusBar();
     startBulkPoller();
+
   } catch(e) {
-    g('bulk-msg').innerHTML = `<div class="msg-err">⚠ ${e.message}</div>`;
+    if (msg) msg.innerHTML = `<div class="msg-err">⚠ ${esc(e.message)}</div>`;
     btn.disabled = false;
     btn.innerHTML = 'Start Background Upload';
+    window._lastBatchStatus = { status: 'error', current: e.message };
+    updateStatusBar();
   }
 }
 
