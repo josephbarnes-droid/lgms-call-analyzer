@@ -5959,6 +5959,8 @@ function renderAdd(){
     <div id="add-bulk" style="display:${addTab==='bulk'?'block':'none'}">
       <div style="background:var(--lg-green-bg);border:1px solid var(--lg-green-soft);border-radius:10px;padding:11px 14px;font-size:12.5px;color:var(--lg-green-dark);margin-bottom:16px;line-height:1.6">
         📦 Upload a ZIP file containing MP3s. Processing runs entirely in the background — you can close this tab and come back. All files are deduplicated automatically.
+        <br><br>
+        <span style="font-size:11px;color:var(--ink3)">If files were skipped as duplicates after a failed upload, use <a href="#" onclick="cleanupEmptyRecords(event)" style="color:var(--lg-green);font-weight:600">Clean up incomplete records</a> to remove them and re-upload.</span>
       </div>
       <div class="drop-zone" id="bulk-drop" onclick="g('bulk-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleBulkDrop(event)">
         <span class="dz-ico">📦</span><div class="dz-title">Drop a Vonage ZIP here</div><div class="dz-sub">All MP3s inside will be queued automatically</div>
@@ -6758,6 +6760,24 @@ async function reattachBulkIfRunning() {
 }
 
 // Check bulk status on page load
+async function cleanupEmptyRecords(e) {
+  if (e) e.preventDefault();
+  const confirmed = confirm("This will delete all call records from today that have no transcript data (broken records from failed uploads). Your 3 successfully saved calls from today will NOT be affected — only empty/incomplete records are removed.\n\nContinue?");
+  if (!confirmed) return;
+  try {
+    const r = await fetch(API + '/batch_upload/cleanup_empty', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json();
+    if (d.deleted > 0) {
+      showToast(`✓ Cleaned up ${d.deleted} incomplete records — you can now re-upload your ZIP`, 'success', 8000);
+      await loadCalls();
+    } else {
+      showToast(d.message || 'No incomplete records found', 'info', 5000);
+    }
+  } catch(e) {
+    showToast('Cleanup failed: ' + e.message, 'error', 6000);
+  }
+}
+
 async function checkBulkStatus() {
   // startStatusPoller handles global status bar — this just ensures the Add Calls panel
   // is wired up correctly if the user is already on that page when they load.
