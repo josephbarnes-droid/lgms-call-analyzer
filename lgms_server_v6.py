@@ -2255,6 +2255,7 @@ class Handler(BaseHTTPRequestHandler):
             "/transcript_corrections/reapply": self._reapply_corrections,
             "/batch_upload/start": self._batch_upload_start,
             "/batch_upload/stop": self._batch_upload_stop,
+            "/batch_upload/cleanup_empty": self._batch_cleanup_empty,
             "/vonage/start": self._vonage_start_endpoint,
             "/vonage/stop": self._vonage_stop_endpoint,
             "/vonage/pause": self._vonage_pause_endpoint,
@@ -2978,31 +2979,35 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         self._ok(status)
 
     def _batch_cleanup_empty(self):
-        """Delete calls that have no transcript — these are broken records from failed uploads."""
+        """Delete calls that have no transcript — broken records from failed uploads."""
         try:
-            # Find calls with empty or null transcript, created today
             from datetime import date
             today = date.today().isoformat()
-            # Get calls with empty transcript created today
-            empty_calls = supa("GET", f"calls?transcript=eq.&created_at=gte.{today}T00:00:00&select=id,filename,created_at&limit=500")
-            if not empty_calls:
-                # Try null transcript
-                empty_calls = []
-            null_calls = supa("GET", f"calls?transcript=is.null&created_at=gte.{today}T00:00:00&select=id,filename,created_at&limit=500")
-            all_empty = (empty_calls or []) + (null_calls or [])
-            if not all_empty:
-                self._ok({"deleted": 0, "message": "No empty records found from today"})
+            # Fetch up to 1000 records with null transcript created today
+            null_calls = supa("GET", f"calls?transcript=is.null&created_at=gte.{today}T00:00:00&select=id,filename&limit=1000") or []
+            # Also fetch records with empty string transcript
+            empty_calls = supa("GET", f"calls?transcript=eq.&created_at=gte.{today}T00:00:00&select=id,filename&limit=1000") or []
+            all_empty = null_calls + empty_calls
+            # Deduplicate by id in case a record matched both filters
+            seen = set()
+            deduped = []
+            for c in all_empty:
+                if c["id"] not in seen:
+                    seen.add(c["id"])
+                    deduped.append(c)
+            if not deduped:
+                self._ok({"deleted": 0, "message": "No incomplete records found from today — nothing to clean up"})
                 return
-            deleted = 0
-            for call in all_empty:
-                try:
-                    supa("DELETE", f"calls?id=eq.{call['id']}")
-                    deleted += 1
-                    log(f"  Cleanup: deleted empty record {call.get('filename','?')} (id={call['id']})")
-                except Exception as e:
-                    log(f"  Cleanup: failed to delete {call.get('id')}: {e}")
-            self._ok({"deleted": deleted, "total_found": len(all_empty), "message": f"Deleted {deleted} empty call records from today"})
+            # Bulk delete by ID list — one request instead of N requests
+            ids = [str(c["id"]) for c in deduped]
+            # Supabase IN filter: id=in.(id1,id2,...)
+            id_list = ",".join(ids)
+            log(f"  Cleanup: deleting {len(ids)} incomplete records from today")
+            supa("DELETE", f"calls?id=in.({id_list})")
+            log(f"  Cleanup: done — deleted {len(ids)} records")
+            self._ok({"deleted": len(ids), "total_found": len(deduped), "message": f"Deleted {len(ids)} incomplete records from today"})
         except Exception as e:
+            log(f"  Cleanup error: {e}")
             self._err(500, f"Cleanup failed: {e}")
 
     def _batch_upload_errors(self):
