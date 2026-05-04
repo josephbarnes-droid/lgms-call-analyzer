@@ -745,7 +745,10 @@ html, body {
   font-size: 12px;
   color: var(--ink3);
   flex-shrink: 0;
+  transition: background .4s;
 }
+.status-bar.warn { background: rgba(227,177,36,.10); border-bottom-color: rgba(227,177,36,.25); }
+.status-bar.done { background: rgba(0,114,54,.07); border-bottom-color: rgba(0,114,54,.2); }
 .sb-msg { flex: 1; font-family: var(--font-label); font-size: 11px; letter-spacing: .04em; color: var(--ink2); font-weight: 500; }
 
 /* === CHART WRAPPER === */
@@ -798,24 +801,6 @@ html, body {
   background: var(--surface-sunken);
   color: var(--ink3);
   text-decoration: line-through;
-}
-.tx-search {
-  display: inline-block;
-  font-size: 11.5px;
-  background: #fef08a;
-  color: #713f12;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin: 2px 4px 2px 0;
-}
-.tx-word.tx-search {
-  display: inline;
-  background: #fef08a;
-  color: #713f12;
-  padding: 1px 4px;
-  margin: 0;
-  font-size: inherit;
-  border-radius: 3px;
 }
 
 /* Word-level transcript (when word_timestamps are present) */
@@ -3497,7 +3482,6 @@ const CK_GROUPS=[
 ];
 const SK=['information_control','price_delivery','closing_attempt','professionalism','rapport_tone','salesmanship','overall'];
 const SL=['Info & Control','Price Delivery','Closing','Professionalism','Rapport & Tone','Salesmanship','Overall'];
-const SW={information_control:15,price_delivery:15,closing_attempt:25,professionalism:10,rapport_tone:15,salesmanship:20};
 // Curated keyword list — these are surfaced in the Keywords chart on Overview.
 // Names must match the canonical strings Claude returns in keywords_detected.
 // Prompt source: lgms_server_v12_audio.py "KEYWORDS" section.
@@ -3551,9 +3535,30 @@ async function init(){
   await loadReps();
   loadSharedViews();loadCorrections();
   populateLocFilter();
+  // Start status poller FIRST so _lastBatchStatus is populated before nav() renders pages
+  // The first poll inside startStatusPoller is awaited via await — ensures state is ready
+  await startStatusPollerInitial();
   nav('overview');
   checkReanalStatus();
   checkBulkStatus();
+}
+
+// Initial poll that runs once to populate state before page render, then starts the interval
+async function startStatusPollerInitial() {
+  try {
+    const [rr, br] = await Promise.all([fetch(API+'/reanalyze/status'), fetch(API+'/batch_upload/status')]);
+    window._lastJobStatus = await rr.json();
+    window._lastBatchStatus = await br.json();
+    updateStatusBar();
+    // If a batch is already running when we load the page, start the bulk poller too
+    if (window._lastBatchStatus?.status === 'running') {
+      startBulkPoller();
+    }
+    if (window._lastJobStatus?.status === 'running') {
+      startReanalPoller();
+    }
+  } catch(e) {}
+  // Then start the regular interval-based poller for ongoing updates
   startStatusPoller();
 }
 async function loadCalls(){
@@ -3585,6 +3590,12 @@ function updateLocIndicator(){
 }
 
 // ── STATUS BAR ──
+function dismissBatchNotification(){
+  if(window._lastBatchStatus?.finished_at){
+    window._dismissedBatchFinish = window._lastBatchStatus.finished_at;
+    updateStatusBar();
+  }
+}
 function updateStatusBar(){
   const bar=g('status-bar'),msg=g('sb-msg');if(!bar||!msg)return;
   const job=window._lastJobStatus||{status:'idle'};
@@ -3594,36 +3605,73 @@ function updateStatusBar(){
   const anyRunning=jobRunning||batchRunning;
   bar.classList.toggle('warn',anyRunning);
 
+  // Detect stalled batch — heartbeat older than 3 minutes
+  let stalled = false;
+  if (batchRunning && batchJob.last_heartbeat) {
+    const heartbeatAge = (new Date() - new Date(batchJob.last_heartbeat)) / 1000;
+    if (heartbeatAge > 180) stalled = true;  // 3 minutes
+  }
+
   // Build or remove the global progress bar
   let progBar=g('sb-prog-wrap');
   if(anyRunning){
     const active=jobRunning?job:batchJob;
-    const pct=active.total?Math.round((active.processed||0)/active.total*100):0;
+    const done=(active.processed||0)+(active.skipped||0)+(active.errors||0);
+    const pct=active.total?Math.round(done/active.total*100):0;
+    const stallNote = stalled ? ' ⚠ stalled?' : '';
     const label=jobRunning
       ?`Re-analyzing: ${active.processed||0}/${active.total||'?'} calls (${pct}%) — ${active.errors||0} errors`
-      :`Uploading: ${active.processed||0}/${active.total||'?'} files (${pct}%)`;
+      :`Uploading: ${done}/${active.total||'?'} files (${pct}%) · ${active.processed||0} saved · ${active.errors||0} errors${active.current?' · '+active.current:''}${stallNote}`;
     if(!progBar){
       progBar=document.createElement('span');
       progBar.id='sb-prog-wrap';
       progBar.style.cssText='display:flex;align-items:center;gap:8px;flex:1;min-width:0';
       msg.parentNode.insertBefore(progBar,msg.nextSibling);
     }
-    progBar.innerHTML=`<span style="font-size:11px;color:var(--amber);white-space:nowrap">${label}</span>
+    progBar.innerHTML=`<span style="font-size:11px;color:var(--amber);white-space:nowrap;max-width:420px;overflow:hidden;text-overflow:ellipsis" title="${label}">${label}</span>
       <div style="flex:1;height:4px;background:rgba(255,183,77,.2);border-radius:4px;min-width:60px;max-width:220px">
         <div style="height:100%;width:${pct}%;background:var(--amber);border-radius:4px;transition:width .5s"></div>
       </div>`;
-    // Only warn about deletion during re-analyze (not safe to delete a call mid-rescore)
-    // During batch upload, deleting unrelated calls is fine
     msg.textContent = jobRunning ? '⚠ Do not delete calls until re-analyze completes' : '';
   } else {
     if(progBar)progBar.remove();
-    // Show last job result briefly if just completed or stopped
-    if(job.status==='stopped'){
-      msg.innerHTML=`⏹ Re-analyze stopped · ${job.processed||0} of ${job.total||'?'} calls processed · <span style="cursor:pointer;text-decoration:underline" onclick="nav('library')">see details</span>`;
-      return;
+    // Batch: show completion/stopped state — persists until next data load or page nav
+    if(batchJob.status==='complete'&&batchJob.finished_at){
+      const mins=Math.floor((new Date()-new Date(batchJob.finished_at))/60000);
+      const errs=batchJob.errors||0;
+      const saved=batchJob.processed||0;
+      const skipped=batchJob.skipped||0;
+      // Hide if user dismissed this completion notification
+      if(window._dismissedBatchFinish === batchJob.finished_at){
+        // skip — fall through to default message
+      } else if(mins<60){
+        bar.classList.add('done');
+        const skippedBit = skipped>0 ? `, ${skipped} skipped` : '';
+        const errBit = errs>0
+          ? `, <span style="color:var(--red);font-weight:700">${errs} failed</span>`
+          : '';
+        const errLink = errs>0
+          ? ` · <span style="cursor:pointer;text-decoration:underline;font-weight:600" onclick="nav('add')">view errors</span>`
+          : '';
+        const ageLabel = mins<1 ? 'just now' : `${mins}m ago`;
+        const dismissBtn = ` · <span style="cursor:pointer;color:var(--ink3);margin-left:6px" title="Dismiss" onclick="dismissBatchNotification()">✕</span>`;
+        msg.innerHTML = `<span style="font-weight:600;color:var(--lg-green-dark,#007236)">✓ Upload complete</span> — <strong>${saved}</strong> ${saved===1?'call':'calls'} saved${skippedBit}${errBit} · ${ageLabel}${errLink}${dismissBtn}`;
+        return;
+      }
+      bar.classList.remove('done');
     }
     if(batchJob.status==='stopped'){
-      msg.innerHTML=`⏹ Batch upload stopped · ${batchJob.processed||0} of ${batchJob.total||'?'} files processed`;
+      msg.innerHTML=`⏹ Upload stopped · ${batchJob.processed||0} of ${batchJob.total||'?'} files processed`;
+      return;
+    }
+    if(batchJob.status==='error'){
+      bar.classList.add('warn');
+      msg.innerHTML=`⚠ Upload error: ${esc(batchJob.current||'unknown error')} · <span style="cursor:pointer;text-decoration:underline" onclick="nav('add')">details</span>`;
+      return;
+    }
+    // Re-analyze states
+    if(job.status==='stopped'){
+      msg.innerHTML=`⏹ Re-analyze stopped · ${job.processed||0} of ${job.total||'?'} calls processed · <span style="cursor:pointer;text-decoration:underline" onclick="nav('library')">see details</span>`;
       return;
     }
     const justDone=job.status==='complete'&&job.summary;
@@ -3644,31 +3692,63 @@ function updateStatusBar(){
   }
   updateLocIndicator();
 }
+
 function startStatusPoller(){
   if(statusPoller)clearInterval(statusPoller);
   let fastMode=false;
+  let firstPoll=true;
+
   async function poll(){
     try{
       const [rr,br]=await Promise.all([fetch(API+'/reanalyze/status'),fetch(API+'/batch_upload/status')]);
       const rd=await rr.json(),bd=await br.json();
-      const wasRunning=(window._lastJobStatus?.status==='running')||(window._lastBatchStatus?.status==='running');
+      // wasRunning: on first poll, trust the SERVER state (not local) — fixes session-independent detection
+      const wasRunning=firstPoll
+        ?(rd.status==='running'||bd.status==='running')  // on first poll, server IS the truth
+        :((window._lastJobStatus?.status==='running')||(window._lastBatchStatus?.status==='running'));
+      firstPoll=false;
       window._lastJobStatus=rd;window._lastBatchStatus=bd;
       const nowRunning=rd.status==='running'||bd.status==='running';
+      // nowDone: was running on previous poll (or server says it just finished), now it's not
       const nowDone=wasRunning&&!nowRunning;
       updateStatusBar();
-      // Switch to fast polling (3s) when a job is running, slow (30s) when idle
-      if(nowRunning&&!fastMode){fastMode=true;clearInterval(statusPoller);statusPoller=setInterval(poll,3000);}
-      else if(!nowRunning&&fastMode){fastMode=false;clearInterval(statusPoller);statusPoller=setInterval(poll,30000);}
-      // While running, update the library page in-place so the progress bar in Bulk Actions panel updates
+      // Switch to fast polling (4s) when a job is running, slow (20s) when idle
+      if(nowRunning&&!fastMode){fastMode=true;clearInterval(statusPoller);statusPoller=setInterval(poll,4000);}
+      else if(!nowRunning&&fastMode){fastMode=false;clearInterval(statusPoller);statusPoller=setInterval(poll,20000);}
+      // While running, update the library bulk-actions panel progress bar in-place
       if(nowRunning && currentPage==='library'){
         const prog=g('reanalyze-prog'); const lbl=g('reanalyze-status');
         if(prog && rd.total) prog.style.width = Math.round(rd.processed/rd.total*100)+'%';
         if(lbl && rd.status==='running') lbl.textContent = `Processing ${rd.processed}/${rd.total}: ${rd.current||'…'}`;
       }
-      if(nowDone){await loadCalls();({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement})[currentPage]?.();}
+      // When a job finishes: reload data and re-render current page regardless of who triggered the upload
+      if(nowDone){
+        // Show toast notification BEFORE reload so user sees confirmation immediately
+        const justFinishedBatch = bd.status === 'complete' || bd.status === 'stopped' || bd.status === 'error';
+        const justFinishedReanal = rd.status === 'complete' || rd.status === 'stopped' || rd.status === 'error';
+        if(justFinishedBatch && bd.status === 'complete'){
+          const saved = bd.processed || 0;
+          const errs = bd.errors || 0;
+          const skip = bd.skipped || 0;
+          const tone = errs > 0 ? 'warn' : 'success';
+          showToast(`Upload complete: ${saved} ${saved===1?'call':'calls'} saved${skip>0?', '+skip+' skipped':''}${errs>0?', '+errs+' failed':''}`, tone, 6000);
+        } else if(justFinishedBatch && bd.status === 'error'){
+          showToast(`Upload failed: ${bd.current||'unknown error'}`, 'error', 8000);
+        } else if(justFinishedReanal && rd.status === 'complete'){
+          const succ = rd.summary?.succeeded || (rd.processed - (rd.errors||0) - (rd.skipped||0));
+          showToast(`Re-analyze complete: ${succ} calls processed`, 'success', 6000);
+        }
+        await loadCalls();
+        ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,add:renderAdd})[currentPage]?.();
+        // If on Add Calls page, update the local panel completion state
+        if(currentPage==='add') updateBulkPanelUI(window._lastBatchStatus||{});
+      }
     }catch(e){}
   }
-  statusPoller=setInterval(poll,30000);
+
+  // Poll immediately on startup — don't wait 20s to find out if something is running
+  poll();
+  statusPoller=setInterval(poll,20000);
   // Also update the "X mins ago" display every minute
   setInterval(updateStatusBar,60000);
 }
@@ -4504,9 +4584,8 @@ function buildRow(c){
     const lbl = SL[i] || k.replace(/_/g,' ');
     const fillCls = v>=8 ? '' : v>=5 ? 'mid' : 'low';
     const valCls = scoreClass(v);
-    const wt = SW[k] ? `<span style="font-size:10px;color:var(--ink4);font-weight:400;margin-left:4px">${SW[k]}%</span>` : '';
     return `<div class="score-row">
-      <div class="score-row-label">${esc(lbl)}${wt}</div>
+      <div class="score-row-label">${esc(lbl)}</div>
       <div class="score-bar"><div class="score-bar-fill ${fillCls}" style="width:${v*10}%"></div></div>
       <div class="score-row-value ${valCls}">${v || '—'}</div>
     </div>`;
@@ -4728,8 +4807,6 @@ function buildTxHtmlTimed(c){
   (c.keywords_detected||[]).forEach(k=>{
     if(k)highlightPhrases.push({phrase:k.toLowerCase(),cls:'tx-kw',label:k});
   });
-  const _srchTerm=(libFilters.search||'').trim().toLowerCase();
-  if(_srchTerm.length>=2)highlightPhrases.push({phrase:_srchTerm,cls:'tx-search',label:_srchTerm});
   (c.objections_detected||[]).forEach(o=>{
     if(!o)return;
     const cls=abandoned.has(o)?'tx-obj-abandoned':'tx-obj';
@@ -4809,15 +4886,6 @@ function buildTxHtmlLegacy(c){
     if(start<0)return;
     marks.push({start,end:start+o.length,cls:'tx-obj-abandoned',id:`txs-${c.id}-abn-${i}`,label:o});
   });
-  // Highlight search term if active
-  const _sq=(libFilters.search||'').trim().toLowerCase();
-  if(_sq.length>=2){
-    let _si=tx.toLowerCase().indexOf(_sq,0);
-    while(_si>=0){
-      marks.push({start:_si,end:_si+_sq.length,cls:'tx-search',id:`txs-${c.id}-srch-${_si}`,label:_sq});
-      _si=tx.toLowerCase().indexOf(_sq,_si+1);
-    }
-  }
   if(!marks.length)return escHtml(tx);
   marks.sort((a,b)=>a.start-b.start);
   const filtered=[];let cursor=0;
@@ -5120,7 +5188,7 @@ function renderProfiles(opts={}) {
 
     const isActive = r === selectedRep;
 
-    return `<div class="rep-card-v2${isActive?' active':''}" data-rep="${esc(r)}" data-store="${esc(storeFilter)}" onclick="handleRepCardClick(this)">
+    return `<div class="rep-card-v2${isActive?' active':''}" onclick="renderProfiles({rep:'${esc(r)}'${storeFilter?`,store:'${esc(storeFilter)}'`:''}})">
       <div class="rep-card-head">
         <div class="rep-card-avatar">${ini(r)}</div>
         <div style="flex:1;min-width:0">
@@ -5178,12 +5246,6 @@ function renderProfiles(opts={}) {
   if (selectedRep) openRepProfile(selectedRep);
 }
 
-function handleRepCardClick(el){
-  const rep = el.getAttribute('data-rep');
-  const store = el.getAttribute('data-store');
-  if(!rep) return;
-  renderProfiles({rep, store: store||undefined});
-}
 function openRepProfile(repName){
   const rc = allCalls.filter(c => c.rep_name===repName);
   const sc = rc.filter(c => !c.exclude_from_scoring);
@@ -5921,6 +5983,8 @@ function renderAdd(){
     </div>
     </div>
   </div></div>`);
+  // Reattach to any in-progress batch so the local progress bar updates even if we navigated away
+  reattachBulkIfRunning();
 }
 function switchAddTab(t){addTab=t;['audio','paste','file','bulk'].forEach(x=>{const el=g('add-'+x);if(el)el.style.display=x===t?'block':'none';});document.querySelectorAll('.tab').forEach((el,i)=>{el.classList.toggle('active',['audio','paste','file','bulk'][i]===t);});}
 function handleDrop(e){e.preventDefault();g('audio-drop').classList.remove('drag');handleFilesWithZip([...e.dataTransfer.files]);}
@@ -6175,21 +6239,23 @@ async function reapplyCorrections(callId, btn) {
 }
 
 // Lightweight toast notification for success/error feedback
-function showToast(msg, kind) {
+function showToast(msg, kind, duration) {
   let toast = document.getElementById('toast');
   if (!toast) {
     toast = document.createElement('div');
     toast.id = 'toast';
-    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 18px;border-radius:8px;font-size:14px;font-weight:500;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:opacity .3s;max-width:400px';
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 18px;border-radius:8px;font-size:14px;font-weight:500;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:opacity .3s;max-width:400px;cursor:pointer';
+    toast.onclick = () => { toast.style.opacity = '0'; };
     document.body.appendChild(toast);
   }
-  const colors = {success:'#16a34a', error:'#dc2626', info:'#2563eb'};
+  const colors = {success:'#16a34a', error:'#dc2626', info:'#2563eb', warn:'#d97706'};
   toast.style.background = colors[kind] || colors.info;
   toast.style.color = '#fff';
   toast.textContent = msg;
   toast.style.opacity = '1';
   clearTimeout(toast._timeout);
-  toast._timeout = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+  const dur = (typeof duration === 'number' && duration > 0) ? duration : 3500;
+  toast._timeout = setTimeout(() => { toast.style.opacity = '0'; }, dur);
 }
 
 
@@ -6579,13 +6645,52 @@ async function startBulkUpload() {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Upload failed');
-    g('bulk-msg').innerHTML = '<div class="msg-ok">✓ Upload started! Processing in background — you can navigate away.</div>';
+    g('bulk-msg').innerHTML = '<div class="msg-ok">✓ Upload started — processing in background. Status bar at the top updates live on any page.</div>';
     btn.innerHTML = '<span class="spin"></span> Processing in background…';
+    // Pre-populate status so the bar shows immediately without waiting for first poll
+    window._lastBatchStatus = { status: 'running', total: 0, processed: 0, skipped: 0, errors: 0, current: 'Starting…' };
+    updateStatusBar();
     startBulkPoller();
   } catch(e) {
     g('bulk-msg').innerHTML = `<div class="msg-err">⚠ ${e.message}</div>`;
     btn.disabled = false;
     btn.innerHTML = 'Start Background Upload';
+  }
+}
+
+function updateBulkPanelUI(d) {
+  // Update the local Add Calls panel progress bar if the elements exist (user is on Add Calls page)
+  const bar = g('bulk-prog-bar');
+  const txt = g('bulk-prog-text');
+  const prog = g('bulk-progress');
+  const btn = g('bulk-btn');
+  const msg = g('bulk-msg');
+  const done = (d.processed || 0) + (d.skipped || 0) + (d.errors || 0);
+  const pct = d.total ? Math.round(done / d.total * 100) : 0;
+
+  if (d.status === 'running') {
+    if (prog) prog.style.display = 'block';
+    if (bar) bar.style.width = pct + '%';
+    if (txt) {
+      const curr = d.current ? ` · ${d.current}` : '';
+      txt.textContent = `[${done}/${d.total || '?'}] ${d.processed} saved · ${d.skipped} skipped · ${d.errors} errors${curr}`;
+    }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Processing in background…'; }
+  } else if (d.status === 'complete' || d.status === 'stopped' || d.status === 'error') {
+    if (bar) bar.style.width = '100%';
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Start Background Upload'; }
+    const label = d.status === 'complete'
+      ? `✓ Done! ${d.processed} calls saved, ${d.skipped} skipped, ${d.errors} errors`
+      : d.status === 'stopped'
+      ? `⏹ Stopped at ${done}/${d.total || '?'} files — ${d.processed} saved`
+      : `⚠ Upload error: ${d.current || 'unknown'}`;
+    if (txt) txt.textContent = label;
+    // Show error list
+    if (d.error_list?.length && msg) {
+      const items = d.error_list.slice(0, 15).map(e => `<div style="margin:2px 0">• ${esc(e)}</div>`).join('');
+      const more = d.error_list.length > 15 ? `<div style="color:var(--ink3)">…and ${d.error_list.length - 15} more</div>` : '';
+      msg.innerHTML = `<div style="margin-top:10px;font-size:11.5px;color:var(--red,#c0392b)">${items}${more}</div>`;
+    }
   }
 }
 
@@ -6595,41 +6700,43 @@ function startBulkPoller() {
     try {
       const r = await fetch(API + '/batch_upload/status');
       const d = await r.json();
-      const bar = g('bulk-prog-bar');
-      const txt = g('bulk-prog-text');
-      if (d.total > 0 && bar) bar.style.width = Math.round((d.processed + d.skipped + d.errors) / d.total * 100) + '%';
-      if (txt) txt.textContent = d.status === 'running'
-        ? `Processing ${d.processed + d.skipped + d.errors}/${d.total}: ${d.current || '…'} (${d.processed} saved, ${d.skipped} skipped, ${d.errors} errors)`
-        : d.status === 'complete'
-        ? `✓ Done! ${d.processed} calls added, ${d.skipped} skipped, ${d.errors} errors`
-        : `Status: ${d.status}`;
-      if (d.status === 'complete' || d.status === 'error') {
+      window._lastBatchStatus = d;
+      updateStatusBar();
+      updateBulkPanelUI(d);
+      if (d.status !== 'running') {
         clearInterval(bulkPoller); bulkPoller = null;
-        const btn = g('bulk-btn');
-        if (btn) { btn.disabled = false; btn.innerHTML = 'Start Background Upload'; }
-        if (bar) bar.style.width = '100%';
-        await loadCalls();
-        if (currentPage === 'overview') renderOverview();
-        else if (currentPage === 'library') renderCallList();
-        if (d.error_list?.length) {
-          const msg = g('bulk-msg');
-          if (msg) msg.innerHTML += `<div style="margin-top:8px;font-size:11.5px;color:var(--tx3)">${d.error_list.slice(0,10).map(e=>`<div>• ${e}</div>`).join('')}${d.error_list.length>10?`<div>…and ${d.error_list.length-10} more</div>`:''}</div>`;
-        }
+        // Data reload is handled by startStatusPoller's nowDone logic — no need to reload here too
       }
     } catch(e) {}
   }, 3000);
 }
 
+// Called by renderAdd() — if a batch is already running when user opens Add Calls, reattach UI
+async function reattachBulkIfRunning() {
+  // Use cached status if available, otherwise fetch fresh
+  const d = window._lastBatchStatus || null;
+  if (!d) return;  // startStatusPoller will have populated this already
+  if (d.status === 'running') {
+    updateBulkPanelUI(d);
+    if (!bulkPoller) startBulkPoller();
+  } else if (d.status === 'complete' || d.status === 'stopped') {
+    // Show last result summary even if no poller is running
+    const prog = g('bulk-progress');
+    if (prog) prog.style.display = 'block';
+    updateBulkPanelUI(d);
+  }
+}
+
 // Check bulk status on page load
 async function checkBulkStatus() {
-  try {
-    const r = await fetch(API + '/batch_upload/status');
-    const d = await r.json();
-    if (d.status === 'running') {
-      g('bulk-progress').style.display = 'block';
-      startBulkPoller();
-    }
-  } catch(e) {}
+  // startStatusPoller handles global status bar — this just ensures the Add Calls panel
+  // is wired up correctly if the user is already on that page when they load.
+  // In practice startStatusPoller runs first and populates _lastBatchStatus,
+  // so this is mostly a no-op unless called explicitly.
+  if (window._lastBatchStatus?.status === 'running' && !bulkPoller) {
+    updateBulkPanelUI(window._lastBatchStatus);
+    startBulkPoller();
+  }
 }
 
 
