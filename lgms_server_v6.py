@@ -2897,24 +2897,34 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         content_type = self.headers.get("Content-Type", "")
         try:
             if "multipart/form-data" in content_type:
-                # Raw multipart upload — parse boundary
+                # Multipart upload — robustly extract the first file part
                 boundary = re.search(r'boundary=([^\s;]+)', content_type)
                 if not boundary:
                     self._err(400, "Missing boundary in multipart"); return
                 bound = boundary.group(1).encode()
-                parts = body.split(b"--" + bound)
                 zip_bytes = None
-                for part in parts:
-                    if b'filename=' in part and b'.zip' in part.lower():
-                        # Find end of headers
-                        header_end = part.find(b"\r\n\r\n")
-                        if header_end >= 0:
-                            zip_bytes = part[header_end+4:].rstrip(b"\r\n--")
-                            break
+                # Split on boundary, skip preamble
+                parts = body.split(b"--" + bound)
+                for part in parts[1:]:  # skip preamble
+                    if part in (b"--\r\n", b"--", b"\r\n"):
+                        continue  # epilogue
+                    header_end = part.find(b"\r\n\r\n")
+                    if header_end < 0:
+                        continue
+                    headers_raw = part[:header_end].decode("utf-8", errors="replace")
+                    data = part[header_end+4:]
+                    # Strip trailing boundary marker
+                    if data.endswith(b"\r\n"):
+                        data = data[:-2]
+                    # Accept any file field — not just .zip — in case user renames file
+                    if b'filename=' in part[:header_end] and len(data) > 100:
+                        zip_bytes = data
+                        log(f"  Multipart upload: received {len(zip_bytes):,} bytes from field headers: {headers_raw[:120]}")
+                        break
                 if not zip_bytes:
-                    self._err(400, "No ZIP file found in upload"); return
+                    self._err(400, "No file found in multipart upload"); return
             else:
-                # JSON with base64
+                # JSON with base64 (legacy fallback)
                 import base64
                 p = json.loads(body)
                 zip_bytes = base64.b64decode(p.get("zip", ""))
