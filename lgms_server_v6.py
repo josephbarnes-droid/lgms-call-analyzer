@@ -1573,34 +1573,39 @@ def _batch_upload_worker(zip_bytes):
         except Exception:
             cached_reps = []
 
-        # ── Extract audio files from ZIP ──
+        # ── Index audio files from ZIP (names only — no bytes loaded yet) ──
+        # We intentionally do NOT read audio bytes here. Loading all files into
+        # memory at once caused OOM crashes on large batches (871 files = >2GB).
+        # Instead we keep the ZipFile open and read each file just before processing,
+        # then let Python GC release the bytes before the next file.
         audio_exts = {".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".webm", ".mpeg", ".mpga"}
-        audio_files = []
+        audio_names = []  # list of (zip_entry_name, basename) — no bytes yet
         try:
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-                for name in sorted(zf.namelist()):  # Sort for deterministic ordering
-                    if name.startswith("__") or name.startswith(".") or name.endswith("/"):
-                        continue
-                    ext = os.path.splitext(name)[1].lower()
-                    if ext not in audio_exts:
-                        continue
-                    basename = os.path.basename(name)
-                    if not basename:
-                        continue
-                    audio_data = zf.read(name)
-                    if len(audio_data) > 25 * 1024 * 1024:
-                        with _batch_lock:
-                            _batch_job["skipped"] += 1
-                            _batch_job["error_list"].append(f"{basename} — too large (>25MB)")
-                        continue
-                    audio_files.append((basename, audio_data))
+            zf_index = zipfile.ZipFile(io.BytesIO(zip_bytes))
+            for name in sorted(zf_index.namelist()):
+                if name.startswith("__") or name.startswith(".") or name.endswith("/"):
+                    continue
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in audio_exts:
+                    continue
+                basename = os.path.basename(name)
+                if not basename:
+                    continue
+                # Check file size from ZIP metadata — no need to read bytes yet
+                info = zf_index.getinfo(name)
+                if info.file_size > 25 * 1024 * 1024:
+                    with _batch_lock:
+                        _batch_job["skipped"] += 1
+                        _batch_job["error_list"].append(f"{basename} — too large (>25MB)")
+                    continue
+                audio_names.append((name, basename))
         except zipfile.BadZipFile as e:
             with _batch_lock:
                 _batch_job["status"] = "error"
                 _batch_job["current"] = f"Invalid ZIP: {e}"
             return
 
-        total = len(audio_files)
+        total = len(audio_names)
         with _batch_lock:
             _batch_job["total"] = total
 
@@ -1608,11 +1613,8 @@ def _batch_upload_worker(zip_bytes):
         with _batch_lock:
             _batch_job["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
 
-        # ── Process sequentially — semaphore already limits concurrency ──
-        # Running 3 threads that all block on the same semaphore wastes thread
-        # overhead with no real parallelism benefit. Sequential is clearer and
-        # makes progress reporting accurate.
-        for idx, (fname, fdata) in enumerate(audio_files):
+        # ── Process sequentially — read one file at a time, release bytes after each ──
+        for idx, (zip_entry, fname) in enumerate(audio_names):
             # Check for stop request
             with _batch_lock:
                 if _batch_job.get("stop_requested"):
@@ -1620,6 +1622,7 @@ def _batch_upload_worker(zip_bytes):
                     _batch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
                     _batch_job["current"] = ""
                     log(f"  Batch upload stopped by user: {_batch_job['processed']} processed before halt")
+                    zf_index.close()
                     return
 
             with _batch_lock:
@@ -1628,12 +1631,18 @@ def _batch_upload_worker(zip_bytes):
 
             log(f"  Batch [{idx+1}/{total}] processing: {fname}")
             try:
+                # Read this file's bytes now — and only now. After _process_single_file
+                # returns we let fdata go out of scope so GC can reclaim the memory
+                # before we move to the next file. This keeps peak RAM at ~1 file
+                # in memory at a time regardless of how large the batch is.
+                fdata = zf_index.read(zip_entry)
                 with _analysis_semaphore:
                     saved, skip_reason = _process_single_file(
                         fdata, fname, keyterms, tx_corrections,
                         cached_files=cached_files,
                         cached_reps=cached_reps,
                     )
+                fdata = None  # Explicit release — don't wait for end-of-loop GC
                 if skip_reason:
                     with _batch_lock:
                         _batch_job["skipped"] += 1
@@ -1655,6 +1664,9 @@ def _batch_upload_worker(zip_bytes):
                 with _batch_lock:
                     if _batch_job["current"] == fname:
                         _batch_job["current"] = ""
+
+        zf_index.close()
+        zip_bytes = None  # Release the raw ZIP from memory too
 
         with _batch_lock:
             _batch_job["status"] = "complete"
@@ -2206,6 +2218,8 @@ class Handler(BaseHTTPRequestHandler):
             self._get_corrections()
         elif path == "/transcript_corrections":
             self._get_transcript_corrections_endpoint()
+        elif path == "/find_duplicates":
+            self._find_duplicates()
         elif path.startswith("/audio_url/"):
             self._get_audio_url()
         elif path == "/vonage/status":
@@ -2252,6 +2266,7 @@ class Handler(BaseHTTPRequestHandler):
             "/corrections/save": self._save_correction,
             "/transcript_corrections/save": self._save_transcript_correction,
             "/transcript_corrections/delete": self._delete_transcript_correction,
+            "/transcript_corrections/update": self._update_transcript_correction,
             "/transcript_corrections/reapply": self._reapply_corrections,
             "/batch_upload/start": self._batch_upload_start,
             "/batch_upload/stop": self._batch_upload_stop,
@@ -2417,20 +2432,93 @@ class Handler(BaseHTTPRequestHandler):
 
     def _check_duplicate(self, filename, transcript):
         try:
+            # Normalize filename for comparison: strip spaces/underscores/dots variations
+            def norm_filename(fn):
+                return re.sub(r'[\s_\-]+', '', fn).lower()
+
+            norm = norm_filename(filename)
             clean = filename.replace("'", "''")
+
+            # Exact filename match (case-insensitive)
             existing = supa("GET", f"calls?filename=ilike.{urllib.parse.quote(clean)}&limit=1")
             if existing:
                 return True, f"Duplicate filename: {filename}"
+
+            # Normalized filename match (catches space vs underscore differences)
+            all_filenames = supa("GET", "calls?select=filename,id&limit=5000")
+            for c in (all_filenames or []):
+                fn = c.get("filename", "")
+                if fn and norm_filename(fn) == norm:
+                    return True, f"Duplicate filename (normalized): {fn}"
+
+            # Content match — compare first 200 chars of transcript
             if transcript and len(transcript) > 100:
-                all_calls = supa("GET", "calls?limit=1000&select=transcript,filename")
-                tx_start = transcript[:150].strip()
-                for c in all_calls:
-                    ctx = (c.get("transcript") or "")[:150].strip()
+                tx_start = transcript[:200].strip()
+                all_calls = supa("GET", "calls?select=transcript,filename&limit=5000")
+                for c in (all_calls or []):
+                    ctx = (c.get("transcript") or "")[:200].strip()
                     if ctx and ctx == tx_start:
                         return True, f"Duplicate content (matches {c.get('filename','unknown')})"
             return False, ""
-        except Exception:
+        except Exception as e:
+            log(f"  _check_duplicate error: {e}")
             return False, ""
+
+    def _find_duplicates(self):
+        """Scan all calls for duplicate filenames or transcript content. Returns grouped duplicates."""
+        try:
+            calls = supa("GET", "calls?select=id,filename,created_at,rep_name,transcript&order=created_at.asc&limit=5000") or []
+
+            def norm_filename(fn):
+                return re.sub(r'[\s_\-]+', '', fn).lower()
+
+            # Group by normalized filename
+            fn_groups = {}
+            for c in calls:
+                fn = c.get("filename", "")
+                if not fn:
+                    continue
+                norm = norm_filename(fn)
+                fn_groups.setdefault(norm, []).append(c)
+
+            # Group by first 200 chars of transcript
+            tx_groups = {}
+            for c in calls:
+                tx = (c.get("transcript") or "")[:200].strip()
+                if not tx or len(tx) < 50:
+                    continue
+                tx_groups.setdefault(tx, []).append(c)
+
+            duplicates = []
+            seen_ids = set()
+
+            for norm, group in fn_groups.items():
+                if len(group) > 1:
+                    ids = [c["id"] for c in group]
+                    if any(i in seen_ids for i in ids):
+                        continue
+                    seen_ids.update(ids)
+                    duplicates.append({
+                        "type": "filename",
+                        "key": group[0].get("filename", ""),
+                        "calls": [{"id": c["id"], "filename": c.get("filename"), "created_at": c.get("created_at"), "rep_name": c.get("rep_name")} for c in group]
+                    })
+
+            for tx_key, group in tx_groups.items():
+                if len(group) > 1:
+                    ids = [c["id"] for c in group]
+                    if any(i in seen_ids for i in ids):
+                        continue
+                    seen_ids.update(ids)
+                    duplicates.append({
+                        "type": "content",
+                        "key": tx_key[:80] + "…",
+                        "calls": [{"id": c["id"], "filename": c.get("filename"), "created_at": c.get("created_at"), "rep_name": c.get("rep_name")} for c in group]
+                    })
+
+            self._ok({"total_calls": len(calls), "duplicate_groups": len(duplicates), "duplicates": duplicates})
+        except Exception as e:
+            self._err(500, str(e))
 
     def _check_filename_exists(self, filename):
         try:
@@ -2444,7 +2532,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             p = json.loads(body)
 
-            if p.get("check_duplicate", True):
+            if p.get("check_duplicate", True) or not p.get("force_save", False):
                 is_dup, dup_reason = self._check_duplicate(p.get("filename", ""), p.get("transcript", ""))
                 if is_dup:
                     self._ok({"duplicate": True, "reason": dup_reason}); return
@@ -2656,6 +2744,22 @@ class Handler(BaseHTTPRequestHandler):
             p = json.loads(body)
             supa("DELETE", f"transcript_corrections?id=eq.{p['id']}")
             self._ok({"deleted": True})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _update_transcript_correction(self, body):
+        try:
+            p = json.loads(body)
+            rid = p.get("id")
+            find_text = p.get("find_text", "").strip()
+            replace_text = p.get("replace_text", "").strip()
+            if not rid or not find_text or not replace_text:
+                self._err(400, "id, find_text, and replace_text are required"); return
+            supa("PATCH", f"transcript_corrections?id=eq.{rid}", {
+                "find_text": find_text,
+                "replace_text": replace_text,
+            })
+            self._ok({"updated": True})
         except Exception as e:
             self._err(500, str(e))
 
@@ -3269,6 +3373,106 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
 
+# ──────────────────────────────────────────────────────────────
+# DATA RETENTION — runs daily at startup and every 24 hours
+# ──────────────────────────────────────────────────────────────
+
+AUDIO_RETENTION_DAYS    = 60   # Delete audio files older than this (keep call record + scores)
+EXCLUDED_RETENTION_DAYS = 14   # Delete system-excluded calls older than this
+# Exclusion reasons that were set by a MANAGER (not auto) — these are NEVER auto-purged
+MANUAL_EXCLUSION_REASONS = {"manually excluded", "manager excluded", "excluded by manager"}
+
+def _retention_worker():
+    """Daily retention job — runs in background thread, loops every 24 hours."""
+    # Wait 2 minutes after startup before first run so server is fully ready
+    time.sleep(120)
+    while True:
+        try:
+            _run_retention()
+        except Exception as e:
+            log(f"  Retention job error: {e}")
+        # Sleep 24 hours before next run
+        time.sleep(86400)
+
+def _run_retention():
+    """Execute both retention passes: audio file cleanup and excluded call purge."""
+    log("  === Daily retention job starting ===")
+    _purge_old_audio()
+    _purge_excluded_calls()
+    log("  === Daily retention job complete ===")
+
+def _purge_old_audio():
+    """Remove audio files from storage for calls older than AUDIO_RETENTION_DAYS.
+    Keeps the call record, transcript, and scores — just removes the audio playback file."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=AUDIO_RETENTION_DAYS)).isoformat()
+        # Find calls that still have audio URLs and are old enough
+        old_calls = supa("GET", f"calls?audio_url=neq.&created_at=lt.{cutoff}&select=id,audio_url,filename&limit=500")
+        if not old_calls:
+            log(f"  Audio retention: no files older than {AUDIO_RETENTION_DAYS} days")
+            return
+        deleted = 0
+        failed = 0
+        for call in old_calls:
+            audio_url = call.get("audio_url", "")
+            if not audio_url:
+                continue
+            path_match = re.search(r'/call-audio/(.+?)(\?|$)', audio_url)
+            if not path_match:
+                continue
+            storage_path = path_match.group(1)
+            try:
+                supa_storage_delete("call-audio", [storage_path])
+                supa("PATCH", f"calls?id=eq.{call['id']}", {"audio_url": "", "storage_filename": ""})
+                deleted += 1
+            except Exception as e:
+                log(f"  Audio retention: failed to delete {storage_path}: {e}")
+                failed += 1
+        log(f"  Audio retention: deleted {deleted} audio files older than {AUDIO_RETENTION_DAYS} days ({failed} failed)")
+    except Exception as e:
+        log(f"  Audio retention error: {e}")
+
+def _purge_excluded_calls():
+    """Delete system-excluded call records older than EXCLUDED_RETENTION_DAYS.
+    Only purges calls excluded for automatic reasons (too short, voicemail, etc.)
+    Never purges calls that were manually excluded by a manager."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=EXCLUDED_RETENTION_DAYS)).isoformat()
+        # Get old excluded calls
+        excluded = supa("GET", f"calls?exclude_from_scoring=eq.true&created_at=lt.{cutoff}&select=id,exclusion_reason,filename,audio_url&limit=1000")
+        if not excluded:
+            log(f"  Excluded purge: no excluded calls older than {EXCLUDED_RETENTION_DAYS} days")
+            return
+        # Filter out manually excluded calls — never auto-delete those
+        to_delete = [
+            c for c in excluded
+            if (c.get("exclusion_reason") or "").lower().strip() not in MANUAL_EXCLUSION_REASONS
+        ]
+        if not to_delete:
+            log(f"  Excluded purge: all old excluded calls were manually excluded — skipping")
+            return
+        # Delete audio files first for any that have them
+        audio_deleted = 0
+        for call in to_delete:
+            audio_url = call.get("audio_url", "")
+            if not audio_url:
+                continue
+            path_match = re.search(r'/call-audio/(.+?)(\?|$)', audio_url)
+            if path_match:
+                try:
+                    supa_storage_delete("call-audio", [path_match.group(1)])
+                    audio_deleted += 1
+                except Exception:
+                    pass
+        # Bulk delete the call records
+        ids = [str(c["id"]) for c in to_delete]
+        id_list = ",".join(ids)
+        supa("DELETE", f"calls?id=in.({id_list})")
+        log(f"  Excluded purge: deleted {len(ids)} system-excluded calls older than {EXCLUDED_RETENTION_DAYS} days ({audio_deleted} audio files removed)")
+    except Exception as e:
+        log(f"  Excluded purge error: {e}")
+
+
 if __name__ == "__main__":
     log("=" * 55)
     log("  Little Guys Movers — Call Analyzer Server v14")
@@ -3288,6 +3492,11 @@ if __name__ == "__main__":
             log("  Vonage VBC: configured but autostart disabled — start manually from dashboard")
     else:
         log("  Vonage VBC: not configured (env vars missing) — integration dormant")
+
+    # Start daily retention job in background
+    retention_thread = threading.Thread(target=_retention_worker, daemon=True, name="retention")
+    retention_thread.start()
+    log("  Retention policy: audio purged after 60 days, excluded calls after 14 days")
 
     log(f"  Running at http://127.0.0.1:{PORT}")
     log("  Press Ctrl+C to stop\n")
