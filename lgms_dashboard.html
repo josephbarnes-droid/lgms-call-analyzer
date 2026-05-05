@@ -2461,6 +2461,26 @@ html, body {
   border-radius: 50%;
 }
 .profile-list.strengths li::before { background: var(--lg-green); }
+.profile-list li.coaching-point-link {
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  border-radius: 6px;
+  padding: 4px 8px 4px 14px;
+  margin: -4px -8px -4px -14px;
+}
+.profile-list li.coaching-point-link:hover {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+.profile-list li.coaching-point-link:hover::before { background: var(--blue); }
+.coaching-point-flash {
+  animation: coachFlash 1.6s ease;
+}
+@keyframes coachFlash {
+  0%   { background: rgba(227,177,36,0.35); }
+  60%  { background: rgba(227,177,36,0.35); }
+  100% { background: transparent; }
+}
 .profile-list-count {
   margin-left: auto;
   font-family: var(--font-label);
@@ -3593,7 +3613,17 @@ async function startStatusPollerInitial() {
   startStatusPoller();
 }
 async function loadCalls(){
-  try{const r=await fetch(API+'/calls');if(r.ok){let d=await r.json();if(SHARE_MODE&&SHARE_REP_IDS.length)d=d.filter(c=>SHARE_REP_IDS.includes(c.rep_name));allCalls=d;dataLoadedAt=new Date();updateStatusBar();}}catch(e){}
+  try{
+    const r=await fetch(API+'/calls?slim=1');
+    if(r.ok){
+      let d=await r.json();
+      if(SHARE_MODE&&SHARE_REP_IDS.length)d=d.filter(c=>SHARE_REP_IDS.includes(c.rep_name));
+      allCalls=d;
+      dataLoadedAt=new Date();
+      updateStatusBar();
+      console.log(`Loaded ${d.length} calls`);
+    }
+  }catch(e){console.error('loadCalls error:',e);}
 }
 async function refreshData(){
   g('sb-msg').textContent='Refreshing…';
@@ -4502,7 +4532,9 @@ function renderCallList(){
   // Auto-expand a specific call if requested via nav('library', {openCallId: '...'})
   if(window._pendingOpenCallId){
     const callId=window._pendingOpenCallId;
+    const coachPoint=window._pendingHighlightCoachPoint||null;
     window._pendingOpenCallId=null;
+    window._pendingHighlightCoachPoint=null;
     setTimeout(()=>{
       const row=g('row-'+callId);
       const detail=g('detail-'+callId);
@@ -4510,6 +4542,19 @@ function renderCallList(){
         row.classList.add('expanded');
         detail.style.display='grid';
         row.scrollIntoView({behavior:'smooth',block:'start'});
+        if(coachPoint){
+          // After the detail is visible, find and flash the matching coaching point li
+          setTimeout(()=>{
+            const coachItems=detail.querySelectorAll('.coaching-list li');
+            coachItems.forEach(li=>{
+              if(li.textContent.trim()===coachPoint||(li.textContent||'').includes(coachPoint)){
+                li.classList.add('coaching-point-flash');
+                li.scrollIntoView({behavior:'smooth',block:'center'});
+                setTimeout(()=>li.classList.remove('coaching-point-flash'),2000);
+              }
+            });
+          },300);
+        }
       }
     },80);
   }
@@ -4752,9 +4797,11 @@ function buildRow(c){
 
   // Banners (excl, low confidence, loss reason)
   const banners = `${isExcl?`<div class="excl-banner" style="background:var(--surface-sunken);border:1px solid var(--border);padding:10px 14px;border-radius:8px;font-size:12.5px;color:var(--ink2);margin-bottom:8px">⚠ Excluded — ${esc(c.exclusion_reason||c.call_type||'marked excluded')}</div>`:''}
+    ${(c.rep_name==='Unknown'||!c.rep_name)?`<div style="background:rgba(0,102,179,0.07);border:1px solid rgba(0,102,179,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--blue);margin-bottom:8px;display:flex;align-items:center;gap:12px">👤 Rep not identified for this call<button class="btn btn-s btn-sm" onclick="event.stopPropagation();openAssignRep('${c.id}')" style="margin-left:auto;flex-shrink:0">Assign Rep</button></div>`:''}
     ${c.evaluation_confidence&&c.evaluation_confidence<=5?`<div style="background:rgba(227,177,36,0.1);border:1px solid rgba(227,177,36,0.3);border-radius:8px;padding:10px 14px;font-size:12.5px;color:#8A6420;margin-bottom:8px">⚠ Low confidence (${c.evaluation_confidence}/10) — manager review recommended</div>`:''}
     ${c.loss_reason?`<div style="background:var(--lg-red-bg);border:1px solid rgba(201,37,44,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-red);margin-bottom:8px">Lost — ${esc(c.loss_reason.replace(/_/g,' '))}</div>`:''}
-    ${c.soft_pipeline_reason?`<div style="background:rgba(0,102,179,0.08);border:1px solid rgba(0,102,179,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-blue);margin-bottom:8px">Pipeline — ${esc(c.soft_pipeline_reason.replace(/_/g,' '))}</div>`:''}`;
+    ${c.soft_pipeline_reason?`<div style="background:rgba(0,102,179,0.08);border:1px solid rgba(0,102,179,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-blue);margin-bottom:8px">Pipeline — ${esc(c.soft_pipeline_reason.replace(/_/g,' '))}</div>`:''}
+    ${c.turned_away?`<div style="background:var(--lg-red-bg);border:1px solid rgba(201,37,44,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-red);margin-bottom:8px">⚠ Customer was turned away</div>`:''}`;
 
   // Tags + objections + keywords
   const tagsRow = `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">
@@ -5110,6 +5157,14 @@ async function clrOv(id){await updCall(id,{score_overrides:{}});}
 function handleRepClick(callId, repName){
   if(!repName||repName==='Unknown')openAssignRep(callId);
   else nav('profiles',{rep:repName});
+}
+
+function openCallWithCoachingPoint(repName, callId, coachingPoint) {
+  // Set library filters to this rep, then open the call and highlight the coaching point
+  libFilters = {rep: repName, out:'', score:'', search:'', sort:'newest', showExcl:false, attn:'', obj:'', kw:'', move_cat:'', confidence:''};
+  window._pendingOpenCallId = callId;
+  window._pendingHighlightCoachPoint = coachingPoint;
+  nav('library');
 }
 function openAssignRep(callId){
   const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(r=>r&&r!=='Unknown').sort();
@@ -5608,7 +5663,12 @@ function openRepProfile(repName){
       ${topCoach.length ? `<div class="profile-list-panel">
         <div class="profile-list-panel-title">Recurring coaching points</div>
         <ul class="profile-list">
-          ${topCoach.map(([p,n]) => `<li>${esc(p)}<span class="profile-list-count">${n}×</span></li>`).join('')}
+          ${topCoach.map(([p,n]) => {
+            // Find the most recent call that has this coaching point
+            const callWithPoint = sorted.find(c => (c.coaching_points||[]).includes(p));
+            const callId = callWithPoint ? callWithPoint.id : null;
+            return `<li class="${callId ? 'coaching-point-link' : ''}" ${callId ? `onclick="openCallWithCoachingPoint('${esc(repName)}','${callId}','${esc(p.replace(/'/g,"\\'"))}')" title="${callId ? 'Click to open call' : ''}"` : ''}>${esc(p)}<span class="profile-list-count">${n}×</span></li>`;
+          }).join('')}
         </ul>
       </div>` : ''}
     </div>` : ''}
@@ -5767,6 +5827,16 @@ function renderManagement(){
         </div>
         <div class="mgmt-card">
           <div class="mgmt-card-head">
+            <div class="mgmt-card-title">Duplicate Calls</div>
+          </div>
+          <div class="mgmt-card-body">
+            <p style="font-size:12px;color:var(--ink3);margin:0 0 12px">Scan for calls that were uploaded or analyzed more than once.</p>
+            <button class="btn btn-s btn-sm" onclick="findDuplicateCalls()" id="find-dup-btn">🔍 Scan for duplicates</button>
+            <div id="dup-calls-results" style="margin-top:12px"></div>
+          </div>
+        </div>
+        <div class="mgmt-card">
+          <div class="mgmt-card-head">
             <div class="mgmt-card-title">Last Bulk Re-Analyze</div>
           </div>
           <div class="mgmt-card-body">
@@ -5858,6 +5928,46 @@ async function runDedup(){
 async function acceptDedup(canonical,variants){
   for(const v of variants){if(v===canonical)continue;try{await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:v,new_name:canonical})});allCalls.forEach(c=>{if(c.rep_name===v)c.rep_name=canonical;});}catch(e){}}
   renderManagement();
+}
+
+async function findDuplicateCalls(){
+  const btn=g('find-dup-btn'),res=g('dup-calls-results');
+  if(!btn||!res)return;
+  btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Scanning…';
+  try{
+    const r=await fetch(API+'/find_duplicates');
+    const data=await r.json();
+    btn.disabled=false;btn.textContent='🔍 Scan for duplicates';
+    if(!data.duplicates?.length){
+      res.innerHTML=`<div class="msg-ok">✓ No duplicates found in ${data.total_calls} calls.</div>`;
+      return;
+    }
+    res.innerHTML=data.duplicates.map(group=>{
+      const calls=group.calls.map((c,i)=>`<div style="font-size:11px;color:var(--ink2);padding:4px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <span>${esc(c.filename||c.id)} · ${esc(c.rep_name||'Unknown')} · ${fmt(c.created_at)}</span>
+        ${i>0?`<button class="btn btn-d btn-xs" onclick="deleteDupCall('${c.id}',this)">Delete</button>`:'<span class="bdg" style="font-size:9px">Keep</span>'}
+      </div>`).join('');
+      return`<div style="background:var(--rl);border:1.5px solid #F0BABA;border-radius:9px;padding:12px;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px">DUPLICATE (${group.type})</div>
+        <div style="font-size:10px;color:var(--ink3);margin-bottom:6px;word-break:break-all">${esc(group.key)}</div>
+        ${calls}
+      </div>`;
+    }).join('');
+  }catch(e){
+    btn.disabled=false;btn.textContent='🔍 Scan for duplicates';
+    res.innerHTML=`<div class="msg-err">${e.message}</div>`;
+  }
+}
+
+async function deleteDupCall(id,btn){
+  if(!confirm('Delete this duplicate call? This cannot be undone.'))return;
+  btn.disabled=true;btn.textContent='…';
+  try{
+    await fetch(API+'/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+    allCalls=allCalls.filter(c=>c.id!==id);
+    btn.closest('div').remove();
+    showToast('Duplicate deleted','success');
+  }catch(e){btn.disabled=false;btn.textContent='Delete';alert(e.message);}
 }
 async function checkUnscored(){
   const el=g('unscored-results');
@@ -6393,7 +6503,7 @@ function renderTxCorrections() {
             <col />
             <col />
             <col style="width:130px" />
-            <col style="width:80px" />
+            <col style="width:120px" />
           </colgroup>
           <thead><tr>
             <th>Find</th>
@@ -6401,11 +6511,11 @@ function renderTxCorrections() {
             <th>Added</th>
             <th></th>
           </tr></thead>
-          <tbody>${txCorrections.map(r => `<tr>
+          <tbody>${txCorrections.map(r => `<tr id="txrule-row-${r.id}">
             <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--lg-red)">${esc(r.find_text)}</td>
             <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--lg-green-dark)">${esc(r.replace_text)}</td>
             <td style="font-size:12px;color:var(--ink3)">${fmt(r.created_at)}</td>
-            <td style="text-align:right"><button class="btn btn-d btn-xs" onclick="deleteTxRule('${r.id}')">Delete</button></td>
+            <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end"><button class="btn btn-g btn-xs" onclick="editTxRule('${r.id}','${esc(r.find_text.replace(/'/g,"\\'"))}','${esc(r.replace_text.replace(/'/g,"\\'"))}')">Edit</button><button class="btn btn-d btn-xs" onclick="deleteTxRule('${r.id}')">Delete</button></td>
           </tr>`).join('')}
           </tbody>
         </table>` : '<div class="empty"><span class="empty-ico">🔤</span><p>No rules yet.<br>Edit a transcript to add your first correction rule.</p></div>'}
@@ -6440,6 +6550,42 @@ async function deleteTxRule(id) {
     txCorrections = txCorrections.filter(r => r.id !== id);
     renderTxCorrections();
   } catch(e) { alert(e.message); }
+}
+
+function editTxRule(id, currentFind, currentReplace) {
+  // Replace the row with an inline edit form
+  const row = document.getElementById('txrule-row-' + id);
+  if (!row) return;
+  row.innerHTML = `
+    <td colspan="2">
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="edit-find-${id}" class="ovr-inp" value="${esc(currentFind)}" placeholder="Find text" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:12px" />
+        <span style="color:var(--ink3);font-size:13px">→</span>
+        <input id="edit-replace-${id}" class="ovr-inp" value="${esc(currentReplace)}" placeholder="Replace with" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:12px" />
+      </div>
+    </td>
+    <td></td>
+    <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end">
+      <button class="btn btn-p btn-xs" onclick="saveTxRuleEdit('${id}')">Save</button>
+      <button class="btn btn-g btn-xs" onclick="renderTxCorrections()">Cancel</button>
+    </td>`;
+}
+
+async function saveTxRuleEdit(id) {
+  const newFind = document.getElementById('edit-find-' + id)?.value?.trim();
+  const newReplace = document.getElementById('edit-replace-' + id)?.value?.trim();
+  if (!newFind || !newReplace) { alert('Both fields required'); return; }
+  try {
+    const r = await fetch(API + '/transcript_corrections/update', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ id, find_text: newFind, replace_text: newReplace })
+    });
+    if (!r.ok) throw new Error('Server returned ' + r.status);
+    // Update local cache
+    const idx = txCorrections.findIndex(c => c.id === id);
+    if (idx >= 0) { txCorrections[idx].find_text = newFind; txCorrections[idx].replace_text = newReplace; }
+    renderTxCorrections();
+  } catch(e) { alert('Save failed: ' + e.message); }
 }
 
 
