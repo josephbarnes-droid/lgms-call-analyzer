@@ -1551,8 +1551,10 @@ def _process_single_file(audio_bytes, filename, keyterms, tx_corrections, cached
     log(f"  Save failed after 2 attempts for {filename}: {last_err}")
     raise last_err
 
-def _batch_upload_worker(zip_bytes):
-    """Background worker — extract ZIP, process each audio file, save to DB."""
+def _batch_upload_worker(zip_path):
+    """Background worker — read ZIP from disk, process each audio file, save to DB.
+    zip_path is a temp file written by _batch_upload_start. We delete it when done.
+    """
     global _batch_job
     try:
         # ── One-time setup: cache everything that is constant across the batch ──
@@ -1574,14 +1576,12 @@ def _batch_upload_worker(zip_bytes):
             cached_reps = []
 
         # ── Index audio files from ZIP (names only — no bytes loaded yet) ──
-        # We intentionally do NOT read audio bytes here. Loading all files into
-        # memory at once caused OOM crashes on large batches (871 files = >2GB).
-        # Instead we keep the ZipFile open and read each file just before processing,
-        # then let Python GC release the bytes before the next file.
+        # Opening directly from disk means the ZIP is never fully in RAM.
+        # We read one audio file at a time inside the loop and release it after.
         audio_exts = {".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".webm", ".mpeg", ".mpga"}
         audio_names = []  # list of (zip_entry_name, basename) — no bytes yet
         try:
-            zf_index = zipfile.ZipFile(io.BytesIO(zip_bytes))
+            zf_index = zipfile.ZipFile(zip_path, "r")
             for name in sorted(zf_index.namelist()):
                 if name.startswith("__") or name.startswith(".") or name.endswith("/"):
                     continue
@@ -1623,6 +1623,8 @@ def _batch_upload_worker(zip_bytes):
                     _batch_job["current"] = ""
                     log(f"  Batch upload stopped by user: {_batch_job['processed']} processed before halt")
                     zf_index.close()
+                    try: os.unlink(zip_path)
+                    except: pass
                     return
 
             with _batch_lock:
@@ -1666,7 +1668,9 @@ def _batch_upload_worker(zip_bytes):
                         _batch_job["current"] = ""
 
         zf_index.close()
-        zip_bytes = None  # Release the raw ZIP from memory too
+        # Delete the temp file — job is done, free the disk space
+        try: os.unlink(zip_path)
+        except: pass
 
         with _batch_lock:
             _batch_job["status"] = "complete"
@@ -1681,6 +1685,8 @@ def _batch_upload_worker(zip_bytes):
             _batch_job["current"] = str(e)
         log(f"  Batch upload worker error: {e}")
         log(f"  Traceback: {traceback.format_exc()[-600:]}")
+        try: os.unlink(zip_path)
+        except: pass
 
 # ──────────────────────────────────────────────
 # VONAGE VBC — OAUTH, API CLIENT, POLLING WORKER
@@ -2242,6 +2248,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
+        path = self.path.split("?")[0]
+
+        # Special case: batch upload can be very large (hundreds of MB).
+        # Stream it directly to a temp file instead of reading into RAM.
+        if path == "/batch_upload/start":
+            self._batch_upload_start_streamed(n)
+            return
+
         body = self.rfile.read(n)
         path = self.path.split("?")[0]
 
@@ -3009,62 +3023,105 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         except Exception as e:
             self._err(500, str(e))
 
-    def _batch_upload_start(self, body):
-        """Accept raw ZIP bytes via multipart or base64 JSON, start background processing."""
+    def _batch_upload_start_streamed(self, content_length):
+        """Stream the incoming ZIP directly to disk — never hold it fully in RAM."""
         global _batch_job
         with _batch_lock:
             if _batch_job["status"] == "running":
                 self._ok({"message": "Already running", "status": _batch_job}); return
-        # Reciprocal block: don't start batch upload while reanalyze is running
         if _reanalyze_job.get("status") == "running":
-            self._ok({"message": "Bulk re-analyze in progress — wait for it to finish before uploading new calls", "blocked": True}); return
+            self._ok({"message": "Bulk re-analyze in progress — wait for it to finish", "blocked": True}); return
 
         content_type = self.headers.get("Content-Type", "")
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="lgms_batch_")
         try:
             if "multipart/form-data" in content_type:
-                # Multipart upload — robustly extract the first file part
+                # Stream the multipart body to disk in chunks, then parse boundary
+                CHUNK = 256 * 1024  # 256KB chunks
+                with os.fdopen(tmp_fd, "wb") as tmp_f:
+                    remaining = content_length
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(CHUNK, remaining))
+                        if not chunk:
+                            break
+                        tmp_f.write(chunk)
+                        remaining -= len(chunk)
+                tmp_fd = None  # fd closed by context manager
+
+                # Now parse the multipart from the temp file to extract the ZIP part
                 boundary = re.search(r'boundary=([^\s;]+)', content_type)
                 if not boundary:
-                    self._err(400, "Missing boundary in multipart"); return
+                    os.unlink(tmp_path); self._err(400, "Missing boundary"); return
                 bound = boundary.group(1).encode()
+
+                # Read back from disk to find the ZIP data within the multipart envelope
+                with open(tmp_path, "rb") as f:
+                    raw = f.read()
+                os.unlink(tmp_path)  # delete the full multipart dump
+
+                # Extract the actual ZIP bytes from the multipart
                 zip_bytes = None
-                # Split on boundary, skip preamble
-                parts = body.split(b"--" + bound)
-                for part in parts[1:]:  # skip preamble
-                    if part in (b"--\r\n", b"--", b"\r\n"):
-                        continue  # epilogue
+                parts = raw.split(b"--" + bound)
+                for part in parts[1:]:
+                    if part in (b"--\r\n", b"--", b"\r\n"): continue
                     header_end = part.find(b"\r\n\r\n")
-                    if header_end < 0:
-                        continue
-                    headers_raw = part[:header_end].decode("utf-8", errors="replace")
+                    if header_end < 0: continue
                     data = part[header_end+4:]
-                    # Strip trailing boundary marker
-                    if data.endswith(b"\r\n"):
-                        data = data[:-2]
-                    # Accept any file field — not just .zip — in case user renames file
+                    if data.endswith(b"\r\n"): data = data[:-2]
                     if b'filename=' in part[:header_end] and len(data) > 100:
                         zip_bytes = data
-                        log(f"  Multipart upload: received {len(zip_bytes):,} bytes from field headers: {headers_raw[:120]}")
                         break
-                if not zip_bytes:
-                    self._err(400, "No file found in multipart upload"); return
-            else:
-                # JSON with base64 (legacy fallback)
-                import base64
-                p = json.loads(body)
-                zip_bytes = base64.b64decode(p.get("zip", ""))
+                raw = None  # release full multipart body
 
-            if len(zip_bytes) < 100:
-                self._err(400, "ZIP file too small or empty"); return
+                if not zip_bytes or len(zip_bytes) < 100:
+                    self._err(400, "No ZIP found in multipart upload"); return
+
+                # Write the extracted ZIP bytes to a fresh temp file
+                tmp_fd2, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="lgms_zip_")
+                with os.fdopen(tmp_fd2, "wb") as f:
+                    f.write(zip_bytes)
+                zip_size = len(zip_bytes)
+                zip_bytes = None  # release now — it's on disk
+
+            else:
+                # JSON/base64 path — less common but keep working
+                import base64
+                CHUNK = 256 * 1024
+                with os.fdopen(tmp_fd, "wb") as tmp_f:
+                    remaining = content_length
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(CHUNK, remaining))
+                        if not chunk: break
+                        tmp_f.write(chunk)
+                        remaining -= len(chunk)
+                tmp_fd = None
+                with open(tmp_path, "rb") as f:
+                    raw = f.read()
+                os.unlink(tmp_path)
+                p = json.loads(raw); raw = None
+                zip_bytes = base64.b64decode(p.get("zip", "")); p = None
+                if len(zip_bytes) < 100:
+                    self._err(400, "ZIP too small"); return
+                tmp_fd2, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="lgms_zip_")
+                with os.fdopen(tmp_fd2, "wb") as f:
+                    f.write(zip_bytes)
+                zip_size = len(zip_bytes)
+                zip_bytes = None
 
         except Exception as e:
-            self._err(400, f"Failed to parse upload: {e}"); return
+            if tmp_fd is not None:
+                try: os.close(tmp_fd)
+                except: pass
+            if os.path.exists(tmp_path):
+                try: os.unlink(tmp_path)
+                except: pass
+            self._err(400, f"Upload failed: {e}"); return
 
         with _batch_lock:
             _batch_job = {
                 "status": "running",
                 "total": 0, "processed": 0, "skipped": 0, "errors": 0,
-                "current": "Extracting ZIP...",
+                "current": "Indexing ZIP...",
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "finished_at": None,
                 "last_heartbeat": datetime.now(timezone.utc).isoformat(),
@@ -3072,10 +3129,14 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
                 "stop_requested": False,
             }
 
-        t = threading.Thread(target=_batch_upload_worker, args=(zip_bytes,), daemon=True)
+        t = threading.Thread(target=_batch_upload_worker, args=(tmp_path,), daemon=True)
         t.start()
-        log(f"  Batch upload started: {len(zip_bytes):,} bytes")
+        log(f"  Batch upload started: {zip_size:,} bytes at {tmp_path}")
         self._ok({"message": "Batch upload started", "status": _batch_job})
+
+    def _batch_upload_start(self, body):
+        """Legacy entry point — should not be called now that do_POST routes to _batch_upload_start_streamed."""
+        self._err(500, "Use the streamed upload path")
 
     def _batch_upload_status(self):
         with _batch_lock:
