@@ -1,3564 +1,7254 @@
-"""
-Little Guys Movers - Call Analyzer Server v12
-=============================================
-Required environment variables:
-  ANTHROPIC_API_KEY  - Anthropic API key
-  SUPABASE_URL       - Supabase project URL
-  SUPABASE_KEY       - Supabase anon/publishable key
-  DEEPGRAM_API_KEY   - Deepgram API key for transcription
-  OPENAI_API_KEY     - optional fallback if Deepgram unavailable
-  PORT               - optional, defaults to 8765
-"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LGMS Call Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@300;400;500;600;700;800&family=Roboto:wght@300;400;500;700&family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root {
+  /* === Brand-aligned light theme === */
+  --bg: #F4F1E8;
+  --bg2: #FAF8F2;
+  --bg3: #FFFFFF;
+  --card: #FFFFFF;
+  --card2: #FAF8F2;
+  --surface: #FAF8F2;
+  --surface2: #FFFFFF;
+  --surface-sunken: #EFEBDF;
 
-import os, json, urllib.request, urllib.error, urllib.parse, tempfile, mimetypes
-import zipfile, io, secrets, re, uuid, threading, time, sys
-from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
-from datetime import datetime, timezone, timedelta
+  /* Brand greens — official LG */
+  --lg-green: #007236;
+  --lg-green-dark: #005F2D;
+  --lg-green-light: #409568;
+  --lg-green-bg: #E0EBDF;
+  --lg-green-soft: #C9DBC5;
 
-# Force stdout flush immediately so Render logs show in real time
-sys.stdout.reconfigure(line_buffering=True)
+  /* Legacy green aliases (used by JS-injected styles & many existing classes) */
+  --g: #007236;
+  --gd: #005F2D;
+  --gm: #007236;
+  --gl: rgba(0, 114, 54, .08);
+  --g2: rgba(0, 114, 54, .14);
+  --g-glow: 0 0 0 transparent;
+  --g-glow2: 0 0 0 transparent;
 
-def log(msg):
-    print(msg, flush=True)
+  /* Borders & lines */
+  --border: rgba(26, 26, 26, .08);
+  --border2: rgba(26, 26, 26, .14);
+  --border3: rgba(26, 26, 26, .22);
 
-API_KEY      = os.environ.get("ANTHROPIC_API_KEY", "")
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-DEEPGRAM_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
-OPENAI_KEY   = os.environ.get("OPENAI_API_KEY", "")  # fallback
-PORT         = int(os.environ.get("PORT", 8765))
+  /* Text */
+  --ink: #1A1A1A;
+  --ink2: #404040;
+  --ink3: #737373;
+  --ink4: #8A8A8A;
+  --ink5: #B3B3B3;
 
-# Global semaphore — max 1 concurrent reanalysis call (prevents memory exhaustion on Render standard plan)
-# Single file uploads and batch uploads share this semaphore but are unaffected since they're user-initiated
-_analysis_semaphore = threading.Semaphore(1)
+  /* Brand accents */
+  --blue: #0066B3;
+  --blue-light: #4695CB;
+  --bl: rgba(0, 102, 179, .10);
+  --bm: #0066B3;
 
-# Keyterm cache — rebuilt every 30 minutes
-_keyterm_cache = {"terms": [], "built_at": 0}
-_keyterm_lock = threading.Lock()
+  --amber: #E3B124;
+  --amber-light: #F1CB6E;
+  --al: rgba(227, 177, 36, .12);
+  --am: #E3B124;
 
-# Background re-analyze job state
-_reanalyze_job = {
-    "status": "idle",
-    "total": 0, "processed": 0, "current": "", "errors": 0,
-    "started_at": None, "finished_at": None,
-    "stop_requested": False,
+  --red: #C9252C;
+  --red-light: #F2625F;
+  --rl: rgba(201, 37, 44, .08);
+
+  --sidebar-w: 240px;
+  --r: 8px;
+  --rl2: 12px;
+  --rl3: 14px;
+
+  --sh: 0 1px 2px rgba(26,26,26,.04), 0 1px 3px rgba(26,26,26,.06);
+  --sh2: 0 2px 4px rgba(26,26,26,.04), 0 4px 12px rgba(26,26,26,.06);
+  --sh3: 0 8px 24px rgba(26,26,26,.08), 0 2px 6px rgba(26,26,26,.04);
+
+  /* Typography */
+  --font-display: 'Roboto Slab', Georgia, serif;
+  --font-ui: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-label: 'Oswald', 'Roboto', sans-serif;
 }
-_reanalyze_lock = threading.Lock()
-
-# Background batch upload job state
-_batch_job = {
-    "status": "idle",
-    "total": 0, "processed": 0, "skipped": 0, "errors": 0,
-    "current": "", "started_at": None, "finished_at": None,
-    "last_heartbeat": None,  # Updated on every file iteration — lets dashboard detect stalled workers
-    "error_list": [],
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
 }
-_batch_lock = threading.Lock()
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border3); }
 
-# ──────────────────────────────────────────────
-# VONAGE VBC INTEGRATION
-# ──────────────────────────────────────────────
-# Env vars (all optional — integration is dormant if any are missing):
-#   VONAGE_CLIENT_ID       — OAuth client ID from VBC API dashboard
-#   VONAGE_CLIENT_SECRET   — OAuth client secret
-#   VONAGE_ACCOUNT_ID      — VBC account identifier (used in API URL paths)
-#   VONAGE_API_BASE        — Base URL for VBC API
-#                            (default https://api.vonage.com — confirm in dashboard)
-#   VONAGE_TOKEN_URL       — OAuth token endpoint
-#                            (default https://api.vonage.com/oauth2/token — confirm)
-#   VONAGE_POLL_INTERVAL   — Seconds between polls (default 1800 = 30 min)
-#   VONAGE_AUTOSTART       — "1" to auto-start polling at boot (default "1")
+.shell { display: flex; height: 100vh; overflow: hidden; }
 
-VONAGE_CLIENT_ID     = os.environ.get("VONAGE_CLIENT_ID", "")
-VONAGE_CLIENT_SECRET = os.environ.get("VONAGE_CLIENT_SECRET", "")
-VONAGE_ACCOUNT_ID    = os.environ.get("VONAGE_ACCOUNT_ID", "")
-VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.vonage.com").rstrip("/")
-VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://api.vonage.com/oauth2/token")
-VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 1800))  # 30 min default
-VONAGE_AUTOSTART     = os.environ.get("VONAGE_AUTOSTART", "1") == "1"
-
-# OAuth token cache. Refreshed automatically when expired or on 401.
-_vonage_token_cache = {"token": None, "expires_at": 0}
-_vonage_token_lock = threading.Lock()
-
-# Polling worker state. Mirrors the pattern used by _reanalyze_job and _batch_job.
-_vonage_job = {
-    "status": "idle",        # idle | running | paused | error | disabled
-    "started_at": None,
-    "last_poll_at": None,
-    "last_poll_succeeded": None,
-    "last_error": None,
-    "ingested_total": 0,     # since worker started
-    "ingested_today": 0,
-    "skipped_total": 0,
-    "errors_total": 0,
-    "stop_requested": False,
-    "pause_requested": False,
+/* === SIDEBAR === */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  padding-top: 4px;
 }
-_vonage_lock = threading.Lock()
-_vonage_thread = None  # Holds the background thread reference; check if alive before spawning
-
-# Whether VBC env is configured at all
-def _vonage_configured():
-    return bool(VONAGE_CLIENT_ID and VONAGE_CLIENT_SECRET and VONAGE_ACCOUNT_ID)
-
-
-# ──────────────────────────────────────────────
-# CLAUDE PROMPT
-# ──────────────────────────────────────────────
-
-def build_prompt(transcript, filename, corrections=None, is_diarized=False):
-    """Build Claude prompt v12 — new scoring formula, hourly/pointed, timeline-weighted closing, improved rep detection."""
-
-    corrections_block = ""
-    if corrections:
-        examples = []
-        for c in corrections[:50]:
-            note = c.get("manager_note", "")
-            examples.append(
-                f"- {c['category']}: scored {c['original_score']} but correct score is {c['corrected_score']}"
-                + (f" — reason: {note}" if note else "")
-            )
-        if examples:
-            corrections_block = "\n\nRECENT SCORING CORRECTIONS (calibrate your scoring using these):\n" + "\n".join(examples) + "\n"
-
-    diarization_note = ""
-    if is_diarized:
-        diarization_note = """
-TRANSCRIPT FORMAT: This transcript has speaker labels (Speaker 0, Speaker 1, etc.).
-- Speaker 0 is typically the rep (answers the phone, introduces themselves first)
-- Speaker 1 is typically the customer
-- Use these labels to accurately determine talk ratio and who said what
-- Rep name detection: look for Speaker 0's introduction context only
-"""
-
-    prompt = f"""You are a sales call evaluator for Little Guys Movers (LGMS).
-{corrections_block}{diarization_note}
-CALIBRATION EXAMPLES — anchor your scoring to these LGMS standards:
-
-EXCELLENT CALL (9/10 overall) — Alex, storage-to-apartment move:
-- Assumed the close: "I can get started first thing tomorrow morning at 8 o'clock" — moved straight to scheduling
-- Rapport: immediately acknowledged customer's stress about last-minute situation, warm and confident — 9/10
-- Closing: 10/10 — never asked "do you want to book?", just booked it (assumed close = minimum 7 base)
-- Salesmanship: mentioned "clothes in the dresser" naturally, background checked movers — 8/10
-- Price: delivered confidently with pointed flat-rate framing — 8/10
-Key lesson: assume the close, move with confidence, acknowledge the customer's situation
-
-GOOD CALL (8/10 overall) — Dylan, large house move:
-- Thorough room-by-room inventory, all right detail questions
-- Closing: "I could have movers there as early as 8 a.m. next Thursday, if you wanted to get that set up" — offered but waited for confirmation — 8/10
-- Salesmanship: 5/10 — missed obvious opportunities (clothes in dresser, disassembly, background checks)
-- Excellent expectation setting: explained email, attachments, day-of 7:45 call — 9/10 professionalism
-Key lesson: thorough and professional but missed salesmanship
-
-AVERAGE CALL (6/10 overall) — JD, studio apartment move:
-- Good inventory detail questions
-- Closing: "Do you want to go ahead and get this scheduled?" — question not assumption — 6/10
-- Salesmanship: mentioned clothes in dresser but only as afterthought at end — 4/10
-- Missed customer's anxiety about unknown floor situation — no reassurance given
-Key lesson: closing as a question instead of assumption costs points; missed rapport hurts salesmanship
-
-POOR CALL (4/10 overall) — James, small marketplace pickup:
-- Customer said "I'm going to try and find another option" — James said "completely understand" TWICE and let him walk — 1/10 closing
-- MISSED RAPPORT: customer said "the guy that was supposed to help me decided to leave town" — James gave no acknowledgment
-- Salesmanship: nothing — 2/10
-- Price delivered without any value framing first
-Key lesson: never let a customer walk without attempting to overcome the objection. Always acknowledge emotional moments.
-
-WHAT A 10/10 CALL LOOKS LIKE:
-- Rep introduces themselves and gets customer name within first 30 seconds
-- Acknowledges any stress or difficulty the customer mentions immediately and warmly
-- Controls the call with confidence while feeling natural and unhurried
-- Gets all required information for the move type
-- Delivers price confidently with value framing first
-- Uses multiple salesmanship phrases naturally throughout
-- Assumes the close — moves to scheduling without asking permission
-- Overcomes any objection with specific counters (FCFS, no deposit, availability, value)
-- Sets clear expectations for confirmation and day-of communication
-- Customer feels like they made the right choice
-
----
-
-STEP 1 — CLASSIFY CALL:
-- move_category: "standard" | "specialty" | "unload_only" | "in_house" | "commercial" | "storage" | "non_move"
-- call_type: "sales_estimate" | "follow_up" | "complaint" | "booking_confirmation" | "non_sales" | "too_short" | "other"
-- word_count: approximate
-- exclude_from_scoring: true if fewer than 80 words OR clearly not a sales call OR disconnected
-IMPORTANT: Even if excluded, still detect turned_away.
-
-STEP 2 — DETECT REP NAME:
-The rep ANSWERS the call — they do not initiate it.
-- The rep typically says "Thank you for calling Little Guys, this is [name]" or similar greeting
-- If diarized, Speaker 0 is almost always the rep — look for their greeting/introduction
-- Rep name is a FIRST NAME spoken in an introduction/greeting context
-- If a name appears later but NOT in an introduction, it is likely the customer
-- Cross-reference against context: if the detected name sounds like it came from the customer side, return "Unknown"
-- PREFER returning "Unknown" over a wrong guess — a wrong name creates phantom reps
-Return FIRST NAME ONLY. Return "Unknown" if not confident.
-
-STEP 3 — CALL QUALITY:
-- "disconnected": abrupt ending, "Hello? Hello?" patterns, very short
-- "poor_audio": heavy [inaudible] density (5+ occurrences), one-sided
-- "normal": otherwise
-
-STEP 4 — FLAGS:
-- turned_away: LGMS could NOT accommodate — "we're booked", "no availability", "can't do that date"
-- onsite_suggested: onsite visit/estimate mentioned
-- is_continuation: "calling back about", "as we discussed", "following up"
-
-STEP 5 — OUTCOME & PIPELINE:
-- call_outcome: "booked" | "estimate_sent" | "soft_pipeline" | "lost" | "unknown"
-- soft_pipeline: customer interested but not ready — needs partner, no exact date, needs to think
-- loss_reason (if lost): "price_too_high" | "went_with_competitor" | "wrong_timing" | "no_availability" | "just_shopping" | "other" | ""
-- soft_pipeline_reason (if soft_pipeline): "needs_partner" | "no_exact_date" | "needs_to_think" | "will_call_back" | "other" | ""
-
-STEP 6 — MOVE TIMELINE:
-Detect when customer wants to move. Classify move_timeline:
-- "exact_date": customer provided a specific date → assumed close expected regardless of how far out
-- "this_week": within 7 days → must attempt to book on call, overcome objections
-- "two_to_four_weeks": 2-4 weeks → strong close + objection handling expected
-- "one_to_three_months": 1-3 months → close attempt expected, lighter pressure
-- "three_plus_months": 3+ months → attempt appreciated, soft pipeline acceptable
-- "unknown": no clear timeline — look for clues (seasons, life events, vague references)
-
-STEP 7 — PRICING MODEL DETECTION (CRITICAL — read carefully):
-
-Output one of: "hourly", "pointed", or "unknown"
-
-SCAN THE ENTIRE TRANSCRIPT for pricing language before deciding.
-Pricing might be discussed for only 30 seconds in a long call.
-
-═══════════════════════════════════════════════════════════════════
-HOURLY INDICATORS (any one of these = hourly):
-═══════════════════════════════════════════════════════════════════
-
-Strong signals:
-- Rep says "hourly rate", "hourly", "per hour", "an hour",
-  "$X an hour", "$X per hour"
-- Rep mentions an "X hour minimum" (2-hour, 1.5-hour, etc.)
-- Rep mentions "rated for the quarter hour" or proration
-- Rep says "if it takes less than X hours you'll pay less"
-- Rep mentions a mileage fee separate from the rate
-- Rep gives an estimated number of hours the job will take
-  ("about 2 hours", "should take 2 to 3 hours", "predicting 4 hours")
-- Rep gives a per-guy rate ("$1.30 an hour for two guys")
-
-Combined signal pattern (both must be present):
-- Quote includes a time component (e.g. "for 2 hours, that's $X")
-  even if no explicit per-hour rate is stated, AND
-- Cash/card price split given for that time-bounded quote
-
-═══════════════════════════════════════════════════════════════════
-POINTED / FLAT-RATE INDICATORS (any one of these = pointed):
-═══════════════════════════════════════════════════════════════════
-
-Strong signals:
-- Rep says "flat fee", "flat rate", "fixed price", "exact price",
-  "exact cost"
-- Rep says "based on inventory", "based on what we discussed",
-  "based on what we move"
-- Rep says "time doesn't affect that", "regardless of how long",
-  "whether it takes 2 hours or 5"
-- Single dollar figure quoted for the entire job with NO time
-  component mentioned at all
-- Multiple price options that differ only by per-item add-on
-  (e.g., "$1,210 without boxes, $1,398 with 50 boxes" where the
-  difference is a fixed per-box amount and NO time impact discussed)
-
-Default rules:
-- Long-distance / interstate moves are POINTED unless the rep
-  explicitly quotes hourly mechanics (federal regs essentially
-  require flat-rate for interstate)
-- Multi-day moves are POINTED unless explicitly hourly
-
-═══════════════════════════════════════════════════════════════════
-DISAMBIGUATION (when both kinds of language appear):
-═══════════════════════════════════════════════════════════════════
-
-Look at HOW THE FINAL QUOTE WAS DELIVERED. Tiebreaker priority:
-
-1. Mileage fee mentioned → HOURLY (only exists on hourly jobs)
-2. Quarter-hour proration mentioned → HOURLY
-3. "Time doesn't affect" or "regardless of how long" → POINTED
-4. "Flat" or "exact" used as adjective for the price → POINTED
-5. Multi-quote with per-item differential → POINTED
-6. Quote tied to specific number of hours → HOURLY
-7. Quote stated as fixed total with no time framing → POINTED
-
-═══════════════════════════════════════════════════════════════════
-UNKNOWN — use ONLY in these cases:
-═══════════════════════════════════════════════════════════════════
-
-- No price was given on the call at all
-- Price was discussed only in the abstract ("we'd need to do an
-  estimate") with no numbers
-- Rep gave a price but FAILED to anchor it as either model AND none
-  of the above patterns apply (this case requires a coaching point —
-  see scoring section)
-- Audio quality too poor to determine
-
-DO NOT use "unknown" just because the rep didn't say a magic word.
-If a price was given, work through the indicators above to decide.
-If after working through them the model is still genuinely unclear,
-unknown is correct AND a coaching point should be added noting that
-the rep needs to clearly anchor the pricing model.
-
-STEP 8 — CLOSING ANALYSIS:
-COUNT close_attempts — how many times did rep explicitly try to book/schedule?
-ASSUMED CLOSE: if rep moved directly to scheduling without asking permission (e.g. "Let me get you on for Saturday" not "Do you want to book?"), closing score starts at minimum 7.
-
-CLOSING LANGUAGE (strong signals):
-"I have a spot available", "let me get you on the board/schedule/calendar",
-"first come first serve", "no cancellation fee", "no deposit to hold a spot",
-"save/hold that for you", "get you taken care of", "let me go ahead and book"
-
-OBJECTION HANDLING:
-- overcome: rep countered with specific response and advanced conversation
-- abandoned: rep accepted without counter ("ok call us back", "completely understand", "no problem")
-
-Ideal counters:
-- Need to think → "No deposit required — would it make sense to hold the spot while you decide?"
-- Need to check with partner → "No deposit to hold — want me to lock that in while you check?"
-- Price too high → "What were you expecting? Let me see what I can do"
-- Already have a quote → "What are they quoting? We'd love to earn your business today"
-
-FOLLOW-UP LANGUAGE (important for soft pipeline):
-Good reps mention: follow-up call timeframe, first come first serve, no deposit to hold.
-Missing these on soft pipeline = coaching point.
-
-pipeline_recovery_quality (soft_pipeline only, 1-10):
-- 1-3: "ok call us back" — no next step
-- 4-6: sent email estimate, some info
-- 7-8: specific callback time + FCFS + no deposit mentioned
-- 9-10: held spot + callback + email + FCFS + no deposit — clear path to book
-
-STEP 9 — RAPPORT OPPORTUNITIES:
-Scan for moments where customer shared something personal, stressful, or emotionally significant.
-Missed opportunities = specific coaching points: "Customer said [X], rep gave no acknowledgment"
-Examples:
-- Someone bailed on them → "We won't do that to you"
-- Life event (divorce, new job) → empathy
-- Stressed/anxious → reassurance
-- Bad experience with movers → "That won't happen with us"
-
-STEP 10 — SALESMANSHIP:
-Score on CONCEPT not exact words.
-
-ALWAYS-RELEVANT (most calls):
-- Background checked / screened movers
-- No day labor / professional employees
-- We show up / reliable / don't miss appointments
-- Proper equipment / trucks / tools
-- Customer reassurance from concern — when customer expresses worry, rep responds with specific LGMS quality
-
-SITUATIONAL (when applicable):
-- "Clothes in the dresser" — bedroom furniture present
-- "Disassemble and reassemble" — furniture assembly needed
-- "Can rearrange things" — in-house or layout mentioned
-- "Careful with belongings" — customer expresses concern
-
-POINTED VALUE PROPS (when pricing_model = pointed):
-- No clock pressure, take time to do it right
-- Disassembly/reassembly included
-- Rearranging included
-- Exact cost upfront, no surprise bill
-- Detailed inventory ensures accuracy
-
-HOURLY VALUE PROPS (when pricing_model = hourly):
-- Only pay for time used
-- Rounded to nearest quarter hour
-- Clock starts on arrival not drive time
-- Flexibility for extra tasks
-- MUST provide estimated hours — if not given, coaching point
-
-CUSTOMER NAME USAGE:
-- Never used: no contribution
-- Used at least once naturally: small bonus
-- Used naturally multiple times: meaningful bonus
-- Forced/awkward: no bonus
-
-Scoring:
-- 1-3: No value props, no name use
-- 4-5: One always-relevant phrase
-- 6-7: Two+ always-relevant, or one + name use
-- 8-9: Always-relevant + situational + name naturally + pricing model props
-- 10: Full suite woven naturally, name used, reassurance addressed, pricing props used
-
-STEP 11 — CHECKLIST (22 steps):
-
-STANDARD MOVE — all 22:
-1. got_move_date
-2. got_customer_name
-3. got_phone_number — TRUE only if rep asked OR confirmed ("I have this number, is that right?"). Passive caller ID alone = false.
-4. got_cities
-5. got_home_type
-6. got_stairs_info
-7. did_full_inventory
-8. asked_forgotten_items
-9. asked_about_boxes (more important on pointed moves)
-10. gave_price_on_call
-11. attempted_to_close
-12. offered_email_estimate
-13. mentioned_confirmations
-14. thanked_customer
-15. asked_name_at_start — TRUE if rep asked, OR if customer introduced themselves first
-16. led_estimate_process
-17. got_email — TRUE if rep asked for OR confirmed an existing email
-18. scheduled_onsite_attempt (na unless triggered)
-19. offered_alternatives (na unless triggered)
-20. took_rapport_opportunities
-21. completed_booking_wrapup
-22. captured_lead
-
-SPECIALTY: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, email, lead. Rest = "na".
-UNLOAD ONLY: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, email, lead. Rest = "na".
-IN-HOUSE: Apply: move_date, name, phone, inventory, price, close, thanks, name_at_start, email, lead. Rest = "na".
-COMMERCIAL: Apply all standard steps. onsite/alternatives = "na" unless triggered.
-STORAGE: Apply: move_date, name, phone, cities, stairs, price, close, confirmations, thanks, name_at_start, email, lead. Rest = "na".
-
-CHECKLIST VALUES: true | false | "na"
-
-STEP 12 — SCORING (1-10 each):
-
-OVERALL — server recalculates. Sanity check:
-overall = round(closing*0.25 + price*0.15 + rapport*0.15 + salesmanship*0.20 + info_control*0.15 + professionalism*0.10)
-
-CLOSING ATTEMPT (25% weight):
-- 1-2: Never attempted
-- 3-4: Weak, accepted first objection without counter
-- 5-6: One attempt, gave up too easily
-- 7: MINIMUM if rep assumed the close
-- 7-8: Clear attempt, handled at least one objection
-- 9: Strong, used FCFS/no-deposit/urgency, overcame objections
-- 10: Multiple attempts, assumed close, overcame all objections
-Timeline adjustment: exact date or this week = not booking after real attempt is NOT penalized, not attempting IS penalized
-
-PRICE DELIVERY (15% weight):
-
-═══ POINTED quotes ═══
-- 1-3: No price given on the call
-- 4-6: Price given, but with no inventory/value framing — just a number
-- 7-8: Confident delivery with inventory context (price is based on
-       what was discussed)
-- 9-10: Confident, value-framed, AND price objections handled effectively
-
-═══ HOURLY quotes — four mechanics expected ═══
-The rep should explain ALL FOUR pieces of how hourly works:
-  1. Per-hour rate stated explicitly ($X an hour for X guys)
-  2. Quarter-hour rounding / proration mentioned
-  3. Mileage fee mentioned
-  4. Clock starts when work starts (not drive time, not arrival)
-
-Scoring:
-- 1-3: No rate given, or job hours estimate completely missing
-- 4-6: Rate given but missing 2+ of the four mechanics. Auto-cap at 6
-       if estimated hours not given (unfair to customer).
-- 7-8: Rate, hours estimate, and 2-3 of the four mechanics explained
-       confidently
-- 9-10: All four mechanics explained AND value framing (only paying
-        for time used, flexibility, etc.)
-
-For each missing mechanic on an hourly call, add a coaching point
-naming the specific mechanic ("did not mention the mileage fee",
-"did not explain quarter-hour rounding", etc.)
-
-═══ MODEL ANCHORING (applies to both) ═══
-
-Whether pointed or hourly, the rep should explicitly state which
-pricing model is being used. Phrases like "this is a flat-rate quote,
-time doesn't affect it" or "we charge hourly with a 2-hour minimum"
-should appear when pricing is delivered.
-
-If the rep gives a price WITHOUT anchoring it to a model, this is a
-coaching point — UNLESS:
-- The customer has used LGMS before (mentioned in call, or system
-  found them), OR
-- The customer themselves explicitly used pricing model language
-  first ("I'm looking for an hourly rate"), making the model already
-  clear
-
-When the anchoring coaching point applies, include in coaching_points
-phrasing like: "Did not explicitly anchor the quote as [hourly/pointed].
-Should clarify pricing model when delivering price for new customers."
-
-RAPPORT & TONE (15% weight):
-- 1-3: Flat, missed emotional moments
-- 4-6: Polite but mechanical
-- 7-8: Warm, acknowledged situation
-- 9-10: Genuine connection, used situation to reinforce LGMS trust
-
-SALESMANSHIP (20% weight): see Step 10 rubric
-
-INFORMATION & CONTROL (15% weight — combined):
-Score on what was gathered AND how well rep steered the call.
-Penalize only if required info never obtained. Natural conversation scores well. Do not penalize N/A items.
-
-PROFESSIONALISM (10% weight):
-Expectation setting, email explanation, day-of call mention, clean wrap-up, handling complications smoothly.
-
-CONFIDENCE SCORE (1-10):
-10: clear transcript. 7-9: minor issues. 4-6: some audio problems. 1-3: poor audio, manager should review.
-
-TALK RATIO: speaker labels if diarized, otherwise estimate.
-
-KEYWORDS — detect when the rep used the CONCEPT (not exact words).
-
-CRITICAL: Return the canonical key from the list below, NOT the rep's
-actual phrasing. The dashboard groups by canonical key. If you return
-"background checks" instead of "background checked", the call won't
-appear on the chart. ALWAYS use the canonical form on the left.
-
-CLOSING / URGENCY:
-- "spot available" — rep mentioned having a spot, opening, slot
-- "get you on the board" — rep offered to put on schedule/calendar/board
-- "first come first serve" — rep mentioned FCFS booking
-- "no cancellation fee" — rep noted they don't charge cancellation fees
-  (use singular form even if rep said "fees")
-- "save that for you" — rep offered to hold/save the spot
-- "go ahead and book" — assumptive close language
-- "no deposit" — rep noted no deposit needed (use singular "deposit"
-  even if rep said "deposits")
-
-VALUE PROPS:
-- "background checked" — rep mentioned crew is background-checked,
-  background-screened, "guys pass background checks", or similar
-- "no day labor" — rep distinguished from day labor / temps
-- "we show up" — rep emphasized reliability, "don't miss appointments"
-- "clothes in the dresser" — rep mentioned this specific service
-- "disassemble" — rep mentioned disassembly/reassembly of furniture
-  (use canonical "disassemble" even if rep said "take apart" or
-  "disassembling")
-
-PROCESS:
-- "confirmation call" — rep mentioned the day-of or week-of
-  confirmation call
-
-Return CHARACTER POSITION of first occurrence in the transcript.
-ONLY include keywords actually said by the REP. Don't include things
-the customer said unless the rep agreed and repeated them.
-
-OBJECTIONS: Price too high, Need to think about it, Already have another quote, Wrong timing, Need to check with partner, Other
-
-SENTIMENT: positive / neutral / hesitant / negative
-
-Filename: {filename}
-
-Transcript:
-{transcript}
-
-Respond ONLY with valid JSON, no markdown:
-
-{{"rep_name_detected":"name or Unknown","caller_name":"name or Unknown","call_purpose":"short phrase","call_type":"sales_estimate","move_category":"standard","move_type":"local/long distance/unknown","pricing_model":"unknown","move_timeline":"unknown","call_outcome":"booked","loss_reason":"","soft_pipeline_reason":"","word_count":150,"exclude_from_scoring":false,"exclusion_reason":"","call_quality":"normal","turned_away":false,"onsite_suggested":false,"is_continuation":false,"evaluation_confidence":8,"close_attempts":1,"objections_overcome":[],"objections_abandoned":[],"pipeline_recovery_quality":0,"missed_rapport_opportunities":[],"value_props_used":[],"salesmanship_score":0,"call_summary":"3-5 sentences","key_details_captured":"details gathered","talk_ratio_rep":40,"talk_ratio_customer":60,"keywords_detected":["confirmation call"],"keyword_positions":{{"confirmation call":342}},"objections_detected":["Price too high"],"objection_positions":{{"Price too high":891}},"customer_sentiment":"positive","scores":{{"information_control":{{"score":0,"note":""}},"price_delivery":{{"score":0,"note":""}},"closing_attempt":{{"score":0,"note":""}},"professionalism":{{"score":0,"note":""}},"rapport_tone":{{"score":0,"note":""}},"salesmanship":{{"score":0,"note":""}},"overall":{{"score":0,"note":""}}}},"checklist":{{"got_move_date":false,"got_customer_name":false,"got_phone_number":false,"got_cities":false,"got_home_type":false,"got_stairs_info":false,"did_full_inventory":false,"asked_forgotten_items":false,"asked_about_boxes":false,"gave_price_on_call":false,"attempted_to_close":false,"offered_email_estimate":false,"mentioned_confirmations":false,"thanked_customer":false,"asked_name_at_start":false,"led_estimate_process":false,"got_email":false,"scheduled_onsite_attempt":"na","offered_alternatives":"na","took_rapport_opportunities":false,"completed_booking_wrapup":false,"captured_lead":false}},"strengths":["s1","s2"],"coaching_points":["c1","c2"]}}"""
-    return prompt
-
-# ──────────────────────────────────────────────
-# VONAGE FILENAME DATE PARSER
-# ──────────────────────────────────────────────
-
-def parse_call_date_from_filename(filename):
-    m = re.search(r'(\d{4})_(\d{2})_(\d{2})_(\d{2})_(\d{2})(AM|PM)', filename, re.IGNORECASE)
-    if not m:
-        return None
-    year, month, day, hour, minute, ampm = m.groups()
-    h = int(hour)
-    if ampm.upper() == 'PM' and h != 12:
-        h += 12
-    elif ampm.upper() == 'AM' and h == 12:
-        h = 0
-    try:
-        dt = datetime(int(year), int(month), int(day), h, int(minute), tzinfo=timezone.utc)
-        return dt.isoformat()
-    except Exception:
-        return None
-
-# ──────────────────────────────────────────────
-# SUPABASE HELPERS
-# ──────────────────────────────────────────────
-
-def _supa_auth_header(key):
-    """Return the correct Authorization header value for the given Supabase key.
-    Legacy JWT keys (eyJ...) require 'Bearer <token>'.
-    New keys (sb_secret_... or sb_publishable_...) must NOT have Bearer prefix —
-    per Supabase docs, the Authorization value must exactly match the apikey value."""
-    if key and key.startswith("sb_"):
-        return key  # New format — match apikey exactly
-    return f"Bearer {key}"  # Legacy JWT format
-
-def supa(method, path, body=None, extra_headers=None, prefer_minimal=False):
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise Exception("Supabase not configured")
-    url = f"{SUPABASE_URL}/rest/v1/{path}"
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Prefer", "return=minimal" if prefer_minimal else "return=representation")
-    if extra_headers:
-        for k, v in extra_headers.items():
-            req.add_header(k, v)
-    try:
-        # Timeout: 60s for writes (POST/PATCH/DELETE), 30s for reads
-        _timeout = 60 if method in ("POST", "PATCH", "DELETE") else 30
-        with urllib.request.urlopen(req, timeout=_timeout) as r:
-            body_bytes = r.read()
-            if not body_bytes or body_bytes == b'':
-                return {}
-            return json.loads(body_bytes)
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8', errors='replace')
-        raise Exception(f"Supabase {method} {path[:60]} HTTP {e.code}: {error_body[:300]}")
-
-def supa_storage_upload(bucket, path, data, content_type="audio/mpeg"):
-    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{path}"
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
-    req.add_header("Content-Type", content_type)
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8', errors='replace')
-        raise Exception(f"Storage upload {bucket}/{path[:50]} HTTP {e.code}: {error_body[:300]}")
-
-def supa_storage_signed_url(bucket, path, expires=86400):
-    url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{path}"
-    body = json.dumps({"expiresIn": expires}).encode()
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            result = json.loads(r.read())
-        signed = result.get("signedURL", "")
-        if not signed:
-            return ""
-        # Supabase returns a relative path like "/object/sign/{bucket}/{path}?token=..."
-        # We need to prepend "{SUPABASE_URL}/storage/v1" to make it a full URL.
-        if signed.startswith("http"):
-            return signed  # Already absolute (some Supabase versions return full URL)
-        if signed.startswith("/storage/v1"):
-            return f"{SUPABASE_URL}{signed}"  # Has prefix already
-        # Otherwise, prepend the storage API path
-        if not signed.startswith("/"):
-            signed = "/" + signed
-        return f"{SUPABASE_URL}/storage/v1{signed}"
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8', errors='replace')
-        log(f"  Signed URL error for {bucket}/{path[:50]}: HTTP {e.code} {error_body[:200]}")
-        return ""
-
-def supa_storage_list(bucket):
-    url = f"{SUPABASE_URL}/storage/v1/object/list/{bucket}"
-    body = json.dumps({"prefix": "", "limit": 1000}).encode()
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
-
-def supa_storage_delete(bucket, paths):
-    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}"
-    body = json.dumps({"prefixes": paths}).encode()
-    req = urllib.request.Request(url, data=body, method="DELETE")
-    req.add_header("apikey", SUPABASE_KEY)
-    req.add_header("Authorization", _supa_auth_header(SUPABASE_KEY))
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
-
-# Storage cap cache — one list per batch, not per file
-_storage_cap_cache = {"files": None, "total_bytes": None, "checked_at": 0}
-_storage_cap_lock = threading.Lock()
-
-def enforce_storage_cap(cached_files=None):
-    """Check and enforce 900MB storage cap. Pass cached_files during batch to avoid repeated list calls."""
-    try:
-        if cached_files is not None:
-            files = cached_files
-        else:
-            # Outside batch context — check cache (valid for 5 min)
-            with _storage_cap_lock:
-                if time.time() - _storage_cap_cache["checked_at"] < 300 and _storage_cap_cache["files"] is not None:
-                    files = _storage_cap_cache["files"]
-                    total_bytes = _storage_cap_cache["total_bytes"]
-                else:
-                    files = supa_storage_list("call-audio")
-                    total_bytes = sum(f.get("metadata", {}).get("size", 0) for f in files if isinstance(f, dict))
-                    _storage_cap_cache["files"] = files
-                    _storage_cap_cache["total_bytes"] = total_bytes
-                    _storage_cap_cache["checked_at"] = time.time()
-        if not files:
-            return
-        total_bytes = sum(f.get("metadata", {}).get("size", 0) for f in files if isinstance(f, dict))
-        if total_bytes <= 900 * 1024 * 1024:
-            return
-        log(f"  Storage cap: {total_bytes//(1024*1024)}MB used, cleaning up oldest files")
-        calls_with_audio = supa("GET", "calls?audio_url=neq.&order=created_at.asc&select=id,audio_url&limit=200")
-        for call in (calls_with_audio or []):
-            if total_bytes <= 800 * 1024 * 1024:
-                break
-            audio_url = call.get("audio_url", "")
-            if not audio_url:
-                continue
-            path_match = re.search(r'/call-audio/(.+?)(\?|$)', audio_url)
-            if path_match:
-                storage_path = path_match.group(1)
-                try:
-                    file_info = next((f for f in files if isinstance(f, dict) and f.get("name") == storage_path), None)
-                    file_size = file_info.get("metadata", {}).get("size", 0) if file_info else 0
-                    supa_storage_delete("call-audio", [storage_path])
-                    supa("PATCH", f"calls?id=eq.{call['id']}", {"audio_url": "", "storage_filename": ""})
-                    total_bytes -= file_size
-                except Exception as e:
-                    log(f"  Storage cleanup error: {e}")
-    except Exception as e:
-        log(f"  Storage cap error: {e}")
-
-# ──────────────────────────────────────────────
-# CORRECTIONS
-# ──────────────────────────────────────────────
-
-def get_recent_corrections(limit=20):
-    try:
-        return supa("GET", f"corrections?order=created_at.desc&limit={limit}&used_in_prompt=eq.true")
-    except Exception:
-        return []
-
-# ──────────────────────────────────────────────
-# REP NAME FUZZY MATCHING
-# ──────────────────────────────────────────────
-
-def fuzzy_match_rep(detected_name, rep_list):
-    """
-    Simple fuzzy match — returns (matched_name, confidence) or (detected_name, 0).
-    No external libraries needed.
-    """
-    if not detected_name or detected_name == "Unknown" or not rep_list:
-        return detected_name, 0.0
-
-    detected_lower = detected_name.lower().strip()
-
-    for rep in rep_list:
-        full = rep.get("full_name", "").lower().strip()
-        nick = rep.get("nickname", "").lower().strip()
-        alts = [a.lower().strip() for a in rep.get("alternate_names", [])]
-        location = rep.get("location", "")
-
-        candidates = [full, nick] + alts
-        # First name of full name
-        if full:
-            candidates.append(full.split()[0])
-
-        for candidate in candidates:
-            if not candidate:
-                continue
-            # Exact match
-            if detected_lower == candidate:
-                return rep.get("full_name"), 1.0
-            # Detected is first name of candidate
-            if candidate.startswith(detected_lower + " "):
-                return rep.get("full_name"), 0.95
-            # Candidate starts with detected
-            if detected_lower.startswith(candidate):
-                return rep.get("full_name"), 0.92
-
-    return detected_name, 0.0
-
-# ──────────────────────────────────────────────
-# CONTINUATION GROUP
-# ──────────────────────────────────────────────
-
-def find_or_create_continuation_group(rep_name, caller_name):
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        safe_rep = urllib.parse.quote(rep_name or "")
-        safe_caller = urllib.parse.quote(caller_name or "")
-        existing = supa("GET", f"calls?rep_name=eq.{safe_rep}&caller_name=eq.{safe_caller}&created_at=gte.{cutoff}&is_continuation=eq.true&order=created_at.desc&limit=1&select=continuation_group_id")
-        if existing and existing[0].get("continuation_group_id"):
-            return existing[0]["continuation_group_id"]
-    except Exception as e:
-        log(f"  Continuation lookup error: {e}")
-    return str(uuid.uuid4())
-
-def retroactively_link_continuation(rep_name, caller_name, group_id):
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        safe_rep = urllib.parse.quote(rep_name or "")
-        safe_caller = urllib.parse.quote(caller_name or "")
-        unlinked = supa("GET", f"calls?rep_name=eq.{safe_rep}&caller_name=eq.{safe_caller}&created_at=gte.{cutoff}&continuation_group_id=eq.&select=id")
-        for call in (unlinked or []):
-            supa("PATCH", f"calls?id=eq.{call['id']}", {"continuation_group_id": group_id, "is_continuation": True})
-    except Exception as e:
-        log(f"  Retroactive linking error: {e}")
-
-# ──────────────────────────────────────────────
-# HTML LOADER
-# ──────────────────────────────────────────────
-
-def read_html():
-    for name in ["lgms_dashboard.html", "lgms_analyzer_v3.html"]:
-        if os.path.exists(name):
-            with open(name, "rb") as f:
-                return f.read()
-    return b"<h1>Missing lgms_dashboard.html</h1>"
-
-# ──────────────────────────────────────────────
-# TRANSCRIPT CORRECTIONS
-# ──────────────────────────────────────────────
-
-def get_transcript_corrections():
-    """Fetch all saved find/replace corrections from Supabase."""
-    try:
-        return supa("GET", "transcript_corrections?order=created_at.asc&limit=500")
-    except Exception:
-        return []
-
-def apply_transcript_corrections(transcript, corrections):
-    """Apply find/replace corrections to transcript before Claude analysis."""
-    if not corrections:
-        return transcript
-    for c in corrections:
-        find = c.get("find_text", "")
-        replace = c.get("replace_text", "")
-        if find:
-            transcript = re.sub(re.escape(find), replace, transcript, flags=re.IGNORECASE)
-    return transcript
-
-def build_keyterms(rep_names=None, corrections=None):
-    """Build keyterm list for Deepgram from rep names + corrections + known LGMS vocabulary."""
-    terms = set([
-        "Little Guys Movers", "Little Guys", "Full Value Protection", "FVP",
-        "confirmation call", "fuel charge", "declared value", "National Express",
-        "Rivermont", "moving boxes", "no cancellation fee", "first come first serve",
-        "background checked", "no day labor",
-    ])
-    if rep_names:
-        for name in rep_names:
-            if name and name != "Unknown":
-                terms.add(name)
-    if corrections:
-        for c in corrections:
-            replace = c.get("replace_text", "")
-            if replace and len(replace) > 2:
-                terms.add(replace)
-    return list(terms)[:100]
-
-def get_cached_keyterms():
-    """Return cached keyterms, rebuilding if older than 30 minutes."""
-    global _keyterm_cache
-    with _keyterm_lock:
-        age = time.time() - _keyterm_cache["built_at"]
-        if age < 1800 and _keyterm_cache["terms"]:
-            return _keyterm_cache["terms"]
-    try:
-        rep_list = supa("GET", "reps?active=eq.true&select=full_name,nickname")
-        rep_names = []
-        for r in (rep_list or []):
-            if r.get("full_name"): rep_names.append(r["full_name"])
-            if r.get("nickname"): rep_names.append(r["nickname"])
-        tx_corrections = get_transcript_corrections()
-        terms = build_keyterms(rep_names=rep_names, corrections=tx_corrections)
-    except Exception:
-        terms = build_keyterms()
-    with _keyterm_lock:
-        _keyterm_cache = {"terms": terms, "built_at": time.time()}
-    log(f"  Keyterm cache rebuilt: {len(terms)} terms")
-    return terms
-
-# ──────────────────────────────────────────────
-# DEEPGRAM TRANSCRIPTION
-# ──────────────────────────────────────────────
-
-def transcribe_audio_deepgram(audio_bytes, filename, keyterms=None):
-    """Transcribe audio using Deepgram Nova-3 with diarization and keyterm prompting."""
-    if not DEEPGRAM_KEY:
-        raise Exception("DEEPGRAM_API_KEY not set")
-
-    # Build query params
-    params = {
-        "model": "nova-3",
-        "diarize": "true",
-        "punctuate": "true",
-        "smart_format": "true",
-        "numerals": "true",
-        "utterances": "true",
+.sb-brand {
+  padding: 18px 22px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sb-brand img {
+  width: 100%;
+  max-width: 168px;
+  display: block;
+  margin: 0 auto;
+  filter: none;
+}
+/* Old brand icon/text - no longer used in new layout but keep safe defaults */
+.sb-brand-icon { display: none; }
+.sb-brand-text { display: none; }
+
+.sb-nav { flex: 1; padding: 14px 12px; overflow-y: auto; }
+.sb-group {
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink4);
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  padding: 14px 12px 6px;
+}
+.sb-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--ink2);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all .15s ease;
+  margin-bottom: 2px;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  position: relative;
+}
+.sb-btn:hover { background: var(--surface-sunken); color: var(--ink); }
+.sb-btn.active {
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  font-weight: 500;
+}
+.sb-btn.active::before {
+  content: '';
+  position: absolute;
+  left: -12px; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 18px;
+  background: var(--lg-green);
+  border-radius: 0 2px 2px 0;
+}
+.sb-ico {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  opacity: 0.7;
+}
+.sb-btn.active .sb-ico { opacity: 1; }
+.sb-sep { height: 1px; background: var(--border); margin: 10px 6px; }
+.sb-footer {
+  padding: 12px 22px 14px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sb-version {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sb-version::after {
+  content: '';
+  display: inline-block;
+  width: 8px; height: 8px;
+  background: var(--lg-green);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(0, 114, 54, .2);
+}
+
+/* === MAIN AREA === */
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.topbar {
+  height: 64px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 28px;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.tb-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+.tb-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.hamburger {
+  display: none;
+  padding: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--ink2);
+}
+.page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px 64px;
+  background: var(--bg);
+}
+
+/* === BUTTONS === */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s ease;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  letter-spacing: 0;
+}
+.btn-p {
+  background: var(--lg-green);
+  color: #FFFFFF;
+  border-color: var(--lg-green-dark);
+  box-shadow: var(--sh);
+}
+.btn-p:hover { background: var(--lg-green-dark); }
+.btn-s {
+  background: var(--surface2);
+  color: var(--lg-green-dark);
+  border: 1px solid var(--lg-green-soft);
+}
+.btn-s:hover { background: var(--lg-green-bg); border-color: var(--lg-green); }
+.btn-g {
+  background: var(--surface2);
+  color: var(--ink);
+  border: 1px solid var(--border2);
+}
+.btn-g:hover { background: var(--surface); border-color: var(--border3); }
+.btn-d {
+  background: var(--surface2);
+  color: var(--red);
+  border: 1px solid #F0BABA;
+}
+.btn-d:hover { background: var(--rl); }
+.btn-sm { padding: 6px 11px; font-size: 12px; border-radius: 7px; }
+.btn-xs { padding: 4px 8px; font-size: 11.5px; border-radius: 6px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* === CARDS & PANELS === */
+.card {
+  background: var(--card);
+  border-radius: var(--rl2);
+  padding: 20px;
+  box-shadow: var(--sh);
+  border: 1px solid var(--border);
+  margin-bottom: 16px;
+  transition: border-color .2s;
+}
+.card-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.card-hdr h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+  letter-spacing: -.005em;
+}
+.bdg {
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  padding: 2px 8px;
+  border-radius: 12px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.bdg-blue { background: var(--bl); color: var(--blue); }
+.bdg-amber { background: var(--al); color: #8A6420; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+/* === ATTENTION CARDS === */
+.attn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.attn-card {
+  border-radius: var(--rl2);
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: all .2s;
+  border: 1px solid;
+  position: relative;
+  overflow: hidden;
+  background: var(--card);
+}
+.attn-card:hover { transform: translateY(-1px); box-shadow: var(--sh2); }
+.attn-card.red { background: #FAE8E6; border-color: #F0BABA; }
+.attn-card.amber { background: #F8ECC8; border-color: #E8C97A; }
+.attn-card.blue { background: var(--bl); border-color: rgba(0, 102, 179, .25); }
+.attn-card.green { background: var(--lg-green-bg); border-color: var(--lg-green-soft); }
+.ac-ico {
+  font-size: 18px;
+  margin-bottom: 6px;
+  display: block;
+  opacity: 0.85;
+}
+.ac-num {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 2px;
+  letter-spacing: -.01em;
+}
+.attn-card.red .ac-num { color: var(--red); }
+.attn-card.amber .ac-num { color: #8A6420; }
+.attn-card.blue .ac-num { color: var(--blue); }
+.attn-card.green .ac-num { color: var(--lg-green-dark); }
+.ac-lbl {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink2);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* === METRIC CARDS (Hero strip) === */
+.metric-grid { display: grid; gap: 16px; margin-bottom: 24px; }
+.mc {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+}
+.mc-label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.mc-val {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -.02em;
+  line-height: 1;
+}
+.mc-sub { font-size: 12px; color: var(--ink3); margin-top: 8px; }
+
+/* === LEADERBOARD === */
+.lb { width: 100%; border-collapse: collapse; }
+.lb th, .lb td { padding: 10px 12px; text-align: left; }
+.lb th {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border);
+}
+.lb td { border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.lb tr:last-child td { border-bottom: none; }
+.lb tr:hover td { background: var(--surface); cursor: pointer; }
+.lb-rank {
+  font-family: var(--font-label);
+  font-size: 13px;
+  color: var(--ink3);
+  text-align: center;
+  font-weight: 500;
+  width: 32px;
+}
+.lb-r1, .lb-r2, .lb-r3 { color: var(--lg-green); font-weight: 700; }
+.lb-rn { color: var(--ink3); }
+.lb-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.lb-expand {
+  background: none;
+  border: none;
+  color: var(--ink3);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+
+/* === REP CARDS === */
+.rep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.rep-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rl2);
+  padding: 18px;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.rep-card:hover { border-color: var(--lg-green-soft); box-shadow: var(--sh); }
+.rep-av {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  flex-shrink: 0;
+}
+.rep-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.rep-sub {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink3);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.rep-score {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.rep-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: .04em;
+}
+.rep-trend.up { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.rep-trend.down { background: var(--rl); color: var(--red); }
+.rep-trend.flat { background: var(--surface-sunken); color: var(--ink3); }
+
+/* === CALL ROWS === */
+.crow {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rl2);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all .12s ease;
+  overflow: hidden;
+}
+.crow:hover { border-color: var(--lg-green-soft); box-shadow: var(--sh); }
+.crow.open { border-color: var(--lg-green-soft); box-shadow: var(--sh2); }
+.crow-head {
+  display: grid;
+  grid-template-columns: 6px 50px 2fr 1fr 100px 100px 24px;
+  gap: 12px;
+  padding: 12px 16px 12px 0;
+  align-items: center;
+}
+.cr-av { display: flex; flex-direction: column; align-items: center; }
+.cr-info { min-width: 0; }
+.cr-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cr-sub {
+  font-size: 12px;
+  color: var(--ink3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.cr-body { padding: 18px 22px 22px; border-top: 1px solid var(--border); background: var(--surface); }
+.cr-right { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.chev { color: var(--ink4); transition: transform .2s; font-size: 16px; }
+.crow.open .chev { transform: rotate(90deg); color: var(--lg-green-dark); }
+
+/* === CHIPS === */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 8px;
+  min-width: 36px;
+  justify-content: center;
+}
+.chip-g { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.chip-y { background: var(--al); color: #8A6420; }
+.chip-r { background: var(--rl); color: var(--red); }
+.chip-n { background: var(--surface-sunken); color: var(--ink3); }
+
+/* Outcome chips on call rows */
+.op {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.op::before { content: ''; width: 7px; height: 7px; border-radius: 50%; }
+.op-b { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.op-b::before { background: var(--lg-green); }
+.op-e { background: var(--al); color: #8A6420; }
+.op-e::before { background: var(--amber); }
+.op-l { background: var(--rl); color: var(--red); }
+.op-l::before { background: var(--red); }
+.op-u { background: var(--surface-sunken); color: var(--ink3); }
+.op-u::before { background: var(--ink4); }
+
+/* Color tokens (used in inline styles within JS) */
+.green { color: var(--lg-green); }
+.amber { color: var(--amber); }
+.red { color: var(--red); }
+.blue { color: var(--blue); }
+
+/* === SCORES === */
+.scores-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.score-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rl2);
+  padding: 12px 14px;
+}
+.score-box-lbl {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink3);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.score-box-val {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -.01em;
+}
+.score-box-bar { height: 4px; background: var(--surface-sunken); border-radius: 2px; overflow: hidden; margin-top: 6px; }
+.score-box-fill { height: 100%; background: var(--lg-green); border-radius: 2px; transition: width .3s ease; }
+.score-box-note { font-size: 11px; color: var(--ink3); margin-top: 4px; }
+.score-big {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -.02em;
+}
+
+/* === TALK RATIO BAR === */
+.tr-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-sunken); }
+.tr-rep, .tr-cust {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: white;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+.tr-rep { background: var(--lg-green); }
+.tr-cust { background: var(--blue); }
+
+/* === COMP GROUPS === */
+.comp-group { background: var(--card); border: 1px solid var(--border); border-radius: var(--rl2); margin-bottom: 8px; overflow: hidden; }
+.comp-group-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.comp-group-header:hover { background: var(--surface); }
+.comp-group-name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  color: var(--ink);
+}
+.comp-group-pct {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.comp-steps { padding: 4px 16px 14px; border-top: 1px solid var(--border); display: none; }
+.comp-group.open .comp-steps { display: block; }
+.comp-step { display: grid; grid-template-columns: 1fr 80px 60px; gap: 10px; padding: 8px 0; align-items: center; font-size: 13px; color: var(--ink2); }
+.comp-step-bar { height: 4px; background: var(--surface-sunken); border-radius: 2px; overflow: hidden; }
+.comp-step-fill { height: 100%; background: var(--lg-green); border-radius: 2px; }
+.comp-step-pct { font-family: var(--font-display); font-size: 13px; font-weight: 600; text-align: right; color: var(--ink); }
+.comp-bar-wrap { height: 6px; background: var(--surface-sunken); border-radius: 3px; overflow: hidden; flex: 1; }
+.comp-bar { height: 100%; background: var(--lg-green); border-radius: 3px; }
+
+/* === LIBRARY CONTROLS === */
+.lib-controls {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rl2);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.lib-meta { font-family: var(--font-label); font-size: 11px; color: var(--ink3); letter-spacing: .06em; text-transform: uppercase; font-weight: 500; }
+.lib-count { font-family: var(--font-display); font-size: 14px; font-weight: 600; color: var(--ink); }
+.search-wrap {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  transition: all .15s;
+}
+.search-wrap:focus-within {
+  background: var(--surface2);
+  border-color: var(--lg-green);
+  box-shadow: 0 0 0 3px var(--lg-green-bg);
+}
+.search-wrap input {
+  border: none; outline: none; background: transparent; flex: 1;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink);
+}
+.search-wrap input::placeholder { color: var(--ink5); }
+
+.fsel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: all .15s;
+}
+.fsel:hover { background: var(--surface2); border-color: var(--border2); }
+.fsel:focus { outline: none; border-color: var(--lg-green); box-shadow: 0 0 0 2px var(--lg-green-bg); }
+
+/* === BULK BAR === */
+.bulk-bar {
+  background: linear-gradient(to right, var(--lg-green-bg) 0%, var(--surface2) 70%);
+  border: 1px solid var(--lg-green-soft);
+  border-radius: var(--rl2);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+/* === STATUS BAR === */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--ink3);
+  flex-shrink: 0;
+  transition: background .4s;
+}
+.status-bar.warn { background: rgba(227,177,36,.10); border-bottom-color: rgba(227,177,36,.25); }
+.status-bar.done { background: rgba(0,114,54,.07); border-bottom-color: rgba(0,114,54,.2); }
+.sb-msg { flex: 1; font-family: var(--font-label); font-size: 11px; letter-spacing: .04em; color: var(--ink2); font-weight: 500; }
+
+/* === CHART WRAPPER === */
+.chart-wrap { position: relative; height: 260px; margin-top: 8px; }
+
+/* === EMPTY STATES === */
+.empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--ink3);
+  font-size: 13px;
+}
+.empty-ico { font-size: 32px; display: block; margin-bottom: 10px; opacity: .5; }
+
+/* === CHECKLIST GRID === */
+.ck-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ck-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--ink2);
+}
+.ck-item.green { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.ck-item.red { background: var(--rl); color: var(--red); }
+.ck-item.amber { background: var(--al); color: #8A6420; }
+
+/* === KEYWORDS / OBJECTIONS === */
+.tx-kw {
+  display: inline-block;
+  font-size: 11.5px;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin: 2px 4px 2px 0;
+}
+.tx-obj {
+  display: inline-block;
+  font-size: 11.5px;
+  background: var(--rl);
+  color: var(--red);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin: 2px 4px 2px 0;
+}
+.tx-obj-abandoned {
+  background: var(--surface-sunken);
+  color: var(--ink3);
+  text-decoration: line-through;
+}
+
+/* Word-level transcript (when word_timestamps are present) */
+.tx-speaker {
+  display: inline-block;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin: 8px 6px 2px 0;
+}
+.tx-word {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 1px;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.tx-word:hover { background: var(--lg-green-bg); }
+.tx-word-active {
+  background: var(--lg-gold) !important;
+  color: white !important;
+}
+/* When a word also carries a keyword/objection class, the kw/obj block-style
+   bubble is too heavy for inline-flow word renders. Override to a softer
+   inline highlight that still reads as "this word matched". */
+.tx-word.tx-kw {
+  display: inline;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  padding: 1px 4px;
+  margin: 0;
+  font-size: inherit;
+  border-radius: 3px;
+}
+.tx-word.tx-obj {
+  display: inline;
+  background: var(--lg-red-bg);
+  color: var(--lg-red);
+  padding: 1px 4px;
+  margin: 0;
+  font-size: inherit;
+  border-radius: 3px;
+}
+.tx-word.tx-obj-abandoned {
+  display: inline;
+  background: var(--surface-sunken);
+  color: var(--ink3);
+  text-decoration: line-through;
+  padding: 1px 4px;
+  margin: 0;
+  font-size: inherit;
+  border-radius: 3px;
+}
+
+/* === SHARED VIEWS === */
+.sv-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rl2);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  gap: 12px;
+  align-items: center;
+}
+.sv-loc, .sv-mgr, .sv-type {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.sv-url {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--blue);
+  background: var(--surface);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  text-decoration: none;
+}
+
+/* === RMGMT TABLE === */
+.rmgmt-table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: var(--rl2); overflow: hidden; border: 1px solid var(--border); }
+.rmgmt-table th, .rmgmt-table td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+.rmgmt-table th {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  background: var(--surface-sunken);
+}
+.rmgmt-table tr:last-child td { border-bottom: none; }
+.rmgmt-table tr:hover td { background: var(--surface); }
+
+/* === TABS === */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tab {
+  padding: 8px 14px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink3);
+  cursor: pointer;
+  border: none;
+  background: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-weight: 500;
+  transition: all .15s;
+}
+.tab:hover { color: var(--ink); }
+.tab.active { color: var(--lg-green-dark); border-bottom-color: var(--lg-green); }
+
+/* === DROP ZONE === */
+.drop-zone {
+  border: 2px dashed var(--border2);
+  border-radius: var(--rl2);
+  padding: 40px 20px;
+  text-align: center;
+  background: var(--surface);
+  transition: all .2s;
+  cursor: pointer;
+}
+.drop-zone:hover, .drop-zone.drag {
+  border-color: var(--lg-green);
+  background: var(--lg-green-bg);
+}
+.dz-ico { font-size: 36px; margin-bottom: 12px; opacity: .6; }
+.dz-title { font-family: var(--font-display); font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.dz-sub { font-size: 12.5px; color: var(--ink3); }
+
+/* === QUEUE ITEMS === */
+.q-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+.q-ico { font-size: 16px; opacity: .7; }
+.q-name { flex: 1; font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.q-size { font-family: var(--font-label); font-size: 11px; color: var(--ink3); letter-spacing: .04em; }
+
+/* === PROGRESS BAR === */
+.prog { width: 100%; height: 6px; background: var(--surface-sunken); border-radius: 3px; overflow: hidden; }
+.prog-fill { height: 100%; background: var(--lg-green); border-radius: 3px; transition: width .3s ease; }
+.prog-label { font-family: var(--font-label); font-size: 11px; color: var(--ink3); letter-spacing: .04em; }
+
+/* === LOCATION PILL === */
+.loc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--lg-green-dark);
+  background: var(--lg-green-bg);
+  padding: 3px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+.loc-tag {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink3);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* === SHARE BANNER === */
+.share-banner {
+  background: var(--lg-green-bg);
+  border-bottom: 1px solid var(--lg-green-soft);
+  color: var(--lg-green-dark);
+  padding: 10px 28px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.share-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* === MOBILE === */
+.mobile-overlay { display: none; }
+
+/* === MISC HELPERS === */
+.dn { display: none; }
+.fg { flex: 1; }
+.flat { background: var(--surface) !important; }
+.spin {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--lg-green);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+.spin-dark {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* === MODALS === */
+.modal-bg {
+  position: fixed; inset: 0;
+  background: rgba(26,26,26,.4);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.modal-box {
+  background: var(--card);
+  border-radius: var(--rl3);
+  padding: 24px;
+  max-width: 500px;
+  width: 100%;
+  box-shadow: var(--sh3);
+  border: 1px solid var(--border);
+}
+.modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+/* === MESSAGES === */
+.msg-ok { background: var(--lg-green-bg); color: var(--lg-green-dark); padding: 10px 14px; border-radius: 8px; font-size: 13px; border: 1px solid var(--lg-green-soft); }
+.msg-err { background: var(--rl); color: var(--red); padding: 10px 14px; border-radius: 8px; font-size: 13px; border: 1px solid #F0BABA; }
+
+/* === EXCLUSION === */
+.excl { opacity: .5; }
+.excl-banner {
+  background: var(--al);
+  color: #8A6420;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  display: inline-block;
+  border: 1px solid #E8C97A;
+  font-family: var(--font-label);
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.toggle-excl {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink3);
+  cursor: pointer;
+}
+
+/* === INFO BOXES === */
+.info-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.info-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.info-box-title {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink3);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.info-list { font-size: 12.5px; color: var(--ink2); line-height: 1.7; }
+
+/* === SENTIMENT DOTS === */
+.sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.sd-pos { background: var(--lg-green); }
+.sd-neu { background: var(--ink4); }
+.sd-neg { background: var(--red); }
+.sd-hes { background: var(--amber); }
+
+/* === MISC === */
+.ds { font-size: 11px; color: var(--ink3); }
+.warn { color: var(--amber); }
+.up { color: var(--lg-green); }
+.nt { font-size: 11px; color: var(--ink3); font-style: italic; }
+.txb { background: var(--surface); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; line-height: 1.6; color: var(--ink); }
+
+/* === TAGS === */
+.tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 3px 9px; border-radius: 12px;
+  font-size: 11.5px; color: var(--ink2); margin: 2px 3px 2px 0;
+}
+.tag-rm { cursor: pointer; opacity: .6; font-weight: 700; }
+.tag-rm:hover { opacity: 1; color: var(--red); }
+.tag-inp { border: 1px dashed var(--border2); background: transparent; padding: 3px 8px; border-radius: 12px; font-size: 11.5px; color: var(--ink2); width: 100px; }
+.tag-inp:focus { outline: none; border-color: var(--lg-green); }
+
+/* === CORRECTION ITEM === */
+.corr-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rl2);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 900px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .info-2col { grid-template-columns: 1fr; }
+  .crow-head { grid-template-columns: 6px 50px 1fr 80px 24px; }
+  .crow-head > :nth-child(4),
+  .crow-head > :nth-child(6) { display: none; }
+}
+@media (max-width: 700px) {
+  .sidebar { position: fixed; left: -240px; top: 0; bottom: 0; z-index: 200; transition: left .25s; }
+  .sidebar.mobile-open { left: 0; }
+  .hamburger { display: block; }
+  .mobile-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    z-index: 199; opacity: 0; pointer-events: none; transition: opacity .25s;
+  }
+  .mobile-overlay.on { opacity: 1; pointer-events: auto; display: block; }
+  .page { padding: 16px; }
+  .topbar { padding: 0 16px; }
+}
+
+/* ============================================ */
+/* PHASE 3 ADDITIONS — Mockup-aligned classes   */
+/* for the new Overview page layout             */
+/* ============================================ */
+
+/* Variable aliases — mockup uses hyphenated names */
+:root {
+  --surface-2: var(--surface2);
+  --line: var(--border);
+  --line-2: var(--border2);
+  --line-strong: var(--border3);
+  --ink-2: var(--ink2);
+  --ink-3: var(--ink3);
+  --ink-4: var(--ink4);
+  --ink-5: var(--ink5);
+  --lg-red-bg: #FAE3E1;
+  /* Phase 6 brand color aliases — keep in sync with --red, --amber above */
+  --lg-red: #C9252C;
+  --lg-red-light: #F2625F;
+  --lg-red-dark: #A71D23;
+  --lg-gold: #E3B124;
+  --lg-gold-light: #F1CB6E;
+  --lg-gold-dark: #8A6420;
+  --lg-gold-bg: rgba(227, 177, 36, .14);
+  --shadow-sm: var(--sh);
+  --shadow-md: var(--sh2);
+}
+
+/* Page title in topbar */
+.page-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  flex: 1;
+}
+.page-title-meta {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 16px;
+  margin-left: 8px;
+}
+.page-meta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+
+/* Buttons — mockup variants (in addition to btn-p/btn-s/btn-g) */
+.btn-primary {
+  background: var(--lg-green);
+  color: white;
+  border-color: var(--lg-green-dark);
+  box-shadow: var(--sh);
+}
+.btn-primary:hover { background: var(--lg-green-dark); }
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--ink);
+  border: 1px solid var(--border2);
+}
+.btn-secondary:hover { background: var(--surface); border-color: var(--border3); }
+.btn-ghost { background: transparent; color: var(--ink2); }
+.btn-ghost:hover { background: var(--surface-sunken); color: var(--ink); }
+
+/* HERO METRICS */
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.hero-grid.hero-2up { grid-template-columns: 1.2fr 1fr; }
+
+.hero-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  position: relative;
+  overflow: hidden;
+}
+.hero-card.featured {
+  background: linear-gradient(135deg, #005F2D 0%, #007236 60%, #1A8045 100%);
+  color: white;
+  border-color: var(--lg-green-dark);
+  box-shadow: var(--sh2);
+}
+.hero-card.featured::after {
+  content: '';
+  position: absolute;
+  right: -40px; top: -40px;
+  width: 180px; height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+}
+.hero-label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-weight: 500;
+}
+.hero-card.featured .hero-label { color: rgba(255,255,255,0.75); }
+.hero-value {
+  font-family: var(--font-display);
+  font-size: 52px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-weight: 700;
+  display: flex; align-items: baseline; gap: 4px;
+}
+.hero-card.featured .hero-value { color: white; }
+.hero-value-suffix {
+  font-size: 22px;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.hero-card.featured .hero-value-suffix { color: rgba(255,255,255,0.6); }
+.hero-detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 8px;
+}
+.hero-card.featured .hero-detail { color: rgba(255,255,255,0.7); }
+
+/* TREND PILLS */
+.trend-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+.trend-pill.up { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.trend-pill.down { background: var(--lg-red-bg); color: var(--lg-red); }
+.trend-pill.flat { background: var(--surface-sunken); color: var(--ink-3); }
+.hero-card.featured .trend-pill.up {
+  background: rgba(255,255,255,0.18);
+  color: white;
+}
+
+/* OUTCOME BAR */
+.outcome-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 10px;
+  background: var(--surface-sunken);
+}
+.outcome-bar-segment { height: 100%; display: block; }
+.outcome-bar-legend {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-family: var(--font-label);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.outcome-bar-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.outcome-bar-legend span::before {
+  content: '';
+  width: 8px; height: 8px;
+  border-radius: 2px;
+  background: var(--c, var(--ink-3));
+}
+
+/* CHART ROW */
+.chart-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.chart-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px 18px;
+  display: flex;
+  flex-direction: column;
+}
+.chart-card-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.chart-card-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.chart-card-meta {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* DONUT CHART */
+.donut-wrap {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 14px;
+  align-items: center;
+  flex: 1;
+}
+.donut-svg { width: 100%; height: auto; display: block; }
+.donut-center-num {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  fill: var(--ink);
+}
+.donut-center-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  fill: var(--ink-3);
+  font-weight: 500;
+}
+.donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.donut-legend-item {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.donut-legend-swatch {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+}
+.donut-legend-label {
+  color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.donut-legend-value {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.donut-legend-pct {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 11px;
+  margin-left: 3px;
+}
+
+/* OBJECTIONS BAR LIST */
+.objection-list { display: flex; flex-direction: column; gap: 10px; flex: 1; padding-top: 2px; }
+.objection-row {
+  display: grid;
+  grid-template-columns: 18px 1fr 36px;
+  gap: 10px;
+  align-items: center;
+}
+.objection-rank {
+  font-family: var(--font-label);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-4);
+  text-align: center;
+}
+.objection-rank.top { color: var(--lg-red); }
+.objection-content { min-width: 0; }
+.objection-label {
+  font-size: 12.5px;
+  color: var(--ink);
+  margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-weight: 500;
+}
+.objection-bar-wrap {
+  height: 4px;
+  background: var(--surface-sunken);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.objection-bar-fill {
+  height: 100%;
+  background: var(--lg-red);
+  border-radius: 2px;
+}
+.objection-count {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: right;
+}
+
+/* TWO-COLUMN LAYOUT */
+.two-col {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+/* PANELS (mockup style) */
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.panel-title em {
+  font-style: normal;
+  color: var(--ink-3);
+  font-weight: 400;
+  margin-left: 6px;
+  font-size: 14px;
+}
+.panel-meta {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* LEADERBOARD (mockup style) */
+.lb-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 70px 70px 70px 70px;
+  gap: 12px;
+  padding: 12px 22px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.lb-row:hover { background: var(--surface); }
+.lb-row:last-child { border-bottom: none; }
+.lb-row.lb-header {
+  background: var(--surface-sunken);
+  cursor: default;
+}
+.lb-row.lb-header:hover { background: var(--surface-sunken); }
+.lb-row.lb-header .lb-score,
+.lb-row.lb-header .lb-rank,
+.lb-row.lb-header .lb-name-text {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.lb-rank.top { color: var(--lg-green); font-weight: 700; font-size: 14px; }
+.lb-avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.lb-name-text {
+  font-size: 13.5px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.lb-name-sub {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 400;
+}
+.lb-score {
+  text-align: right;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* SCORE COLOR ENCODING */
+.score-good { color: var(--lg-green); }
+.score-mid { color: var(--lg-gold); }
+.score-low { color: var(--lg-red); }
+
+/* ATTENTION PANEL (mockup style) */
+.attn-item {
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.attn-item:hover { background: var(--surface); }
+.attn-item:last-child { border-bottom: none; }
+.attn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+.attn-dot.warn { background: var(--lg-red); }
+.attn-dot.info { background: var(--lg-blue); }
+.attn-dot.alert { background: var(--lg-gold); }
+.attn-content { flex: 1; min-width: 0; }
+.attn-title {
+  font-size: 13.5px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+.attn-desc {
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.4;
+}
+
+/* RESPONSIVE — mockup row collapses */
+@media (max-width: 1100px) {
+  .two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .hero-grid.hero-2up { grid-template-columns: 1fr; }
+}
+
+
+/* ============================================ */
+/* PHASE 4 ADDITIONS — Library page              */
+/* ============================================ */
+
+/* BULK ACTIONS BAR — mockup gradient style */
+.bulk-bar-mockup {
+  background: linear-gradient(to right, var(--lg-green-bg) 0%, var(--surface2) 70%);
+  border: 1px solid var(--lg-green-soft);
+  border-radius: 12px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.bulk-bar-title {
+  font-family: var(--font-label);
+  font-weight: 600;
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* LIB TOOLBAR — mockup style */
+.lib-toolbar-mockup {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.search-box {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  transition: all 0.15s ease;
+}
+.search-box:focus-within {
+  background: var(--surface2);
+  border-color: var(--lg-green);
+  box-shadow: 0 0 0 3px var(--lg-green-bg);
+}
+.search-box input {
+  border: none;
+  outline: none;
+  background: transparent;
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.search-box input::placeholder { color: var(--ink5); }
+
+.filter-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--ink2);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.filter-chip:hover {
+  background: var(--surface2);
+  border-color: var(--border3);
+}
+.filter-chip.active {
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  border-color: var(--lg-green-soft);
+  font-weight: 500;
+}
+.chip-count {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink4);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.filter-chip.active .chip-count { color: var(--lg-green); }
+
+/* CALL ROW — mockup style replaces .crow */
+.call-list {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.call-row {
+  display: grid;
+  grid-template-columns: 6px 56px 2fr 150px 110px 110px 28px;
+  gap: 14px;
+  padding: 14px 18px 14px 0;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.call-row:hover { background: var(--surface); }
+.call-row:last-of-type { border-bottom: none; }
+.call-row.expanded { background: var(--lg-green-bg); border-bottom-color: var(--lg-green-soft); }
+.call-row.expanded:hover { background: var(--lg-green-bg); }
+.call-row.flagged-row { background: var(--lg-red-bg); }
+.call-row.flagged-row:hover { background: #F8D7D3; }
+
+.score-stripe {
+  height: 100%;
+  min-height: 56px;
+  width: 6px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+  align-self: stretch;
+}
+.score-stripe.good { background: var(--lg-green-soft); }
+.score-stripe.mid { background: var(--lg-gold); opacity: 0.45; }
+.score-stripe.low { background: var(--lg-red); }
+.score-stripe.flagged { background: var(--lg-red); }
+
+.call-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.call-score-num {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+.call-score-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+.call-meta-main { min-width: 0; }
+.call-caller {
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.call-summary {
+  font-size: 12.5px;
+  color: var(--ink3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.call-categorization {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.cat-badge {
+  font-family: var(--font-label);
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--ink3);
+  background: var(--surface-sunken);
+}
+.cat-badge.specialty { background: rgba(0,102,179,0.12); color: var(--lg-blue); }
+.cat-badge.commercial { background: #E9DEF1; color: #6B3D8C; }
+.cat-badge.long-distance { background: rgba(227,177,36,0.18); color: #8A6420; }
+.cat-badge.flagged { background: var(--lg-red-bg); color: var(--lg-red); }
+
+.call-rep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink2);
+  min-width: 0;
+}
+.call-rep-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.call-rep-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outcome-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.outcome-badge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.outcome-booked { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.outcome-booked::before { background: var(--lg-green); }
+.outcome-estimate { background: rgba(227,177,36,0.18); color: #8A6420; }
+.outcome-estimate::before { background: var(--lg-gold); }
+.outcome-pipeline { background: rgba(0,102,179,0.12); color: var(--lg-blue); }
+.outcome-pipeline::before { background: var(--lg-blue); }
+.outcome-lost { background: var(--lg-red-bg); color: var(--lg-red); }
+.outcome-lost::before { background: var(--lg-red); }
+.outcome-unknown { background: var(--surface-sunken); color: var(--ink3); }
+.outcome-unknown::before { background: var(--ink4); }
+
+.call-date {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.row-arrow {
+  color: var(--ink4);
+  transition: transform 0.2s ease;
+  font-size: 18px;
+  text-align: center;
+}
+.call-row.expanded .row-arrow { transform: rotate(90deg); color: var(--lg-green-dark); }
+
+/* CALL DETAIL — sibling element after .call-row */
+.call-detail {
+  background: linear-gradient(180deg, var(--lg-green-bg) 0%, var(--surface2) 12%);
+  border-top: 1px solid var(--lg-green-soft);
+  border-bottom: 1px solid var(--border);
+  padding: 24px 32px 28px;
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 28px;
+}
+
+.call-detail-hero {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--lg-green-soft);
+}
+.verdict-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.verdict-badge.good { background: var(--lg-green); color: white; }
+.verdict-badge.mid { background: var(--lg-gold); color: #2A1F00; }
+.verdict-badge.low { background: var(--lg-red); color: white; }
+.verdict-badge.excluded { background: var(--ink4); color: white; }
+.verdict-text {
+  flex: 1;
+  font-size: 14px;
+  color: var(--ink2);
+  line-height: 1.5;
+}
+.verdict-text strong { color: var(--ink); font-weight: 600; }
+
+/* Detail left side — main content */
+.detail-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Detail side panel */
+.detail-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Score card (used inside detail-side) */
+.score-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.score-card-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.score-row {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 80px 36px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.score-row:last-child { margin-bottom: 0; }
+.score-row-label {
+  font-size: 12.5px;
+  color: var(--ink2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.score-bar {
+  height: 4px;
+  background: var(--surface-sunken);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%;
+  background: var(--lg-green);
+  border-radius: 2px;
+}
+.score-bar-fill.mid { background: var(--lg-gold); }
+.score-bar-fill.low { background: var(--lg-red); }
+.score-row-value {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--ink);
+}
+
+/* COACHING / STRENGTHS LISTS */
+.coaching-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+}
+.coaching-list li {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.5;
+  padding-left: 14px;
+  position: relative;
+}
+.coaching-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  background: var(--lg-red);
+  border-radius: 50%;
+}
+.coaching-list .strength::before { background: var(--lg-green); }
+
+/* COLLAPSIBLE PANELS inside detail-side (checklist, manager feedback, talk ratio) */
+.detail-section {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.detail-section-head {
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease;
+}
+.detail-section-head:hover { background: var(--surface); }
+.detail-section-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+}
+.detail-section-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+}
+.detail-section-pill.mid { background: rgba(227,177,36,0.18); color: #8A6420; }
+.detail-section-pill.low { background: var(--lg-red-bg); color: var(--lg-red); }
+.detail-section-chev {
+  color: var(--ink4);
+  font-size: 14px;
+  transition: transform 0.2s ease;
+  margin-left: 8px;
+}
+.detail-section.open .detail-section-chev { transform: rotate(90deg); color: var(--lg-green-dark); }
+.detail-section-body {
+  display: none;
+  padding: 0 18px 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.detail-section.open .detail-section-body { display: block; }
+
+/* CHECKLIST GRID inside expanded section */
+.ck-grid-mockup {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.ck-item-mockup {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink2);
+  line-height: 1.4;
+  padding: 4px 0;
+}
+.ck-item-mockup .ck-icon {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+.ck-item-mockup.hit .ck-icon { color: var(--lg-green); }
+.ck-item-mockup.miss .ck-icon { color: var(--ink5); }
+.ck-item-mockup.na .ck-icon { color: var(--ink4); font-size: 9px; }
+
+/* TALK RATIO inside detail-side */
+.talk-ratio-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 6px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.talk-ratio-bar > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+.talk-ratio-rep { background: var(--lg-green); }
+.talk-ratio-cust { background: var(--lg-blue); }
+
+.talk-ratio-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink3);
+}
+
+/* MANAGER FEEDBACK textarea */
+.mgr-textarea {
+  width: 100%;
+  min-height: 80px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  outline: none;
+  resize: vertical;
+  transition: all 0.15s ease;
+}
+.mgr-textarea:focus {
+  border-color: var(--lg-green);
+  background: var(--surface2);
+  box-shadow: 0 0 0 3px var(--lg-green-bg);
+}
+
+/* AUDIO PLAYER (dark gem) */
+.audio-player-mockup {
+  background: var(--ink);
+  color: var(--surface2);
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.audio-play-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--lg-green);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 0 3px rgba(0, 114, 54, 0.25);
+}
+.audio-play-btn:hover { background: var(--lg-green-light); transform: scale(1.04); }
+.audio-meta {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: rgba(255,255,255,0.6);
+  letter-spacing: 0.06em;
+}
+
+/* TRANSCRIPT */
+.transcript-wrap-mockup {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  max-height: 500px;
+  overflow-y: auto;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+/* Detail action buttons */
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1100px) {
+  .call-detail { grid-template-columns: 1fr; }
+  .call-row {
+    grid-template-columns: 6px 50px 2fr 110px 100px 28px;
+  }
+  .call-row .call-rep,
+  .call-row .call-date { display: none; }
+}
+
+
+/* ============================================ */
+/* PHASE 5 ADDITIONS — Rep Profiles page         */
+/* ============================================ */
+
+/* SKILL CARDS — strongest / coaching opportunity */
+.skill-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.skill-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  position: relative;
+  overflow: hidden;
+}
+.skill-card.strength { border-left: 4px solid var(--lg-green); }
+.skill-card.weakness { border-left: 4px solid var(--lg-red); }
+.skill-card-label {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skill-card-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 12px;
+  color: white;
+  font-weight: 700;
+}
+.skill-card.strength .skill-card-icon { background: var(--lg-green); }
+.skill-card.weakness .skill-card-icon { background: var(--lg-red); }
+.skill-card-name {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 4px;
+  letter-spacing: -0.005em;
+}
+.skill-card-score {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 6px 0 12px;
+  line-height: 1;
+}
+.skill-card-score-suffix {
+  font-size: 18px;
+  color: var(--ink3);
+  font-weight: 400;
+}
+.skill-card-detail {
+  font-size: 12.5px;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+.skill-card-detail strong { color: var(--ink2); font-weight: 600; }
+
+/* Profile header — name + meta + actions */
+.profile-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.profile-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.profile-name {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.profile-meta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* Profile score row — 5-up grid using existing styles */
+.profile-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+/* Score profile rows — wider label column */
+.score-row.score-row-wide {
+  grid-template-columns: 150px 1fr 50px 50px;
+  gap: 14px;
+}
+.score-row-delta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink4);
+  font-weight: 500;
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+.score-row-delta.up { color: var(--lg-green-dark); }
+.score-row-delta.down { color: var(--lg-red); }
+
+/* Trend chart frame */
+.profile-trend-frame {
+  height: 200px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding-top: 10px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.profile-trend-bar {
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  transition: opacity 0.15s ease;
+  min-width: 4px;
+}
+.profile-trend-summary {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.profile-trend-summary-label {
+  color: var(--ink3);
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.profile-trend-summary-val {
+  font-family: var(--font-display);
+  font-size: 24px;
+  color: var(--ink);
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+/* Recurring coaching / strengths panels */
+.profile-list-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+}
+.profile-list-panel-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.profile-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+}
+.profile-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--ink2);
+  line-height: 1.5;
+  padding-left: 14px;
+  position: relative;
+}
+.profile-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  background: var(--lg-red);
+  border-radius: 50%;
+}
+.profile-list.strengths li::before { background: var(--lg-green); }
+.profile-list-count {
+  margin-left: auto;
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink4);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Empty state on profile page */
+.profile-empty {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--ink3);
+  font-size: 14px;
+}
+.profile-empty-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1100px) {
+  .skill-cards { grid-template-columns: 1fr; }
+}
+
+
+/* ============================================ */
+/* PHASE 5 v2 — Rep card grid                   */
+/* (replaces .rep-picker / .rep-pill approach)  */
+/* ============================================ */
+
+.rep-location-section {
+  margin-bottom: 24px;
+}
+.rep-location-header {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rep-location-header::before {
+  content: '📍';
+  font-size: 12px;
+}
+.rep-location-header-count {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink4);
+  letter-spacing: 0.08em;
+  font-weight: 400;
+}
+
+.rep-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.rep-card-v2 {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+.rep-card-v2:hover {
+  border-color: var(--lg-green-soft);
+  box-shadow: var(--sh);
+  transform: translateY(-1px);
+}
+.rep-card-v2.active {
+  border-color: var(--lg-green);
+  box-shadow: 0 0 0 3px var(--lg-green-bg);
+}
+.rep-card-v2.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--lg-green);
+}
+
+.rep-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.rep-card-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.rep-card-v2.active .rep-card-avatar {
+  background: var(--lg-green);
+  color: white;
+}
+.rep-card-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rep-card-meta {
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--ink3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 3px;
+  font-weight: 500;
+}
+
+.rep-card-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.rep-card-score-big {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.rep-card-score-suffix {
+  font-size: 14px;
+  color: var(--ink3);
+  font-weight: 400;
+}
+.rep-card-score-trend {
+  margin-left: auto;
+}
+
+.rep-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+  font-size: 11.5px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.rep-card-stat-label {
+  font-family: var(--font-label);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  font-weight: 500;
+}
+.rep-card-stat-val {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 2px;
+}
+.rep-card-stat-val.muted { color: var(--ink3); font-weight: 500; }
+
+/* Sparkline */
+.rep-card-spark-wrap {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.rep-card-spark-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  font-weight: 500;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.rep-card-spark-label-meta {
+  font-size: 9px;
+  color: var(--ink5);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.rep-card-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 24px;
+}
+.rep-card-spark-bar {
+  flex: 1;
+  border-radius: 1.5px 1.5px 0 0;
+  min-width: 3px;
+  min-height: 2px;
+  cursor: help;
+  transition: opacity 0.12s ease;
+}
+.rep-card-spark-bar:hover { opacity: 0.7; }
+
+/* Header row: location filter + sort note */
+.profile-page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+
+/* Score distribution mini-bars (on featured Average Score card) */
+.score-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+.score-dist-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.85);
+  font-weight: 500;
+}
+.score-dist-label {
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.score-dist-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.score-dist-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.score-dist-bar-fill.high { background: rgba(255,255,255,0.95); }
+.score-dist-bar-fill.mid  { background: rgba(255,255,255,0.55); }
+.score-dist-bar-fill.low  { background: rgba(255,255,255,0.30); }
+.score-dist-pct {
+  text-align: right;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+}
+
+
+/* ============================================ */
+/* PHASE 6 ADDITIONS — Compare Reps page         */
+/* ============================================ */
+
+/* SELECTOR CARD */
+.cmp-selector-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 16px;
+}
+.cmp-selector-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  align-items: end;
+}
+.cmp-selector-col-label {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-selector-col-label.rep-a { color: var(--lg-blue, #0066B3); }
+.cmp-selector-col-label.rep-b { color: var(--lg-gold-dark, #8A6420); }
+.cmp-swap-icon {
+  font-size: 22px;
+  color: var(--ink4);
+  padding-bottom: 6px;
+  user-select: none;
+}
+
+/* HERO STRIP — two reps side by side */
+.cmp-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.cmp-hero-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 24px;
+  position: relative;
+  overflow: hidden;
+}
+.cmp-hero-card.rep-a { border-top: 3px solid var(--lg-blue, #0066B3); }
+.cmp-hero-card.rep-b { border-top: 3px solid var(--lg-gold, #E3B124); }
+.cmp-hero-rep-label {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.cmp-hero-card.rep-a .cmp-hero-rep-label { color: var(--lg-blue, #0066B3); }
+.cmp-hero-card.rep-b .cmp-hero-rep-label { color: var(--lg-gold-dark, #8A6420); }
+.cmp-hero-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+}
+.cmp-hero-score {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.cmp-hero-score-value {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.cmp-hero-score-suffix {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--ink4);
+  font-weight: 500;
+}
+.cmp-hero-score-delta {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+.cmp-hero-score-delta.up { background: var(--lg-green-bg); color: var(--lg-green-dark); }
+.cmp-hero-score-delta.down { background: var(--lg-red-bg); color: var(--lg-red); }
+.cmp-hero-score-delta.flat { background: var(--surface2); color: var(--ink3); }
+.cmp-hero-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.cmp-hero-stat-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  font-weight: 500;
+  margin-bottom: 3px;
+}
+.cmp-hero-stat-value {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* COMPARE SCORE PROFILE — dual bars per row */
+.cmp-score-profile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 16px;
+}
+.cmp-score-profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cmp-score-profile-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+}
+.cmp-score-profile-legend {
+  display: flex;
+  gap: 14px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink3);
+}
+.cmp-score-profile-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-score-profile-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.cmp-skill-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr 60px;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border2, var(--border));
+}
+.cmp-skill-row:last-child { border-bottom: none; }
+.cmp-skill-label {
+  font-size: 13px;
+  color: var(--ink2);
+  font-weight: 500;
+}
+.cmp-skill-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cmp-skill-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-sunken, var(--surface2));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cmp-skill-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.cmp-skill-bar-fill.rep-a { background: var(--lg-blue, #0066B3); }
+.cmp-skill-bar-fill.rep-b { background: var(--lg-gold, #E3B124); }
+.cmp-skill-bar-value {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  width: 30px;
+  text-align: right;
+  color: var(--ink);
+}
+.cmp-skill-bar-value.empty { color: var(--ink5); font-weight: 400; }
+.cmp-skill-team {
+  font-family: var(--font-label);
+  font-size: 11px;
+  color: var(--ink3);
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+.cmp-skill-team-val {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+.cmp-skill-row .cmp-skill-bar-cell.winner .cmp-skill-bar-value::after {
+  content: ' ▲';
+  color: var(--lg-green);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* COACHING side-by-side panels */
+.cmp-coach-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.cmp-coach-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 22px;
+}
+.cmp-coach-card.rep-a { border-left: 3px solid var(--lg-blue, #0066B3); }
+.cmp-coach-card.rep-b { border-left: 3px solid var(--lg-gold, #E3B124); }
+.cmp-coach-card-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+.cmp-coach-card.rep-a .cmp-coach-card-title { color: var(--lg-blue, #0066B3); }
+.cmp-coach-card.rep-b .cmp-coach-card-title { color: var(--lg-gold-dark, #8A6420); }
+.cmp-coach-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cmp-coach-list li {
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.5;
+  padding-left: 14px;
+  position: relative;
+}
+.cmp-coach-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink4);
+}
+.cmp-coach-card.rep-a .cmp-coach-list li::before { background: var(--lg-blue, #0066B3); }
+.cmp-coach-card.rep-b .cmp-coach-list li::before { background: var(--lg-gold, #E3B124); }
+.cmp-coach-empty {
+  color: var(--ink4);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+/* COMPLIANCE rows inside collapsible */
+.cmp-compliance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cmp-compliance-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 110px;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border2, var(--border));
+}
+.cmp-compliance-row:last-child { border-bottom: none; }
+.cmp-compliance-label {
+  font-size: 12px;
+  color: var(--ink2);
+}
+.cmp-compliance-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-compliance-bar-track {
+  flex: 1;
+  height: 5px;
+  background: var(--surface-sunken, var(--surface2));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cmp-compliance-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.cmp-compliance-bar-cell.rep-a .cmp-compliance-bar-fill { background: var(--lg-blue, #0066B3); }
+.cmp-compliance-bar-cell.rep-b .cmp-compliance-bar-fill { background: var(--lg-gold, #E3B124); }
+.cmp-compliance-bar-pct {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  width: 32px;
+  text-align: right;
+  color: var(--ink2);
+}
+
+/* RESPONSIVE */
+@media (max-width: 900px) {
+  .cmp-hero-grid,
+  .cmp-coach-grid { grid-template-columns: 1fr; }
+  .cmp-selector-row { grid-template-columns: 1fr; }
+  .cmp-swap-icon { display: none; }
+  .cmp-skill-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .cmp-skill-team { text-align: left; }
+  .cmp-compliance-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+
+/* ============================================ */
+/* PHASE 6 ADDITIONS — Management page           */
+/* ============================================ */
+
+/* PAGE LAYOUT — two columns */
+.mgmt-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.mgmt-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* CARD HEADER — consistent w/ mockup */
+.mgmt-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.mgmt-card-head {
+  padding: 14px 18px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.mgmt-card-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mgmt-card-subtitle {
+  font-size: 12px;
+  color: var(--ink3);
+  padding: 8px 18px 0;
+  margin: 0;
+}
+.mgmt-card-body {
+  padding: 14px 18px 16px;
+}
+.mgmt-card-body.flush { padding: 0; }
+
+/* TABLE WIDTH FIX (Bug 2) — explicit column widths */
+.rmgmt-table-v2 {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.rmgmt-table-v2 col.col-name     { width: auto; }
+.rmgmt-table-v2 col.col-loc      { width: 160px; }
+.rmgmt-table-v2 col.col-calls    { width: 70px; }
+.rmgmt-table-v2 col.col-score    { width: 90px; }
+.rmgmt-table-v2 col.col-status   { width: 80px; }
+.rmgmt-table-v2 col.col-actions  { width: 110px; }
+.rmgmt-table-v2 th,
+.rmgmt-table-v2 td {
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.rmgmt-table-v2 th {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  background: var(--surface-sunken, var(--surface2));
+}
+.rmgmt-table-v2 .col-calls,
+.rmgmt-table-v2 .col-score,
+.rmgmt-table-v2 .col-status,
+.rmgmt-table-v2 .col-actions {
+  text-align: center;
+}
+.rmgmt-table-v2 td.col-actions { text-align: right; }
+.rmgmt-table-v2 tr.rmgmt-row { cursor: pointer; transition: background 0.12s ease; }
+.rmgmt-table-v2 tr.rmgmt-row:hover td { background: var(--surface); }
+.rmgmt-table-v2 tr.rmgmt-row.expanded td { background: var(--surface); }
+.rmgmt-table-v2 tr.rmgmt-row.expanded td:first-child {
+  border-left: 3px solid var(--lg-green);
+  padding-left: 9px;
+}
+.rmgmt-table-v2 tr.rmgmt-edit-row td {
+  padding: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.rmgmt-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rmgmt-name-chev {
+  color: var(--ink4);
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+.rmgmt-row.expanded .rmgmt-name-chev {
+  transform: rotate(90deg);
+  color: var(--lg-green-dark);
+}
+.rmgmt-status-pill {
+  display: inline-block;
+  font-family: var(--font-label);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--lg-green-bg);
+  color: var(--lg-green-dark);
+}
+.rmgmt-loc-empty {
+  color: var(--lg-gold-dark, #8A6420);
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* EDIT PANEL — three-way grid with detail-section sub-blocks */
+.rmgmt-edit-panel {
+  padding: 14px 18px 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.rmgmt-edit-block {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.rmgmt-edit-block.danger { border-color: var(--lg-red-bg); }
+.rmgmt-edit-block-label {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 500;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rmgmt-edit-block.danger .rmgmt-edit-block-label { color: var(--lg-red); }
+.rmgmt-edit-row-controls {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.rmgmt-edit-row-controls .ovr-inp,
+.rmgmt-edit-row-controls .fsel {
+  flex: 1;
+  min-width: 0;
+}
+.rmgmt-edit-hint {
+  font-size: 10.5px;
+  color: var(--ink3);
+  margin-top: 5px;
+}
+.rmgmt-edit-msg {
+  font-size: 11px;
+  margin-top: 5px;
+  min-height: 14px;
+}
+
+/* UNMATCHED REPS PANEL */
+.mgmt-unmatched-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--lg-gold, #E3B124);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.mgmt-unmatched-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  gap: 12px;
+}
+.mgmt-unmatched-title {
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lg-gold-dark, #8A6420);
+  font-weight: 500;
+}
+.mgmt-unmatched-count {
+  font-family: var(--font-label);
+  font-size: 10px;
+  background: rgba(227,177,36,0.18);
+  color: var(--lg-gold-dark, #8A6420);
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.06em;
+}
+.mgmt-unmatched-desc {
+  font-size: 12px;
+  color: var(--ink3);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.mgmt-unmatched-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border2, var(--border));
+  flex-wrap: wrap;
+}
+.mgmt-unmatched-row:last-child { border-bottom: none; }
+.mgmt-unmatched-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--ink);
+  flex: 1;
+  min-width: 100px;
+}
+.mgmt-unmatched-count-meta {
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  color: var(--ink3);
+  letter-spacing: 0.04em;
+}
+
+/* RE-ANALYZE SUMMARY (right column) */
+.mgmt-stat-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 6px;
+}
+.mgmt-stat-cell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 8px;
+  text-align: center;
+}
+.mgmt-stat-cell-value {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.mgmt-stat-cell-value.g { color: var(--lg-green-dark); }
+.mgmt-stat-cell-value.r { color: var(--lg-red); }
+.mgmt-stat-cell-value.n { color: var(--ink2); }
+.mgmt-stat-cell-label {
+  font-family: var(--font-label);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-top: 3px;
+  font-weight: 500;
+}
+.mgmt-empty-line {
+  font-size: 12px;
+  color: var(--ink4);
+  font-style: italic;
+}
+.mgmt-failed-list {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--ink3);
+}
+.mgmt-failed-list-title {
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--lg-red);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 1100px) {
+  .mgmt-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .rmgmt-edit-panel { grid-template-columns: 1fr; }
+  .rmgmt-table-v2 col.col-loc,
+  .rmgmt-table-v2 col.col-status { width: 100px; }
+  .mgmt-stat-row { grid-template-columns: 1fr 1fr; }
+}
+
+</style>
+</head>
+<body>
+<div id="share-banner" style="display:none" class="share-banner">🔗 <strong id="share-banner-label">Shared View</strong> <span>· Read only</span></div>
+<div class="shell">
+<nav class="sidebar" id="sidebar">
+  <div class="sb-brand">
+    <img src="data:image/png;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAR+BH4DASIAAhEBAxEB/8QAHQABAAIDAQEBAQAAAAAAAAAAAAcIBQYJBAMCAf/EAGoQAAEDAgMFAwUGDBEKAwYEBwABAgMEBQYHEQgSITFBE1FhFCIycYFCUnKRobEVFhgjM0Nic7KzwdEJFzY3OFNWdHWCkpSVorTS0yQ0NVRVY5PCw+ElV/AmRGRlg6NFpeLxRmZ2hIWk4//EABsBAQACAwEBAAAAAAAAAAAAAAABAgQFBgMH/8QAPREBAAEDAQQGCQMDAgYDAAAAAAECAxEEBRIhMQZBUWFx0RMiMoGRobHB8BQz4RVCUiPxFjRDYnKSU4LS/9oADAMBAAIRAxEAPwDQgAax8ZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH//Z" alt="Little Guys Movers" style="width:100%;max-width:168px;display:block;margin:0 auto" />
+  </div>
+  <div class="sb-nav">
+    <div class="sb-group" id="sb-g1">Analytics</div>
+    <button class="sb-btn active" onclick="nav('overview')" id="nav-overview"><span class="sb-ico">🏠</span>Overview</button>
+    <button class="sb-btn" onclick="nav('library')" id="nav-library"><span class="sb-ico">📞</span>Call Library</button>
+    <button class="sb-btn" onclick="nav('profiles')" id="nav-profiles"><span class="sb-ico">👤</span>Rep Profiles</button>
+    <div class="sb-sep"></div>
+    <div class="sb-group" id="sb-g2">Management</div>
+    <button class="sb-btn" onclick="nav('management')" id="nav-management"><span class="sb-ico">⚙️</span>Rep Management</button>
+    <button class="sb-btn" onclick="nav('shared')" id="nav-shared"><span class="sb-ico">📤</span>Shared Views</button>
+    <button class="sb-btn" onclick="nav('corrections')" id="nav-corrections"><span class="sb-ico">✏️</span>Correction Log</button>
+    <button class="sb-btn" onclick="nav('txcorrections')" id="nav-txcorrections"><span class="sb-ico">🔤</span>Transcript Rules</button>
+    <button class="sb-btn" onclick="nav('vonage')" id="nav-vonage"><span class="sb-ico">📞</span>Vonage Sync</button>
+    <div class="sb-sep"></div>
+    <button class="sb-btn" onclick="nav('costs')" id="nav-costs"><span class="sb-ico">💰</span>Running Costs</button>
+    <button class="sb-btn" onclick="nav('compare')" id="nav-compare"><span class="sb-ico">⚖️</span>Rep Comparison</button>
+    <div class="sb-sep"></div>
+    <button class="sb-btn" onclick="nav('add')" id="nav-add"><span class="sb-ico">➕</span>Add Calls</button>
+  </div>
+  <div class="sb-footer"><div class="sb-version">v15 · Call Intelligence</div></div>
+</nav>
+<div class="mobile-overlay" id="mob-overlay" onclick="closeMob()"></div>
+<div class="main">
+  <header class="topbar">
+    <button class="hamburger" onclick="openMob()">☰</button>
+    <div class="tb-title" id="tb-title">Overview</div>
+    <div class="tb-right" id="tb-right">
+      <select id="loc-filter" class="fsel" style="font-size:11.5px;padding:5px 9px" onchange="setLocationFilter(this.value)">
+        <option value="">All Locations</option>
+      </select>
+      <div style="display:flex;align-items:center;gap:4px;position:relative">
+        <button class="btn btn-g btn-sm" id="date-filter-btn" onclick="toggleDatePicker()" style="font-size:11px;padding:3px 9px;display:flex;align-items:center;gap:4px">
+          📅 <span id="date-filter-label">Last 30 days</span>
+        </button>
+        <div id="date-picker-panel" style="display:none;position:absolute;top:32px;right:0;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;z-index:1000;box-shadow:0 6px 24px rgba(0,0,0,.13);min-width:260px">
+          <div style="font-size:11px;font-weight:600;color:var(--ink3);letter-spacing:.05em;margin-bottom:10px">DATE RANGE</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="font-size:12px;color:var(--ink2)">Quick select
+              <select id="date-quick" class="fsel" style="width:100%;margin-top:3px;font-size:12px" onchange="applyQuickDate(this.value)">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="365">Last 12 months</option>
+                <option value="0">All time</option>
+                <option value="custom">Custom range…</option>
+              </select>
+            </label>
+            <div id="date-custom-range" style="display:none;gap:6px;flex-direction:column">
+              <label style="font-size:12px;color:var(--ink2)">From
+                <input type="date" id="date-from-input" class="fsel" style="width:100%;margin-top:3px;font-size:12px" onchange="applyCustomDate()">
+              </label>
+              <label style="font-size:12px;color:var(--ink2)">To
+                <input type="date" id="date-to-input" class="fsel" style="width:100%;margin-top:3px;font-size:12px" onchange="applyCustomDate()">
+              </label>
+            </div>
+            <button class="btn btn-g btn-sm" style="width:100%;margin-top:4px" onclick="clearDateFilter()">Clear filter</button>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-g btn-sm" onclick="exportCSV()">↓ CSV</button>
+      <button class="btn btn-p btn-sm" onclick="nav('add')">+ Add Calls</button>
+    </div>
+  </header>
+  <div id="status-bar" class="status-bar">
+    <span class="sb-msg" id="sb-msg">Loading…</span>
+    <span id="loc-indicator"></span>
+    <button class="btn btn-g btn-sm" style="padding:3px 9px;font-size:11px" onclick="refreshData()">↺ Refresh</button>
+  </div>
+  <div class="page" id="page"></div>
+</div>
+</div>
+<script>
+const API='';
+const CK=['got_move_date','got_customer_name','got_phone_number','got_cities','got_home_type','got_stairs_info','did_full_inventory','asked_forgotten_items','asked_about_boxes','gave_price_on_call','attempted_to_close','offered_email_estimate','mentioned_confirmations','thanked_customer','asked_name_at_start','led_estimate_process','got_email','scheduled_onsite_attempt','offered_alternatives','took_rapport_opportunities','completed_booking_wrapup','captured_lead'];
+const CKFULL=['Move date','Customer name','Phone number (asked/confirmed)','Cities/locations','Home type (load & unload)','Stairs info','Full room-by-room inventory','Forgotten items asked','Moving boxes asked','Gave price on call','Attempted to close','Offered email estimate','Mentioned confirmation calls','Thanked customer','Asked/confirmed customer name','Led estimate process (Navigator)','Got email (asked/confirmed)','Attempted to schedule onsite','Offered alternatives for difficult moves','Took rapport opportunities','Completed booking wrap-up','Lead captured'];
+const CK_GROUPS=[
+  {name:'Information Gathering',keys:['got_move_date','got_customer_name','got_phone_number','got_cities','got_home_type','got_stairs_info'],color:'#3461c1'},
+  {name:'Inventory & Details',keys:['did_full_inventory','asked_forgotten_items','asked_about_boxes'],color:'#6b21a8'},
+  {name:'Pricing & Close',keys:['gave_price_on_call','attempted_to_close'],color:'#b86800'},
+  {name:'Follow-up & Wrap-up',keys:['offered_email_estimate','mentioned_confirmations','got_email','thanked_customer'],color:'#4a7c3f'},
+  {name:'Rapport & Navigation',keys:['asked_name_at_start','led_estimate_process','scheduled_onsite_attempt','offered_alternatives','took_rapport_opportunities'],color:'#c0392b'},
+  {name:'Admin & Lead',keys:['completed_booking_wrapup','captured_lead'],color:'#065f46'},
+];
+const SK=['information_control','price_delivery','closing_attempt','professionalism','rapport_tone','salesmanship','overall'];
+const SL=['Info & Control','Price Delivery','Closing','Professionalism','Rapport & Tone','Salesmanship','Overall'];
+// Curated keyword list — these are surfaced in the Keywords chart on Overview.
+// Names must match the canonical strings Claude returns in keywords_detected.
+// Prompt source: lgms_server_v12_audio.py "KEYWORDS" section.
+// Grouped here mentally as: closing language, value props, process.
+const KWS=[
+  // Closing / urgency
+  'spot available',
+  'get you on the board',
+  'first come first serve',
+  'no cancellation fee',
+  'save that for you',
+  'go ahead and book',
+  'no deposit',
+  // Value props
+  'background checked',
+  'no day labor',
+  'we show up',
+  'clothes in the dresser',
+  'disassemble',
+  // Process
+  'confirmation call'
+];
+
+let allCalls=[],reps=[],sharedViews=[],corrections=[];
+let lbKey='overall',lbDir=-1,lbShowAll=false;
+let selected=new Set();
+let audioFiles=[];
+let addTab='audio';
+let currentPage='overview';
+let trendChart=null,repTrendChart=null;
+let shareType='location';
+let reanalyzePoller=null,statusPoller=null;
+let libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};
+let locationFilter='';
+let dateFrom='';  // ISO date string '2026-01-01' — empty means no start bound
+let dateTo='';    // ISO date string '2026-04-30' — empty means no end bound
+let dateFilter=30; // relative days filter — 0=all time; overridden by dateFrom/dateTo when set
+let dataLoadedAt=null;
+
+const SHARE_MODE=!!(window.SHARE_TOKEN);
+const SHARE_REP_IDS=window.SHARE_REP_IDS||[];
+const SHARE_LABEL=window.SHARE_LABEL||'';
+
+async function init(){
+  if(SHARE_MODE){
+    g('share-banner').style.display='flex';
+    g('share-banner-label').textContent=SHARE_LABEL||'Shared View';
+    ['sb-g2','nav-management','nav-shared','nav-corrections','nav-txcorrections','nav-vonage','nav-costs','nav-compare','nav-add'].forEach(id=>{const el=g(id);if(el)el.style.display='none';});
+    g('tb-right').innerHTML='';
+    g('status-bar').style.display='none';
+  }
+  await loadCalls();
+  await loadReps();
+  loadSharedViews();loadCorrections();
+  populateLocFilter();
+  // Start status poller FIRST so _lastBatchStatus is populated before nav() renders pages
+  // The first poll inside startStatusPoller is awaited via await — ensures state is ready
+  await startStatusPollerInitial();
+  nav('overview');
+  checkReanalStatus();
+  checkBulkStatus();
+}
+
+// Initial poll that runs once to populate state before page render, then starts the interval
+async function startStatusPollerInitial() {
+  try {
+    const [rr, br] = await Promise.all([fetch(API+'/reanalyze/status'), fetch(API+'/batch_upload/status')]);
+    window._lastJobStatus = await rr.json();
+    window._lastBatchStatus = await br.json();
+    updateStatusBar();
+    // If a batch is already running when we load the page, start the bulk poller too
+    if (window._lastBatchStatus?.status === 'running') {
+      startBulkPoller();
     }
-    # Add keyterms (each as separate param)
-    keyterm_str = ""
-    if keyterms:
-        keyterm_str = "&" + "&".join(f"keyterm={urllib.parse.quote(k)}" for k in keyterms[:100])
-
-    query = urllib.parse.urlencode(params) + keyterm_str
-    url = f"https://api.deepgram.com/v1/listen?{query}"
-
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "mp3"
-    mime_map = {"mp3": "audio/mpeg", "mp4": "audio/mp4", "m4a": "audio/mp4",
-                "wav": "audio/wav", "ogg": "audio/ogg", "webm": "audio/webm",
-                "mpeg": "audio/mpeg", "mpga": "audio/mpeg"}
-    mime = mime_map.get(ext, "audio/mpeg")
-
-    last_err = None
-    result = None
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(url, data=audio_bytes, method="POST")
-            req.add_header("Authorization", f"Token {DEEPGRAM_KEY}")
-            req.add_header("Content-Type", mime)
-            with urllib.request.urlopen(req, timeout=300) as r:
-                result = json.loads(r.read())
-            break  # Success
-        except urllib.error.HTTPError as e:
-            if e.code in (429, 502, 503, 504) and attempt < 2:
-                wait = (2 ** attempt) * 4  # 4s, 8s
-                log(f"  Deepgram HTTP {e.code} (attempt {attempt+1}/3) — retrying in {wait}s")
-                time.sleep(wait)
-                last_err = e
-                continue
-            raise
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            if attempt < 2:
-                wait = (2 ** attempt) * 3
-                log(f"  Deepgram network error (attempt {attempt+1}/3): {e} — retrying in {wait}s")
-                time.sleep(wait)
-                last_err = e
-                continue
-            raise
-    if result is None:
-        raise Exception(f"Deepgram failed after 3 attempts: {last_err}")
-
-    # Log Deepgram response structure for debugging
-    has_utterances = bool(result.get("results", {}).get("utterances"))
-    has_channels = bool(result.get("results", {}).get("channels"))
-    log(f"  Deepgram response: utterances={has_utterances}, channels={has_channels}")
-
-    # Try utterances first (best diarization)
-    utterances = result.get("results", {}).get("utterances", [])
-    if utterances:
-        lines = []
-        words_flat = []  # Flat list of {w, s, e, sp} for click-to-seek transcript
-        for u in utterances:
-            speaker = u.get("speaker", 0)
-            text = u.get("transcript", "").strip()
-            if text:
-                lines.append(f"Speaker {speaker}: {text}")
-            for w in u.get("words", []):
-                words_flat.append({
-                    "w": w.get("punctuated_word", w.get("word", "")),
-                    "s": round(float(w.get("start", 0)), 3),
-                    "e": round(float(w.get("end", 0)), 3),
-                    "sp": w.get("speaker", speaker),
-                })
-        transcript = "\n".join(lines)
-        log(f"  Diarized via utterances: {len(utterances)} turns, {len(words_flat)} words timestamped")
-        return transcript, True, words_flat
-
-    # Fallback: try word-level diarization from channels
-    channels = result.get("results", {}).get("channels", [])
-    if channels:
-        words = channels[0].get("alternatives", [{}])[0].get("words", [])
-        plain = channels[0].get("alternatives", [{}])[0].get("transcript", "")
-
-        words_flat = [{
-            "w": w.get("punctuated_word", w.get("word", "")),
-            "s": round(float(w.get("start", 0)), 3),
-            "e": round(float(w.get("end", 0)), 3),
-            "sp": w.get("speaker", 0),
-        } for w in words]
-
-        if words and any("speaker" in w for w in words):
-            # Build diarized transcript from word-level speaker tags
-            lines = []
-            current_speaker = None
-            current_words = []
-            for w in words:
-                spk = w.get("speaker", 0)
-                word = w.get("punctuated_word", w.get("word", ""))
-                if spk != current_speaker:
-                    if current_words:
-                        lines.append(f"Speaker {current_speaker}: {' '.join(current_words)}")
-                    current_speaker = spk
-                    current_words = [word]
-                else:
-                    current_words.append(word)
-            if current_words:
-                lines.append(f"Speaker {current_speaker}: {' '.join(current_words)}")
-            transcript = "\n".join(lines)
-            log(f"  Diarized via word-level: {len(lines)} turns, {len(words_flat)} words timestamped")
-            return transcript, True, words_flat
-        else:
-            log(f"  No diarization data, using plain transcript ({len(plain)} chars), {len(words_flat)} words timestamped")
-            return plain, False, words_flat
-
-    log("  Deepgram returned no usable transcript")
-    return "", False, []
-
-# Fallback Whisper transcription if Deepgram unavailable
-def transcribe_audio_whisper(audio_bytes, filename):
-    if not OPENAI_KEY:
-        raise Exception("Neither DEEPGRAM_API_KEY nor OPENAI_API_KEY is set")
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "mp3"
-    mime_map = {"mp3": "audio/mpeg", "mp4": "audio/mp4", "m4a": "audio/mp4",
-                "wav": "audio/wav", "ogg": "audio/ogg", "webm": "audio/webm",
-                "mpeg": "audio/mpeg", "mpga": "audio/mpeg"}
-    mime = mime_map.get(ext, "audio/mpeg")
-    boundary = "----WhisperBoundary"
-    body_parts = [
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1".encode(),
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\ntext".encode(),
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n".encode() + audio_bytes,
-        f"--{boundary}--".encode()
-    ]
-    body = b"\r\n".join(body_parts)
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/audio/transcriptions", data=body,
-        headers={"Authorization": f"Bearer {OPENAI_KEY}", "Content-Type": f"multipart/form-data; boundary={boundary}"},
-        method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=300) as r:
-        return r.read().decode("utf-8"), False, []
-
-def transcribe_audio(audio_bytes, filename, keyterms=None):
-    """Transcribe using Deepgram, fall back to Whisper if needed."""
-    if DEEPGRAM_KEY:
-        return transcribe_audio_deepgram(audio_bytes, filename, keyterms)
-    elif OPENAI_KEY:
-        log("  WARNING: Deepgram not configured, falling back to Whisper")
-        return transcribe_audio_whisper(audio_bytes, filename)
-    else:
-        raise Exception("No transcription API configured. Set DEEPGRAM_API_KEY.")
-
-# ──────────────────────────────────────────────
-# CLAUDE ANALYSIS
-# ──────────────────────────────────────────────
-
-def calculate_weighted_overall(scores):
-    """Calculate weighted overall score server-side — guaranteed accuracy."""
-    w = {
-        "closing_attempt":      0.25,
-        "price_delivery":       0.15,
-        "rapport_tone":         0.15,
-        "salesmanship":         0.20,
-        "information_control":  0.15,
-        "professionalism":      0.10,
+    if (window._lastJobStatus?.status === 'running') {
+      startReanalPoller();
     }
-    total = 0.0
-    weight_used = 0.0
-    for key, weight in w.items():
-        s = scores.get(key, {})
-        score = s.get("score", 0) if isinstance(s, dict) else 0
-        if score > 0:
-            total += score * weight
-            weight_used += weight
-    if weight_used < 0.3:
-        return 0
-    normalized = total / weight_used if weight_used > 0 else 0
-    return min(10, max(1, round(normalized)))
-
-# Vonage ingestion settings
-# Max call duration in seconds to process (default 15 min = 900s). Calls longer than this are skipped.
-MAX_CALL_DURATION_SECONDS = int(os.environ.get("MAX_CALL_DURATION_SECONDS", 900))
-
-def should_skip_by_duration(duration_seconds):
-    """Return (skip, reason) for calls that exceed the max duration threshold."""
-    if duration_seconds and duration_seconds > MAX_CALL_DURATION_SECONDS:
-        mins = duration_seconds // 60
-        return True, f"Call duration {mins}m exceeds {MAX_CALL_DURATION_SECONDS//60}m limit"
-    return False, ""
-
-def normalize_objection(raw):
-    """Normalize objection labels to canonical display names regardless of how Claude returned them."""
-    if not raw:
-        return raw
-    s = str(raw).lower().strip().replace('_', ' ').replace('-', ' ')
-    # Remove trailing punctuation
-    s = s.rstrip('.,!?')
-    if any(x in s for x in ['price', 'too high', 'expensive', 'cost', 'quote', 'cheaper']):
-        if any(x in s for x in ['another quote', 'other quote', 'competitor', 'someone else', 'already have', 'have a quote', 'have another']):
-            return "Already have another quote"
-        return "Price too high"
-    if any(x in s for x in ['think', 'consider', 'decide', 'not sure', 'unsure', 'need time', 'think about']):
-        return "Need to think about it"
-    if any(x in s for x in ['partner', 'spouse', 'husband', 'wife', 'check with', 'talk to', 'significant other', 'roommate']):
-        return "Need to check with partner"
-    if any(x in s for x in ['timing', 'not ready', 'wrong time', 'bad time', 'too early', 'too late', 'not the right']):
-        return "Wrong timing"
-    if any(x in s for x in ['another quote', 'other quote', 'have a quote', 'already have', 'someone else', 'other company', 'other mover']):
-        return "Already have another quote"
-    return raw.strip()
-
-def _call_claude_api(req_body, headers, max_retries=3):
-    """Call Anthropic API with exponential backoff retry for transient errors (429, 529, timeouts)."""
-    last_err = None
-    for attempt in range(max_retries):
-        try:
-            req = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages", data=req_body,
-                headers=headers, method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=180) as r:
-                return json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8", errors="replace")
-            # 429 = rate limit, 529 = overloaded, 502/503/504 = transient gateway errors
-            if e.code in (429, 502, 503, 504, 529) and attempt < max_retries - 1:
-                wait = (2 ** attempt) * 5  # 5s, 10s, 20s
-                log(f"  Claude API HTTP {e.code} (attempt {attempt+1}/{max_retries}) — retrying in {wait}s")
-                time.sleep(wait)
-                last_err = Exception(f"Anthropic API HTTP {e.code}: {error_body[:300]}")
-                continue
-            # Non-retryable error or last attempt
-            raise Exception(f"Anthropic API HTTP {e.code}: {error_body[:500]}")
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
-            if attempt < max_retries - 1:
-                wait = (2 ** attempt) * 3  # 3s, 6s, 12s
-                log(f"  Claude API network error (attempt {attempt+1}/{max_retries}): {e} — retrying in {wait}s")
-                time.sleep(wait)
-                last_err = e
-                continue
-            raise Exception(f"Anthropic API network error: {e}")
-    if last_err:
-        raise last_err
-    raise Exception("Claude API failed after all retries")
-
-
-def run_claude_analysis(transcript, filename, model="claude-sonnet-4-20250514", is_diarized=False):
-    corrections = get_recent_corrections()
-    # Truncate very long transcripts to prevent exceeding Claude's token limit
-    # Prompt template is ~16k chars; Claude's limit is ~200k tokens but request body has practical limits
-    # 14,000 chars of transcript ≈ 3,500 tokens — combined with prompt stays well within limits
-    MAX_TRANSCRIPT_CHARS = 14000
-    if len(transcript) > MAX_TRANSCRIPT_CHARS:
-        log(f"  Truncating long transcript: {len(transcript)} chars → {MAX_TRANSCRIPT_CHARS} chars ({filename})")
-        # Try to truncate at a sentence boundary
-        truncated = transcript[:MAX_TRANSCRIPT_CHARS]
-        last_newline = truncated.rfind('\n')
-        if last_newline > MAX_TRANSCRIPT_CHARS * 0.9:
-            truncated = truncated[:last_newline]
-        transcript = truncated + "\n[Transcript truncated — call was unusually long]"
-    prompt = build_prompt(transcript, filename, corrections, is_diarized=is_diarized)
-    req_body = json.dumps({
-        "model": model,
-        "max_tokens": 4096,
-        "messages": [{"role": "user", "content": prompt}]
-    }).encode()
-    headers = {"Content-Type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"}
-    resp = _call_claude_api(req_body, headers, max_retries=3)
-    tb = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
-    if not tb:
-        raise Exception("No response from Claude")
-    raw = tb["text"].strip()
-    if raw.startswith("```"):
-        raw = re.sub(r'^```[a-z]*\n?', '', raw)
-        raw = re.sub(r'\n?```$', '', raw)
-        raw = raw.strip()
-    start = raw.find('{')
-    end = raw.rfind('}')
-    if start >= 0 and end > start:
-        raw = raw[start:end+1]
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as e:
-        log(f"  JSON parse error: {e} — attempting repair")
-        raw = re.sub(r',\s*}', '}', raw)
-        raw = re.sub(r',\s*]', ']', raw)
-        raw = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
-        result = json.loads(raw)
-
-    # Calculate weighted overall server-side
-    scores = result.get("scores", {})
-    # Add salesmanship score to scores dict if returned separately
-    if "salesmanship_score" in result and "salesmanship" not in scores:
-        scores["salesmanship"] = {"score": result["salesmanship_score"], "note": ""}
-    weighted_overall = calculate_weighted_overall(scores)
-    if weighted_overall > 0:
-        scores["overall"] = {"score": weighted_overall, "note": "Weighted: closing 25%, price 15%, rapport 15%, salesmanship 20%, info&control 15%, prof 10%"}
-        result["scores"] = scores
-
-    # Normalize objection labels — Claude sometimes returns snake_case or slight variants
-    result["objections_detected"] = [normalize_objection(o) for o in result.get("objections_detected", [])]
-    # Re-key objection_positions with normalized labels
-    raw_pos = result.get("objection_positions", {})
-    result["objection_positions"] = {normalize_objection(k): v for k, v in raw_pos.items()}
-
-    # Save token counts for cost tracking
-    usage = resp.get("usage", {})
-    result["input_tokens"] = usage.get("input_tokens", 0)
-    result["output_tokens"] = usage.get("output_tokens", 0)
-
-    return result
-
-# ──────────────────────────────────────────────
-# PDF EXPORT
-# ──────────────────────────────────────────────
-
-def generate_call_pdf(call):
-    try:
-        from weasyprint import HTML
-    except ImportError:
-        raise Exception("WeasyPrint not installed")
-
-    scores = call.get("scores", {})
-    checklist = call.get("checklist", {})
-    overrides = call.get("score_overrides", {})
-
-    score_keys = ["rapport_tone","information_control","price_delivery","closing_attempt","salesmanship","professionalism","overall"]
-    score_labels = ["Rapport & Tone","Information & Control","Price Delivery","Closing Attempt","Salesmanship","Professionalism","Overall"]
-
-    ck_keys = ["got_move_date","got_customer_name","got_phone_number","got_cities","got_home_type","got_stairs_info","did_full_inventory","asked_forgotten_items","asked_about_boxes","gave_price_on_call","attempted_to_close","offered_email_estimate","mentioned_confirmations","thanked_customer","asked_name_at_start","led_estimate_process","got_email","scheduled_onsite_attempt","offered_alternatives","took_rapport_opportunities","completed_booking_wrapup","captured_lead"]
-    ck_labels = ["Move date","Customer name","Phone number","Cities/locations","Home type","Stairs info","Full inventory","Forgotten items","Moving boxes","Gave price on call","Closing attempt","Email estimate offered","Confirmations mentioned","Thanked customer","Asked name at start","Led estimate process","Got email","Scheduled onsite attempt","Offered alternatives","Took rapport opportunities","Completed booking wrap-up","Lead captured"]
-
-    def sc(s):
-        if s >= 8: return "#16a34a"
-        if s >= 5: return "#d97706"
-        return "#dc2626"
-
-    scores_html = ""
-    for k, label in zip(score_keys, score_labels):
-        s = overrides.get(k) or scores.get(k, {}).get("score", 0)
-        note = scores.get(k, {}).get("note", "")
-        scores_html += f'<div class="score-item"><div class="sl">{label}</div><div class="sv" style="color:{sc(s)}">{s}/10</div><div class="sb"><div style="width:{s*10}%;background:{sc(s)};height:100%;border-radius:3px"></div></div><div class="sn">{note}</div></div>'
-
-    ck_html = ""
-    for k, label in zip(ck_keys, ck_labels):
-        ck_html += f'<div class="ck">{"✅" if checklist.get(k) else "❌"} {label}</div>'
-
-    try:
-        dt = datetime.fromisoformat(call.get("created_at", datetime.now().isoformat()).replace("Z", "+00:00"))
-        formatted_date = dt.strftime("%B %d, %Y at %I:%M %p")
-    except Exception:
-        formatted_date = call.get("created_at", "")[:10]
-
-    html_content = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
-body{{font-family:Arial,sans-serif;color:#1a1c1a;margin:0;padding:24px;font-size:13px}}
-.hdr{{background:#4a7c3f;color:white;padding:20px 24px;border-radius:8px;margin-bottom:20px}}
-.hdr h1{{margin:0 0 4px;font-size:20px}}.hdr p{{margin:0;opacity:.85;font-size:12px}}
-.sec{{margin-bottom:20px}}.sec h2{{font-size:12px;font-weight:700;color:#4a7c3f;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-bottom:12px}}
-.mg{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}
-.mi{{background:#f6f9f5;border-radius:6px;padding:8px 10px}}.ml{{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.4px}}.mv{{font-size:13px;font-weight:600;margin-top:2px}}
-.score-item{{margin-bottom:10px}}.sl{{font-size:11px;font-weight:600;color:#374151;margin-bottom:2px}}.sv{{font-size:16px;font-weight:700}}.sb{{height:5px;background:#e5e7eb;border-radius:3px;margin:3px 0}}.sn{{font-size:11px;color:#6b7280}}
-.ckg{{display:grid;grid-template-columns:1fr 1fr;gap:4px}}.ck{{font-size:12px;padding:3px 0}}
-.sum{{background:#eef6ec;border-left:4px solid #4a7c3f;padding:12px;border-radius:4px;font-size:13px;line-height:1.7}}
-.cch{{background:#fff7ed;border-left:4px solid #d97706;padding:12px;border-radius:4px}}.cch li{{font-size:12px;margin-bottom:4px}}
-.nt{{background:#f9fafb;border:1px solid #e5e7eb;padding:12px;border-radius:6px;font-size:13px}}
-.ftr{{margin-top:30px;text-align:center;font-size:10px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:12px}}
-</style></head><body>
-<div class="hdr"><h1>Call Scorecard — {call.get('rep_name','Unknown Rep')}</h1><p>{formatted_date} · {call.get('caller_name','Unknown Caller')} · {call.get('call_outcome','unknown').replace('_',' ').title()}</p></div>
-<div class="sec"><h2>Call Details</h2><div class="mg">
-<div class="mi"><div class="ml">Rep</div><div class="mv">{call.get('rep_name','—')}</div></div>
-<div class="mi"><div class="ml">Caller</div><div class="mv">{call.get('caller_name','—')}</div></div>
-<div class="mi"><div class="ml">Purpose</div><div class="mv">{call.get('call_purpose','—')}</div></div>
-<div class="mi"><div class="ml">Move Type</div><div class="mv">{call.get('move_type','—')}</div></div>
-<div class="mi"><div class="ml">Outcome</div><div class="mv">{call.get('call_outcome','—').replace('_',' ').title()}</div></div>
-<div class="mi"><div class="ml">Sentiment</div><div class="mv">{call.get('customer_sentiment','—').title()}</div></div>
-</div></div>
-<div class="sec"><h2>Summary</h2><div class="sum">{call.get('call_summary','No summary.')}</div></div>
-<div class="sec"><h2>Performance Scores</h2>{scores_html}</div>
-<div class="sec"><h2>22-Step Checklist</h2><div class="ckg">{ck_html}</div></div>
-<div class="sec"><h2>Coaching Points</h2><div class="cch"><ul>{''.join(f'<li>{p}</li>' for p in call.get('coaching_points',[]) or ['None recorded.'])}</ul></div></div>
-{f'<div class="sec"><h2>Manager Notes</h2><div class="nt">{call.get("manager_notes","")}</div></div>' if call.get('manager_notes') else ''}
-<div class="ftr">Little Guys Movers — Call Intelligence · Generated {datetime.now().strftime("%B %d, %Y")}</div>
-</body></html>"""
-
-    return HTML(string=html_content).write_pdf()
-
-# ──────────────────────────────────────────────
-# BACKGROUND RE-ANALYZE
-# ──────────────────────────────────────────────
-
-def _reanalyze_worker():
-    global _reanalyze_job
-    try:
-        # Wait for any active batch upload to finish first
-        waited = 0
-        while _batch_job.get("status") == "running" and waited < 300:
-            log("Reanalyze waiting for batch upload to finish...")
-            time.sleep(10)
-            waited += 10
-        calls = supa("GET", "calls?order=created_at.desc&limit=5000&select=id,transcript,filename")
-        total = len(calls)
-        # Fetch transcript corrections ONCE before the loop, not on every iteration
-        try:
-            tx_corrections_cached = get_transcript_corrections()
-        except Exception:
-            tx_corrections_cached = []
-        with _reanalyze_lock:
-            _reanalyze_job["total"] = total
-            _reanalyze_job["processed"] = 0
-            _reanalyze_job["errors"] = 0
-            _reanalyze_job["failed_calls"] = []
-            _reanalyze_job["skipped"] = 0
-
-        for call in calls:
-            # Check if stop was requested
-            with _reanalyze_lock:
-                if _reanalyze_job.get("stop_requested"):
-                    _reanalyze_job["status"] = "stopped"
-                    _reanalyze_job["current"] = ""
-                    _reanalyze_job["finished_at"] = datetime.now(timezone.utc).isoformat()
-                    log("  Re-analyze stopped by user request")
-                    return
-
-            transcript = call.get("transcript", "")
-            filename = call.get("filename", "call.txt")
-            call_id = call.get("id")
-
-            with _reanalyze_lock:
-                _reanalyze_job["current"] = filename
-
-            if not transcript or not transcript.strip():
-                with _reanalyze_lock:
-                    _reanalyze_job["processed"] += 1
-                    _reanalyze_job["skipped"] += 1
-                continue
-
-            try:
-                with _analysis_semaphore:
-                    # Apply corrections before analysis (using corrections cached at job start)
-                    clean_transcript = apply_transcript_corrections(transcript, tx_corrections_cached)
-                    result = run_claude_analysis(clean_transcript, filename)
-
-                # Fetch existing record's manager-controlled fields so we don't overwrite them
-                # (managers may have manually toggled turned_away, exclusions, etc.)
-                try:
-                    existing = supa("GET", f"calls?id=eq.{call_id}&select=availability_decline,turned_away,onsite_suggested,exclude_from_scoring,exclusion_reason,manager_notes,tags,score_overrides,is_continuation&limit=1")
-                    existing_call = existing[0] if existing else {}
-                except Exception:
-                    existing_call = {}
-
-                call_date = parse_call_date_from_filename(filename)
-                update_data = {
-                    # Claude-derived fields — overwrite freely
-                    "scores": result.get("scores", {}),
-                    "checklist": result.get("checklist", {}),
-                    "strengths": result.get("strengths", []),
-                    "coaching_points": result.get("coaching_points", []),
-                    "keywords_detected": result.get("keywords_detected", []),
-                    "keyword_positions": result.get("keyword_positions", {}),
-                    "objections_detected": result.get("objections_detected", []),
-                    "objection_positions": result.get("objection_positions", {}),
-                    "customer_sentiment": result.get("customer_sentiment", "neutral"),
-                    "call_summary": result.get("call_summary", ""),
-                    "word_count": result.get("word_count", 0),
-                    "call_type": result.get("call_type", "sales_estimate"),
-                    "move_category": result.get("move_category", "standard"),
-                    "loss_reason": result.get("loss_reason", ""),
-                    "soft_pipeline_reason": result.get("soft_pipeline_reason", ""),
-                    "evaluation_confidence": result.get("evaluation_confidence", 8),
-                    "close_attempts": result.get("close_attempts", 0),
-                    "objections_overcome": result.get("objections_overcome", []),
-                    "objections_abandoned": result.get("objections_abandoned", []),
-                    "pipeline_recovery_quality": result.get("pipeline_recovery_quality", 0),
-                    "salesmanship_score": result.get("scores", {}).get("salesmanship", {}).get("score", 0) if isinstance(result.get("scores", {}).get("salesmanship"), dict) else 0,
-                    "value_props_used": result.get("value_props_used", []),
-                    "missed_rapport_opportunities": result.get("missed_rapport_opportunities", []),
-                    "input_tokens": result.get("input_tokens", 0),
-                    "output_tokens": result.get("output_tokens", 0),
-                    "pricing_model": result.get("pricing_model", "unknown"),
-                    "move_timeline": result.get("move_timeline", "unknown"),
-                    "call_quality": result.get("call_quality", "normal"),
-                    # Manager-controlled fields — preserve existing values if previously set
-                    # If existing has a True value, keep True (manager-set). Otherwise use Claude's detection.
-                    "availability_decline": existing_call.get("availability_decline") or result.get("availability_decline", False),
-                    "turned_away": existing_call.get("turned_away") or result.get("turned_away", False),
-                    "onsite_suggested": existing_call.get("onsite_suggested") or result.get("onsite_suggested", False),
-                    "is_continuation": existing_call.get("is_continuation") or result.get("is_continuation", False),
-                }
-                # Manager exclusion handling: preserve manual exclusions but allow auto-exclude on disconnect
-                existing_exclude = existing_call.get("exclude_from_scoring", False)
-                existing_reason = existing_call.get("exclusion_reason", "")
-                if existing_exclude and not existing_reason.startswith("Disconnected"):
-                    # Manager manually excluded — preserve their decision and reason
-                    update_data["exclude_from_scoring"] = True
-                    update_data["exclusion_reason"] = existing_reason
-                elif result.get("call_quality") == "disconnected":
-                    # Auto-exclude disconnected
-                    update_data["exclude_from_scoring"] = True
-                    update_data["exclusion_reason"] = "Disconnected/short call — auto excluded"
-                else:
-                    update_data["exclude_from_scoring"] = result.get("exclude_from_scoring", False)
-                    update_data["exclusion_reason"] = result.get("exclusion_reason", "")
-
-                if call_date:
-                    update_data["call_date"] = call_date
-
-                supa("PATCH", f"calls?id=eq.{call_id}", update_data, prefer_minimal=True)
-
-                with _reanalyze_lock:
-                    _reanalyze_job["processed"] += 1
-
-                time.sleep(0.5)  # Brief pause between calls — keeps server responsive to other requests
-
-            except Exception as e:
-                import traceback
-                full_error = traceback.format_exc()
-                log(f"  Re-analyze error for {filename}: {e}")
-                log(f"  Full traceback: {full_error[-500:]}")
-                with _reanalyze_lock:
-                    _reanalyze_job["errors"] += 1
-                    _reanalyze_job["processed"] += 1
-                    _reanalyze_job["failed_calls"].append({"filename": filename, "id": call_id, "error": str(e)[:300]})
-
-        with _reanalyze_lock:
-            _reanalyze_job["status"] = "complete"
-            _reanalyze_job["finished_at"] = datetime.now(timezone.utc).isoformat()
-            _reanalyze_job["current"] = ""
-            _reanalyze_job["summary"] = {
-                "total": total,
-                "succeeded": total - _reanalyze_job["errors"] - _reanalyze_job["skipped"],
-                "skipped": _reanalyze_job["skipped"],
-                "errors": _reanalyze_job["errors"],
-                "finished_at": _reanalyze_job["finished_at"],
-            }
-
-    except Exception as e:
-        with _reanalyze_lock:
-            _reanalyze_job["status"] = "error"
-            _reanalyze_job["current"] = str(e)
-        log(f"  Re-analyze worker error: {e}")
-
-# ──────────────────────────────────────────────
-# BATCH UPLOAD WORKER
-# ──────────────────────────────────────────────
-
-def _process_single_file(audio_bytes, filename, keyterms, tx_corrections, cached_files=None, cached_reps=None):
-    """Process one audio file — transcribe, analyze, save. Returns (saved_record, skip_reason)."""
-    # Check duplicate
-    try:
-        safe = filename.replace("'", "''")
-        existing = supa("GET", f"calls?filename=ilike.{urllib.parse.quote(safe)}&limit=1")
-        if existing:
-            return None, "duplicate"
-    except Exception:
-        pass
-
-    # Transcribe
-    transcript, is_diarized, word_timestamps = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
-    if not transcript or not transcript.strip():
-        return None, "empty transcript"
-
-    # Apply corrections
-    clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
-
-    # Analyze
-    result = run_claude_analysis(clean_transcript, filename, is_diarized=is_diarized)
-    result["transcript"] = clean_transcript
-    result["filename"] = filename
-    result["is_diarized"] = is_diarized
-    if word_timestamps:
-        result["word_timestamps"] = word_timestamps
-
-    # Upload audio to storage
-    try:
-        enforce_storage_cap(cached_files=cached_files)
-        safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
-        supa_storage_upload("call-audio", safe_filename, audio_bytes, "audio/mpeg")
-        result["audio_url"] = supa_storage_signed_url("call-audio", safe_filename)
-        result["storage_filename"] = safe_filename
-    except Exception as e:
-        log(f"  Audio storage warning for {filename}: {e}")
-        result["audio_url"] = ""
-        result["storage_filename"] = ""
-
-    # Save to database
-    call_date = parse_call_date_from_filename(filename)
-    rep_name_raw = result.get("rep_name_detected") or "Unknown"
-    try:
-        rep_list = cached_reps if cached_reps is not None else supa("GET", "reps?active=eq.true")
-        matched_name, confidence = fuzzy_match_rep(rep_name_raw, rep_list)
-        rep_name = matched_name if confidence >= 0.90 else rep_name_raw
-    except Exception:
-        rep_name = rep_name_raw
-
-    call_quality = result.get("call_quality", "normal")
-    exclude = result.get("exclude_from_scoring", False)
-    exclusion_reason = result.get("exclusion_reason", "")
-    if call_quality == "disconnected" and not exclude:
-        exclude = True
-        exclusion_reason = "Disconnected/short call — auto excluded"
-
-    scores = result.get("scores", {})
-    record = {
-        "rep_name": rep_name,
-        "filename": filename,
-        "storage_filename": result.get("storage_filename", ""),
-        "transcript": clean_transcript,
-        "caller_name": result.get("caller_name", ""),
-        "call_purpose": result.get("call_purpose", ""),
-        "call_type": result.get("call_type", "sales_estimate"),
-        "move_type": result.get("move_type", ""),
-        "move_category": result.get("move_category", "standard"),
-        "call_outcome": result.get("call_outcome", "unknown"),
-        "loss_reason": result.get("loss_reason", ""),
-        "soft_pipeline_reason": result.get("soft_pipeline_reason", ""),
-        "word_count": result.get("word_count", 0),
-        "exclude_from_scoring": exclude,
-        "exclusion_reason": exclusion_reason,
-        "call_summary": result.get("call_summary", ""),
-        "key_details": result.get("key_details_captured", ""),
-        "talk_ratio_rep": result.get("talk_ratio_rep", 0),
-        "talk_ratio_customer": result.get("talk_ratio_customer", 0),
-        "keywords_detected": result.get("keywords_detected", []),
-        "keyword_positions": result.get("keyword_positions", {}),
-        "objections_detected": result.get("objections_detected", []),
-        "objection_positions": result.get("objection_positions", {}),
-        "customer_sentiment": result.get("customer_sentiment", "neutral"),
-        "scores": scores,
-        "checklist": result.get("checklist", {}),
-        "strengths": result.get("strengths", []),
-        "coaching_points": result.get("coaching_points", []),
-        "tags": [],
-        "manager_notes": "",
-        "score_overrides": {},
-        "call_date": call_date,
-        "audio_url": result.get("audio_url", ""),
-        "availability_decline": result.get("availability_decline", False),
-        "turned_away": result.get("turned_away", False),
-        "onsite_suggested": result.get("onsite_suggested", False),
-        "call_quality": call_quality,
-        "is_continuation": result.get("is_continuation", False),
-        "continuation_group_id": "",
-        "evaluation_confidence": result.get("evaluation_confidence", 8),
-        "is_diarized": is_diarized,
-        "close_attempts": result.get("close_attempts", 0),
-        "objections_overcome": result.get("objections_overcome", []),
-        "objections_abandoned": result.get("objections_abandoned", []),
-        "pipeline_recovery_quality": result.get("pipeline_recovery_quality", 0),
-        "salesmanship_score": scores.get("salesmanship", {}).get("score", 0) if isinstance(scores.get("salesmanship"), dict) else 0,
-        "value_props_used": result.get("value_props_used", []),
-        "missed_rapport_opportunities": result.get("missed_rapport_opportunities", []),
-        "input_tokens": result.get("input_tokens", 0),
-        "output_tokens": result.get("output_tokens", 0),
-        "pricing_model": result.get("pricing_model", "unknown"),
-        "move_timeline": result.get("move_timeline", "unknown"),
-        "word_timestamps": result.get("word_timestamps") or None,
+  } catch(e) {}
+  // Then start the regular interval-based poller for ongoing updates
+  startStatusPoller();
+}
+async function loadCalls(){
+  try{
+    const r=await fetch(API+'/calls?slim=1');
+    if(r.ok){
+      let d=await r.json();
+      if(SHARE_MODE&&SHARE_REP_IDS.length)d=d.filter(c=>SHARE_REP_IDS.includes(c.rep_name));
+      allCalls=d;
+      dataLoadedAt=new Date();
+      updateStatusBar();
+      console.log(`Loaded ${d.length} calls`);
     }
+  }catch(e){console.error('loadCalls error:',e);}
+}
+async function refreshData(){
+  g('sb-msg').textContent='Refreshing…';
+  await loadCalls();
+  await loadReps();
+  populateLocFilter();
+  // Re-render current page
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,costs:renderCosts,compare:renderCompare})[currentPage]?.();
+}
+function populateLocFilter(){
+  const sel=g('loc-filter');if(!sel)return;
+  const locs=[...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
+  const cur=locationFilter;
+  sel.innerHTML=`<option value="">All Locations</option>`+locs.map(l=>`<option value="${esc(l)}"${l===cur?' selected':''}>${esc(l)}</option>`).join('');
+}
+function toggleDatePicker(){
+  const panel=g('date-picker-panel');
+  if(!panel)return;
+  panel.style.display=panel.style.display==='none'?'block':'none';
+  // Close when clicking outside
+  if(panel.style.display==='block'){
+    setTimeout(()=>{
+      const close=(e)=>{if(!panel.contains(e.target)&&e.target!==g('date-filter-btn')){panel.style.display='none';document.removeEventListener('click',close);}};
+      document.addEventListener('click',close);
+    },10);
+  }
+}
 
-    # Save to Supabase — retry once on timeout/transient error
-    last_err = None
-    for attempt in range(2):
-        try:
-            saved = supa("POST", "calls", record)
-            return saved, None
-        except Exception as e:
-            last_err = e
-            if attempt == 0:
-                log(f"  Save attempt 1 failed for {filename}: {e} — retrying in 3s")
-                time.sleep(3)
-    log(f"  Save failed after 2 attempts for {filename}: {last_err}")
-    raise last_err
+function applyQuickDate(val){
+  const customDiv=g('date-custom-range');
+  if(val==='custom'){
+    if(customDiv)customDiv.style.display='flex';
+    return;
+  }
+  if(customDiv)customDiv.style.display='none';
+  dateFrom='';dateTo='';
+  dateFilter=parseInt(val)||0;
+  updateDateLabel();
+  g('date-picker-panel').style.display='none';
+  rerenderCurrentPage();
+}
 
-def _batch_upload_worker(zip_path):
-    """Background worker — read ZIP from disk, process each audio file, save to DB.
-    zip_path is a temp file written by _batch_upload_start. We delete it when done.
-    """
-    global _batch_job
-    try:
-        # ── One-time setup: cache everything that is constant across the batch ──
-        keyterms = get_cached_keyterms()
-        tx_corrections = get_transcript_corrections()
+function applyCustomDate(){
+  const from=g('date-from-input')?.value||'';
+  const to=g('date-to-input')?.value||'';
+  if(!from&&!to)return;
+  dateFrom=from;dateTo=to;dateFilter=0;
+  updateDateLabel();
+  rerenderCurrentPage();
+}
 
-        # Cache the storage file list ONCE — saves one 30s API call per file
-        try:
-            cached_files = supa_storage_list("call-audio")
-            log(f"  Batch: cached {len(cached_files)} storage files")
-        except Exception as e:
-            log(f"  Batch: storage list failed ({e}), will skip audio storage for this batch")
-            cached_files = None  # Non-fatal: calls save fine without audio
+function clearDateFilter(){
+  dateFrom='';dateTo='';dateFilter=30;
+  const q=g('date-quick');if(q)q.value='30';
+  const customDiv=g('date-custom-range');if(customDiv)customDiv.style.display='none';
+  const fi=g('date-from-input');if(fi)fi.value='';
+  const ti=g('date-to-input');if(ti)ti.value='';
+  updateDateLabel();
+  g('date-picker-panel').style.display='none';
+  rerenderCurrentPage();
+}
 
-        # Cache active reps list ONCE — saves one DB round-trip per file
-        try:
-            cached_reps = supa("GET", "reps?active=eq.true")
-        except Exception:
-            cached_reps = []
+function updateDateLabel(){
+  const lbl=g('date-filter-label');
+  if(!lbl)return;
+  if(dateFrom||dateTo){
+    const f=dateFrom||'…';
+    const t=dateTo||'…';
+    lbl.textContent=`${f} → ${t}`;
+  } else if(dateFilter===0){
+    lbl.textContent='All time';
+  } else {
+    lbl.textContent=`Last ${dateFilter} days`;
+  }
+}
 
-        # ── Index audio files from ZIP (names only — no bytes loaded yet) ──
-        # Opening directly from disk means the ZIP is never fully in RAM.
-        # We read one audio file at a time inside the loop and release it after.
-        audio_exts = {".mp3", ".m4a", ".wav", ".ogg", ".mp4", ".webm", ".mpeg", ".mpga"}
-        audio_names = []  # list of (zip_entry_name, basename) — no bytes yet
-        try:
-            zf_index = zipfile.ZipFile(zip_path, "r")
-            for name in sorted(zf_index.namelist()):
-                if name.startswith("__") or name.startswith(".") or name.endswith("/"):
-                    continue
-                ext = os.path.splitext(name)[1].lower()
-                if ext not in audio_exts:
-                    continue
-                basename = os.path.basename(name)
-                if not basename:
-                    continue
-                # Check file size from ZIP metadata — no need to read bytes yet
-                info = zf_index.getinfo(name)
-                if info.file_size > 25 * 1024 * 1024:
-                    with _batch_lock:
-                        _batch_job["skipped"] += 1
-                        _batch_job["error_list"].append(f"{basename} — too large (>25MB)")
-                    continue
-                audio_names.append((name, basename))
-        except zipfile.BadZipFile as e:
-            with _batch_lock:
-                _batch_job["status"] = "error"
-                _batch_job["current"] = f"Invalid ZIP: {e}"
-            return
+function rerenderCurrentPage(){
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement})[currentPage]?.();
+}
 
-        total = len(audio_names)
-        with _batch_lock:
-            _batch_job["total"] = total
+function setLocationFilter(val){
+  locationFilter=val;
+  updateLocIndicator();
+  // Re-render current page with new filter
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,costs:renderCosts})[currentPage]?.();
+}
+function updateLocIndicator(){
+  const el=g('loc-indicator');if(!el)return;
+  el.innerHTML=locationFilter?`<span class="loc-pill" onclick="setLocationFilter('');g('loc-filter').value=''">📍 ${esc(locationFilter)} ✕</span>`:'';
+  updateDateLabel();
+}
 
-        log(f"  Batch upload: {total} files to process")
-        with _batch_lock:
-            _batch_job["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+// ── STATUS BAR ──
+function dismissBatchNotification(){
+  if(window._lastBatchStatus?.finished_at){
+    window._dismissedBatchFinish = window._lastBatchStatus.finished_at;
+    updateStatusBar();
+  }
+}
+function updateStatusBar(){
+  const bar=g('status-bar'),msg=g('sb-msg');if(!bar||!msg)return;
+  const job=window._lastJobStatus||{status:'idle'};
+  const batchJob=window._lastBatchStatus||{status:'idle'};
+  const jobRunning=job.status==='running';
+  const batchRunning=batchJob.status==='running';
+  const anyRunning=jobRunning||batchRunning;
+  bar.classList.toggle('warn',anyRunning);
 
-        # ── Process sequentially — read one file at a time, release bytes after each ──
-        for idx, (zip_entry, fname) in enumerate(audio_names):
-            # Check for stop request
-            with _batch_lock:
-                if _batch_job.get("stop_requested"):
-                    _batch_job["status"] = "stopped"
-                    _batch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
-                    _batch_job["current"] = ""
-                    log(f"  Batch upload stopped by user: {_batch_job['processed']} processed before halt")
-                    zf_index.close()
-                    try: os.unlink(zip_path)
-                    except: pass
-                    return
+  // Detect stalled batch — heartbeat older than 3 minutes
+  let stalled = false;
+  if (batchRunning && batchJob.last_heartbeat) {
+    const heartbeatAge = (new Date() - new Date(batchJob.last_heartbeat)) / 1000;
+    if (heartbeatAge > 180) stalled = true;  // 3 minutes
+  }
 
-            with _batch_lock:
-                _batch_job["current"] = fname
-                _batch_job["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
-
-            log(f"  Batch [{idx+1}/{total}] processing: {fname}")
-            try:
-                # Read this file's bytes now — and only now. After _process_single_file
-                # returns we let fdata go out of scope so GC can reclaim the memory
-                # before we move to the next file. This keeps peak RAM at ~1 file
-                # in memory at a time regardless of how large the batch is.
-                fdata = zf_index.read(zip_entry)
-                with _analysis_semaphore:
-                    saved, skip_reason = _process_single_file(
-                        fdata, fname, keyterms, tx_corrections,
-                        cached_files=cached_files,
-                        cached_reps=cached_reps,
-                    )
-                fdata = None  # Explicit release — don't wait for end-of-loop GC
-                if skip_reason:
-                    with _batch_lock:
-                        _batch_job["skipped"] += 1
-                        if skip_reason != "duplicate":
-                            _batch_job["error_list"].append(f"{fname} — {skip_reason}")
-                    log(f"  Batch [{idx+1}/{total}] skipped ({skip_reason}): {fname}")
-                else:
-                    with _batch_lock:
-                        _batch_job["processed"] += 1
-                    log(f"  Batch [{idx+1}/{total}] saved: {fname}")
-            except Exception as e:
-                import traceback
-                log(f"  Batch [{idx+1}/{total}] ERROR for {fname}: {e}")
-                log(f"  Traceback: {traceback.format_exc()[-600:]}")
-                with _batch_lock:
-                    _batch_job["errors"] += 1
-                    _batch_job["error_list"].append(f"{fname} — {str(e)[:120]}")
-            finally:
-                with _batch_lock:
-                    if _batch_job["current"] == fname:
-                        _batch_job["current"] = ""
-
-        zf_index.close()
-        # Delete the temp file — job is done, free the disk space
-        try: os.unlink(zip_path)
-        except: pass
-
-        with _batch_lock:
-            _batch_job["status"] = "complete"
-            _batch_job["finished_at"] = datetime.now(timezone.utc).isoformat()
-            _batch_job["current"] = ""
-        log(f"  Batch upload complete: {_batch_job['processed']} saved, {_batch_job['skipped']} skipped, {_batch_job['errors']} errors")
-
-    except Exception as e:
-        import traceback
-        with _batch_lock:
-            _batch_job["status"] = "error"
-            _batch_job["current"] = str(e)
-        log(f"  Batch upload worker error: {e}")
-        log(f"  Traceback: {traceback.format_exc()[-600:]}")
-        try: os.unlink(zip_path)
-        except: pass
-
-# ──────────────────────────────────────────────
-# VONAGE VBC — OAUTH, API CLIENT, POLLING WORKER
-# ──────────────────────────────────────────────
-# Implementation notes:
-#
-# This is "scaffolded" code. The structure (token caching, polling loop,
-# idempotency, error handling) is solid and won't change. But the exact
-# endpoint URLs, OAuth grant type, response field names, and pagination
-# style need to be confirmed against the actual VBC API docs (visible
-# from the user's developer dashboard at vbcdeveloper.vonage.com).
-#
-# Every place that depends on a specific endpoint detail is marked with
-# a # TODO(vbc) comment. Find them all by grepping for "TODO(vbc)" before
-# going live.
-
-def _vonage_get_token(force_refresh=False):
-    """Get a valid OAuth bearer token, refreshing if needed.
-
-    Caches the token in _vonage_token_cache. Refreshes 60 seconds before
-    actual expiry to avoid edge-case 401s. Thread-safe.
-    """
-    if not _vonage_configured():
-        raise RuntimeError("Vonage not configured (missing client ID, secret, or account ID)")
-
-    with _vonage_token_lock:
-        now = time.time()
-        cached = _vonage_token_cache
-        if not force_refresh and cached.get("token") and cached.get("expires_at", 0) > now + 60:
-            return cached["token"]
-
-        # TODO(vbc): Confirm the OAuth grant type. Most likely "client_credentials"
-        # for server-to-server VBC integrations, but VBC docs may specify otherwise.
-        # If they require Basic auth in the header instead of body, swap to that.
-        body = urllib.parse.urlencode({
-            "grant_type": "client_credentials",
-            "client_id": VONAGE_CLIENT_ID,
-            "client_secret": VONAGE_CLIENT_SECRET,
-        }).encode()
-        req = urllib.request.Request(
-            VONAGE_TOKEN_URL,
-            data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                resp = json.loads(r.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"OAuth token request failed: HTTP {e.code} — {err}")
-
-        token = resp.get("access_token")
-        expires_in = int(resp.get("expires_in", 3600))
-        if not token:
-            raise RuntimeError(f"OAuth token response missing access_token: {resp}")
-
-        cached["token"] = token
-        cached["expires_at"] = now + expires_in
-        return token
-
-
-def _vonage_api(method, path, params=None, retry_on_401=True):
-    """Call a VBC API endpoint and return the parsed JSON response.
-
-    `path` should start with "/" and be relative to VONAGE_API_BASE.
-    Automatically refreshes token on 401 and retries once.
-    """
-    token = _vonage_get_token()
-    qs = ""
-    if params:
-        qs = "?" + urllib.parse.urlencode(params)
-    url = f"{VONAGE_API_BASE}{path}{qs}"
-    req = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        method=method,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            data = r.read()
-            if not data:
-                return None
-            return json.loads(data.decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401 and retry_on_401:
-            log("  Vonage API 401 — refreshing token and retrying")
-            _vonage_get_token(force_refresh=True)
-            return _vonage_api(method, path, params=params, retry_on_401=False)
-        err_body = e.read().decode("utf-8", errors="replace")[:500] if e.fp else ""
-        raise RuntimeError(f"Vonage API {method} {path} failed: HTTP {e.code} — {err_body}")
-
-
-def _vonage_list_recordings(since_iso):
-    """List recordings created since the given ISO timestamp.
-
-    Returns a list of dicts. Each dict represents one recording.
-    Pagination is handled internally (follows next-page links until
-    exhausted).
-    """
-    # TODO(vbc): Confirm the actual endpoint path. Educated guess:
-    #   /vbc/v1/accounts/{account_id}/call_recordings
-    #   /api/v1/accounts/{account_id}/recordings
-    # The path will include the account ID. Filter param for time-bounded
-    # queries is typically called "start" or "from" — adjust to match docs.
-    endpoint = f"/vbc/v1/accounts/{VONAGE_ACCOUNT_ID}/call_recordings"
-
-    all_items = []
-    next_page = None
-    page_count = 0
-    while True:
-        page_count += 1
-        if page_count > 50:  # Safety brake — never paginate forever
-            log("  Vonage list paginated past 50 pages, stopping for safety")
-            break
-        params = {"start": since_iso, "page_size": 100}
-        if next_page:
-            params["page"] = next_page
-        try:
-            resp = _vonage_api("GET", endpoint, params=params)
-        except Exception as e:
-            log(f"  Vonage list error on page {page_count}: {e}")
-            raise
-
-        # TODO(vbc): The response shape is unknown until we see the real one.
-        # Most VBC APIs return either:
-        #   {"items": [...], "_links": {"next": {"href": "..."}}}
-        # or
-        #   {"data": [...], "next_cursor": "..."}
-        # Adjust these two lines once the real shape is known:
-        items = resp.get("items") or resp.get("data") or []
-        all_items.extend(items)
-
-        # Pagination cursor extraction — also needs confirmation:
-        next_link = (resp.get("_links") or {}).get("next") or {}
-        next_page = next_link.get("href") or resp.get("next_cursor")
-        if not next_page:
-            break
-
-    return all_items
-
-
-def _vonage_download_recording(recording_id):
-    """Download the audio bytes for a single recording.
-
-    Returns (audio_bytes, mime_type). Raises on error.
-    """
-    # TODO(vbc): Confirm download endpoint. Could be:
-    #   /vbc/v1/accounts/{account_id}/call_recordings/{recording_id}/download
-    #   /vbc/v1/recordings/{recording_id}/audio
-    # And it may require a separate signed URL fetch first. Adjust as needed.
-    endpoint = f"/vbc/v1/accounts/{VONAGE_ACCOUNT_ID}/call_recordings/{recording_id}/download"
-    token = _vonage_get_token()
-    url = f"{VONAGE_API_BASE}{endpoint}"
-    req = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Bearer {token}", "Accept": "audio/mpeg, audio/*"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=300) as r:
-            audio = r.read()
-            mime = r.headers.get("Content-Type", "audio/mpeg")
-            return audio, mime
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            _vonage_get_token(force_refresh=True)
-            return _vonage_download_recording(recording_id)
-        err = e.read().decode("utf-8", errors="replace")[:300] if e.fp else ""
-        raise RuntimeError(f"Recording download failed: HTTP {e.code} — {err}")
-
-
-def _vonage_recording_seen(recording_id):
-    """Check the idempotency table — have we already processed this recording?"""
-    try:
-        rows = supa("GET", f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}&limit=1")
-        return bool(rows)
-    except Exception:
-        return False  # On lookup error, treat as unseen (we'll dedupe again at insert via PK constraint)
-
-
-def _vonage_record_status(recording_id, status, **fields):
-    """Insert or update the idempotency row for a recording.
-
-    Uses an explicit check-then-insert/update pattern rather than PostgREST's
-    upsert (which requires conflicting Prefer headers vs. the rest of the
-    codebase). The recording_id is the PK so this is race-safe enough for
-    a single-worker setup.
-    """
-    record = {
-        "status": status,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+  // Build or remove the global progress bar
+  let progBar=g('sb-prog-wrap');
+  if(anyRunning){
+    const active=jobRunning?job:batchJob;
+    const done=(active.processed||0)+(active.skipped||0)+(active.errors||0);
+    const pct=active.total?Math.round(done/active.total*100):0;
+    const stallNote = stalled ? ' ⚠ stalled?' : '';
+    const label=jobRunning
+      ?`Re-analyzing: ${active.processed||0}/${active.total||'?'} calls (${pct}%) — ${active.errors||0} errors`
+      :`Uploading: ${done}/${active.total||'?'} files (${pct}%) · ${active.processed||0} saved · ${active.errors||0} errors${active.current?' · '+active.current:''}${stallNote}`;
+    if(!progBar){
+      progBar=document.createElement('span');
+      progBar.id='sb-prog-wrap';
+      progBar.style.cssText='display:flex;align-items:center;gap:8px;flex:1;min-width:0';
+      msg.parentNode.insertBefore(progBar,msg.nextSibling);
     }
-    record.update({k: v for k, v in fields.items() if v is not None})
-    try:
-        existing = supa("GET", f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}&limit=1")
-        if existing:
-            supa("PATCH", f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}", record, prefer_minimal=True)
-        else:
-            record["recording_id"] = recording_id
-            supa("POST", "vonage_recordings", record, prefer_minimal=True)
-    except Exception as e:
-        log(f"  Failed to update vonage_recordings row for {recording_id}: {e}")
+    progBar.innerHTML=`<span style="font-size:11px;color:var(--amber);white-space:nowrap;max-width:420px;overflow:hidden;text-overflow:ellipsis" title="${label}">${label}</span>
+      <div style="flex:1;height:4px;background:rgba(255,183,77,.2);border-radius:4px;min-width:60px;max-width:220px">
+        <div style="height:100%;width:${pct}%;background:var(--amber);border-radius:4px;transition:width .5s"></div>
+      </div>`;
+    msg.textContent = jobRunning ? '⚠ Do not delete calls until re-analyze completes' : '';
+  } else {
+    if(progBar)progBar.remove();
+    // Batch: show completion/stopped state — persists until next data load or page nav
+    if(batchJob.status==='complete'&&batchJob.finished_at){
+      const mins=Math.floor((new Date()-new Date(batchJob.finished_at))/60000);
+      const errs=batchJob.errors||0;
+      const saved=batchJob.processed||0;
+      const skipped=batchJob.skipped||0;
+      // Hide if user dismissed this completion notification
+      if(window._dismissedBatchFinish === batchJob.finished_at){
+        // skip — fall through to default message
+      } else if(mins<60){
+        bar.classList.add('done');
+        const skippedBit = skipped>0 ? `, ${skipped} skipped` : '';
+        const errBit = errs>0
+          ? `, <span style="color:var(--red);font-weight:700">${errs} failed</span>`
+          : '';
+        const errLink = errs>0
+          ? ` · <span style="cursor:pointer;text-decoration:underline;font-weight:600" onclick="nav('add')">view errors</span>`
+          : '';
+        const ageLabel = mins<1 ? 'just now' : `${mins}m ago`;
+        const dismissBtn = ` · <span style="cursor:pointer;color:var(--ink3);margin-left:6px" title="Dismiss" onclick="dismissBatchNotification()">✕</span>`;
+        msg.innerHTML = `<span style="font-weight:600;color:var(--lg-green-dark,#007236)">✓ Upload complete</span> — <strong>${saved}</strong> ${saved===1?'call':'calls'} saved${skippedBit}${errBit} · ${ageLabel}${errLink}${dismissBtn}`;
+        return;
+      }
+      bar.classList.remove('done');
+    }
+    if(batchJob.status==='stopped'){
+      msg.innerHTML=`⏹ Upload stopped · ${batchJob.processed||0} of ${batchJob.total||'?'} files processed`;
+      return;
+    }
+    if(batchJob.status==='error'){
+      bar.classList.add('warn');
+      msg.innerHTML=`⚠ Upload error: ${esc(batchJob.current||'unknown error')} · <span style="cursor:pointer;text-decoration:underline" onclick="nav('add')">details</span>`;
+      return;
+    }
+    // Re-analyze states
+    if(job.status==='stopped'){
+      msg.innerHTML=`⏹ Re-analyze stopped · ${job.processed||0} of ${job.total||'?'} calls processed · <span style="cursor:pointer;text-decoration:underline" onclick="nav('library')">see details</span>`;
+      return;
+    }
+    const justDone=job.status==='complete'&&job.summary;
+    if(justDone&&job.summary.finished_at){
+      const mins=Math.floor((new Date()-new Date(job.summary.finished_at))/60000);
+      if(mins<10){
+        const errs=job.summary.errors||0;
+        msg.innerHTML=errs>0
+          ?`✓ Re-analyze done: ${job.summary.succeeded} succeeded, <span style="color:var(--red)">${errs} failed</span> · <span style="cursor:pointer;text-decoration:underline" onclick="nav('library')">see details</span>`
+          :`✓ Re-analyze done: ${job.summary.succeeded} calls · ${mins<1?'just now':mins+' min ago'}`;
+        return;
+      }
+    }
+    if(dataLoadedAt){
+      const mins=Math.floor((new Date()-dataLoadedAt)/60000);
+      msg.textContent=mins<1?'Data just loaded':`Data loaded ${mins} min ago`;
+    }
+  }
+  updateLocIndicator();
+}
 
+function startStatusPoller(){
+  if(statusPoller)clearInterval(statusPoller);
+  let fastMode=false;
+  let firstPoll=true;
 
-def _vonage_get_extension_map():
-    """Fetch the full extension → rep_name map. Returns dict."""
-    try:
-        rows = supa("GET", "vonage_extension_map?select=extension_id,rep_name")
-        return {r["extension_id"]: r["rep_name"] for r in rows}
-    except Exception as e:
-        log(f"  Failed to load extension map: {e}")
-        return {}
-
-
-def _vonage_process_one(recording, ext_map, keyterms, tx_corrections):
-    """Process a single recording: dedupe, download, hand off to existing
-    pipeline, attribute to rep based on extension mapping. Returns one of
-    'ingested', 'skipped', 'duplicate', 'failed'.
-    """
-    # TODO(vbc): These field names are guesses. Confirm against real API response.
-    recording_id    = recording.get("id") or recording.get("recording_id")
-    extension_id    = recording.get("extension_id") or recording.get("extension") or ""
-    started_at      = recording.get("start_time") or recording.get("call_started_at") or recording.get("created_at")
-    duration_secs   = recording.get("duration") or recording.get("duration_seconds") or 0
-    filename_hint   = recording.get("filename") or f"vonage_{recording_id}.mp3"
-
-    if not recording_id:
-        log(f"  Vonage: recording missing ID, skipping: {recording}")
-        return "skipped"
-
-    # Idempotency check
-    if _vonage_recording_seen(recording_id):
-        return "duplicate"
-
-    # Mark as pending so we have a record even if download fails
-    _vonage_record_status(
-        recording_id, "pending",
-        extension_id=str(extension_id) if extension_id else None,
-        call_started_at=started_at,
-        duration_seconds=int(duration_secs) if duration_secs else None,
-    )
-
-    # Skip overly-long calls early to avoid wasting download bandwidth
-    skip, reason = should_skip_by_duration(int(duration_secs) if duration_secs else 0)
-    if skip:
-        _vonage_record_status(recording_id, "skipped", error_message=reason)
-        return "skipped"
-
-    # Download audio
-    try:
-        audio_bytes, mime = _vonage_download_recording(recording_id)
-    except Exception as e:
-        _vonage_record_status(recording_id, "failed", error_message=str(e)[:500])
-        log(f"  Vonage download failed for {recording_id}: {e}")
-        return "failed"
-
-    # Bytes-level skip if file is too big for downstream transcription
-    if len(audio_bytes) > 25 * 1024 * 1024:
-        _vonage_record_status(
-            recording_id, "skipped",
-            error_message=f"Audio file too large ({len(audio_bytes)//(1024*1024)}MB > 25MB cap)",
-        )
-        return "skipped"
-
-    _vonage_record_status(recording_id, "downloaded")
-
-    # Build a sensible filename — Vonage-style date format that the existing
-    # parse_call_date_from_filename() helper already understands. Falls back
-    # to the API-provided filename hint if we can't construct one.
-    filename = filename_hint
-    if started_at:
-        try:
-            dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-            ts = dt.strftime("%Y_%m_%d_%I_%M%p")
-            ext_suffix = f"_ext{extension_id}" if extension_id else ""
-            filename = f"{ts}{ext_suffix}_vonage.mp3"
-        except Exception:
-            pass
-
-    # Hand off to the existing transcription/analysis pipeline
-    try:
-        with _analysis_semaphore:
-            saved, skip_reason = _process_single_file(audio_bytes, filename, keyterms, tx_corrections)
-    except Exception as e:
-        _vonage_record_status(recording_id, "failed", error_message=f"Process error: {str(e)[:400]}")
-        log(f"  Vonage processing failed for {recording_id}: {e}")
-        return "failed"
-
-    if skip_reason:
-        _vonage_record_status(recording_id, "skipped", error_message=skip_reason)
-        return "skipped"
-
-    # `saved` from supa POST is typically a list with one record
-    call_id = None
-    if saved:
-        if isinstance(saved, list) and saved:
-            call_id = saved[0].get("id")
-        elif isinstance(saved, dict):
-            call_id = saved.get("id")
-
-    # Override rep_name from extension mapping. Extension ID is more reliable
-    # than transcript inference because it's tied to the Vonage user account.
-    if call_id and extension_id:
-        ext_str = str(extension_id)
-        mapped_name = ext_map.get(ext_str)
-        if mapped_name:
-            try:
-                supa("PATCH", f"calls?id=eq.{call_id}", {"rep_name": mapped_name})
-            except Exception as e:
-                log(f"  Vonage: failed to apply rep mapping for ext {ext_str}: {e}")
-        else:
-            # Auto-create "Unknown" rep_name including the extension so it shows
-            # up in the Unmatched Reps panel in Management for easy mapping.
-            unknown_name = f"Unknown — ext {ext_str}"
-            try:
-                supa("PATCH", f"calls?id=eq.{call_id}", {"rep_name": unknown_name})
-            except Exception as e:
-                log(f"  Vonage: failed to set unknown rep name: {e}")
-
-    _vonage_record_status(recording_id, "done", call_id=call_id)
-    return "ingested"
-
-
-def _vonage_poll_once():
-    """Run a single polling cycle. Returns (ingested, skipped, errors)."""
-    # Compute "since" timestamp — the most recent call_started_at we've seen,
-    # or 1 hour ago for the very first poll. We deliberately *don't* use
-    # ingested_at because Vonage may publish recordings out of order or with
-    # delays.
-    try:
-        latest = supa("GET", "vonage_recordings?order=call_started_at.desc.nullslast&limit=1&select=call_started_at")
-        if latest and latest[0].get("call_started_at"):
-            since_iso = latest[0]["call_started_at"]
-        else:
-            since_iso = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    except Exception:
-        since_iso = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-
-    log(f"  Vonage poll: listing recordings since {since_iso}")
-    try:
-        recordings = _vonage_list_recordings(since_iso)
-    except Exception as e:
-        log(f"  Vonage poll list failed: {e}")
-        raise
-
-    if not recordings:
-        log("  Vonage poll: no new recordings")
-        return 0, 0, 0
-
-    log(f"  Vonage poll: found {len(recordings)} recording(s) to evaluate")
-
-    # Build context once per cycle
-    ext_map = _vonage_get_extension_map()
-    try:
-        keyterms = get_cached_keyterms()
-    except Exception:
-        keyterms = []
-    try:
-        tx_corrections = get_transcript_corrections()
-    except Exception:
-        tx_corrections = []
-
-    ingested = skipped = errors = 0
-    for rec in recordings:
-        # Respect pause/stop between recordings
-        with _vonage_lock:
-            if _vonage_job.get("stop_requested") or _vonage_job.get("pause_requested"):
-                break
-        try:
-            outcome = _vonage_process_one(rec, ext_map, keyterms, tx_corrections)
-        except Exception as e:
-            outcome = "failed"
-            log(f"  Vonage process loop error: {e}")
-        if outcome == "ingested":
-            ingested += 1
-        elif outcome in ("skipped", "duplicate"):
-            skipped += 1
-        elif outcome == "failed":
-            errors += 1
-
-    return ingested, skipped, errors
-
-
-def _vonage_poll_worker():
-    """Background loop that polls Vonage on a regular interval."""
-    log(f"  Vonage poll worker starting (interval: {VONAGE_POLL_INTERVAL}s)")
-    with _vonage_lock:
-        _vonage_job["status"] = "running"
-        _vonage_job["started_at"] = datetime.now(timezone.utc).isoformat()
-        _vonage_job["stop_requested"] = False
-        _vonage_job["pause_requested"] = False
-
-    today = datetime.now(timezone.utc).date()
-
-    while True:
-        # Check stop flag at top of loop
-        with _vonage_lock:
-            if _vonage_job.get("stop_requested"):
-                _vonage_job["status"] = "idle"
-                log("  Vonage poll worker stopped by request")
-                return
-            paused = _vonage_job.get("pause_requested", False)
-            if paused:
-                _vonage_job["status"] = "paused"
-
-        # When paused, sleep in short increments and re-check rather than
-        # blocking on the full interval — so resume reacts within ~5s.
-        if paused:
-            time.sleep(5)
-            continue
-
-        # Reset today counter on day rollover
-        cur_day = datetime.now(timezone.utc).date()
-        if cur_day != today:
-            today = cur_day
-            with _vonage_lock:
-                _vonage_job["ingested_today"] = 0
-
-        # Run one poll cycle
-        try:
-            ingested, skipped, errors = _vonage_poll_once()
-            with _vonage_lock:
-                _vonage_job["last_poll_at"] = datetime.now(timezone.utc).isoformat()
-                _vonage_job["last_poll_succeeded"] = True
-                _vonage_job["ingested_total"] += ingested
-                _vonage_job["ingested_today"] += ingested
-                _vonage_job["skipped_total"] += skipped
-                _vonage_job["errors_total"] += errors
-                _vonage_job["status"] = "running"
-                if ingested or errors:
-                    log(f"  Vonage poll cycle: +{ingested} ingested, {skipped} skipped, {errors} errors")
-        except Exception as e:
-            with _vonage_lock:
-                _vonage_job["last_poll_at"] = datetime.now(timezone.utc).isoformat()
-                _vonage_job["last_poll_succeeded"] = False
-                _vonage_job["last_error"] = str(e)[:500]
-                _vonage_job["status"] = "error"
-            log(f"  Vonage poll cycle error: {e}")
-            # Don't kill the worker on a single failed cycle — just back off
-            # and try again next interval.
-
-        # Sleep in 5-second chunks so stop/pause requests are honored quickly
-        slept = 0
-        while slept < VONAGE_POLL_INTERVAL:
-            with _vonage_lock:
-                if _vonage_job.get("stop_requested") or _vonage_job.get("pause_requested"):
-                    break
-            time.sleep(5)
-            slept += 5
-
-
-def _vonage_start_worker():
-    """Start the background polling thread if not already running.
-    Returns True if started, False if already running or not configured.
-    """
-    global _vonage_thread
-    if not _vonage_configured():
-        log("  Vonage worker not started: integration not configured (missing env vars)")
-        with _vonage_lock:
-            _vonage_job["status"] = "disabled"
-            _vonage_job["last_error"] = "Vonage env vars not set"
-        return False
-    with _vonage_lock:
-        if _vonage_thread and _vonage_thread.is_alive():
-            log("  Vonage worker already running, ignoring start request")
-            return False
-        _vonage_job["stop_requested"] = False
-        _vonage_job["pause_requested"] = False
-    _vonage_thread = threading.Thread(target=_vonage_poll_worker, daemon=True, name="vonage-poll")
-    _vonage_thread.start()
-    return True
-
-
-def _vonage_stop_worker():
-    """Signal the worker to stop. Returns True if a stop was signaled."""
-    with _vonage_lock:
-        if _vonage_job.get("status") not in ("running", "paused", "error"):
-            return False
-        _vonage_job["stop_requested"] = True
-    return True
-
-
-def _vonage_pause_worker():
-    """Pause the worker (does not kill the thread; resumes on demand)."""
-    with _vonage_lock:
-        _vonage_job["pause_requested"] = True
-    return True
-
-
-def _vonage_resume_worker():
-    """Resume a paused worker."""
-    with _vonage_lock:
-        _vonage_job["pause_requested"] = False
-    return True
-
-
-# ──────────────────────────────────────────────
-# HTTP HANDLER
-# ──────────────────────────────────────────────
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        log(f"  {args[0]} {args[1]}")
-
-    def do_GET(self):
-        path = self.path.split("?")[0]
-        if path == "/calls":
-            self._get_calls()
-        elif path == "/reps":
-            self._get_reps()
-        elif path == "/shared_views":
-            self._get_shared_views()
-        elif path.startswith("/share/"):
-            self._get_shared_view_by_token()
-        elif path == "/export/csv":
-            self._export_csv()
-        elif path.startswith("/export/pdf/call/"):
-            self._export_pdf_call()
-        elif path.startswith("/export/pdf/rep/"):
-            self._export_pdf_rep()
-        elif path == "/reanalyze/status":
-            self._reanalyze_status()
-        elif path == "/reanalyze/unscored":
-            self._reanalyze_unscored()
-        elif path == "/reanalyze/stop":
-            self._reanalyze_stop()
-        elif path == "/batch_upload/status":
-            self._batch_upload_status()
-        elif path == "/batch_upload/errors":
-            self._batch_upload_errors()
-        elif path == "/batch_upload/cleanup_empty":
-            self._batch_cleanup_empty()
-        elif path == "/corrections":
-            self._get_corrections()
-        elif path == "/transcript_corrections":
-            self._get_transcript_corrections_endpoint()
-        elif path == "/find_duplicates":
-            self._find_duplicates()
-        elif path.startswith("/audio_url/"):
-            self._get_audio_url()
-        elif path == "/vonage/status":
-            self._vonage_status()
-        elif path == "/vonage/extension_map":
-            self._vonage_get_extension_map_endpoint()
-        elif path == "/vonage/recent":
-            self._vonage_get_recent()
-        else:
-            html = read_html()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(html)
-
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self._cors()
-        self.end_headers()
-
-    def do_POST(self):
-        n = int(self.headers.get("Content-Length", 0))
-        path = self.path.split("?")[0]
-
-        # Special case: batch upload can be very large (hundreds of MB).
-        # Stream it directly to a temp file instead of reading into RAM.
-        if path == "/batch_upload/start":
-            self._batch_upload_start_streamed(n)
-            return
-
-        body = self.rfile.read(n)
-        path = self.path.split("?")[0]
-
-        routes = {
-            "/analyze": self._analyze,
-            "/transcribe_and_analyze": self._transcribe_and_analyze,
-            "/check_duplicate": self._check_dup_endpoint,
-            "/extract_zip": self._extract_zip,
-            "/save": self._save,
-            "/update": self._update,
-            "/delete": self._delete,
-            "/bulk_delete": self._bulk_delete,
-            "/share": self._create_share,
-            "/share/delete": self._delete_share,
-            "/reps/save": self._save_rep,
-            "/reps/update": self._update_rep,
-            "/reps/delete": self._delete_rep,
-            "/reps/deduplicate": self._dedup_reps,
-            "/reps/bulk_rename": self._bulk_rename_rep,
-            "/reanalyze/start": self._reanalyze_start,
-            "/reanalyze/stop": self._reanalyze_stop,
-            "/corrections/save": self._save_correction,
-            "/transcript_corrections/save": self._save_transcript_correction,
-            "/transcript_corrections/delete": self._delete_transcript_correction,
-            "/transcript_corrections/update": self._update_transcript_correction,
-            "/transcript_corrections/reapply": self._reapply_corrections,
-            "/batch_upload/start": self._batch_upload_start,
-            "/batch_upload/stop": self._batch_upload_stop,
-            "/batch_upload/cleanup_empty": self._batch_cleanup_empty,
-            "/vonage/start": self._vonage_start_endpoint,
-            "/vonage/stop": self._vonage_stop_endpoint,
-            "/vonage/pause": self._vonage_pause_endpoint,
-            "/vonage/resume": self._vonage_resume_endpoint,
-            "/vonage/poll_now": self._vonage_poll_now_endpoint,
-            "/vonage/extension_map/save": self._vonage_save_extension,
-            "/vonage/extension_map/delete": self._vonage_delete_extension,
+  async function poll(){
+    try{
+      const [rr,br]=await Promise.all([fetch(API+'/reanalyze/status'),fetch(API+'/batch_upload/status')]);
+      const rd=await rr.json(),bd=await br.json();
+      // wasRunning: on first poll, trust the SERVER state (not local) — fixes session-independent detection
+      const wasRunning=firstPoll
+        ?(rd.status==='running'||bd.status==='running')  // on first poll, server IS the truth
+        :((window._lastJobStatus?.status==='running')||(window._lastBatchStatus?.status==='running'));
+      firstPoll=false;
+      window._lastJobStatus=rd;window._lastBatchStatus=bd;
+      const nowRunning=rd.status==='running'||bd.status==='running';
+      // nowDone: was running on previous poll (or server says it just finished), now it's not
+      const nowDone=wasRunning&&!nowRunning;
+      updateStatusBar();
+      // Switch to fast polling (4s) when a job is running, slow (20s) when idle
+      if(nowRunning&&!fastMode){fastMode=true;clearInterval(statusPoller);statusPoller=setInterval(poll,4000);}
+      else if(!nowRunning&&fastMode){fastMode=false;clearInterval(statusPoller);statusPoller=setInterval(poll,20000);}
+      // While running, update the library bulk-actions panel progress bar in-place
+      if(nowRunning && currentPage==='library'){
+        const prog=g('reanalyze-prog'); const lbl=g('reanalyze-status');
+        if(prog && rd.total) prog.style.width = Math.round(rd.processed/rd.total*100)+'%';
+        if(lbl && rd.status==='running') lbl.textContent = `Processing ${rd.processed}/${rd.total}: ${rd.current||'…'}`;
+      }
+      // When a job finishes: reload data and re-render current page regardless of who triggered the upload
+      if(nowDone){
+        // Show toast notification BEFORE reload so user sees confirmation immediately
+        const justFinishedBatch = bd.status === 'complete' || bd.status === 'stopped' || bd.status === 'error';
+        const justFinishedReanal = rd.status === 'complete' || rd.status === 'stopped' || rd.status === 'error';
+        if(justFinishedBatch && bd.status === 'complete'){
+          const saved = bd.processed || 0;
+          const errs = bd.errors || 0;
+          const skip = bd.skipped || 0;
+          const tone = errs > 0 ? 'warn' : 'success';
+          showToast(`Upload complete: ${saved} ${saved===1?'call':'calls'} saved${skip>0?', '+skip+' skipped':''}${errs>0?', '+errs+' failed':''}`, tone, 6000);
+        } else if(justFinishedBatch && bd.status === 'error'){
+          showToast(`Upload failed: ${bd.current||'unknown error'}`, 'error', 8000);
+        } else if(justFinishedReanal && rd.status === 'complete'){
+          const succ = rd.summary?.succeeded || (rd.processed - (rd.errors||0) - (rd.skipped||0));
+          showToast(`Re-analyze complete: ${succ} calls processed`, 'success', 6000);
         }
-        fn = routes.get(path)
-        if fn:
-            fn(body)
-        else:
-            self.send_response(404)
-            self.end_headers()
+        await loadCalls();
+        ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,add:renderAdd})[currentPage]?.();
+        // If on Add Calls page, update the local panel completion state
+        if(currentPage==='add') updateBulkPanelUI(window._lastBatchStatus||{});
+      }
+    }catch(e){}
+  }
 
-    # ── CALLS ──
+  // Poll immediately on startup — don't wait 20s to find out if something is running
+  poll();
+  statusPoller=setInterval(poll,20000);
+  // Also update the "X mins ago" display every minute
+  setInterval(updateStatusBar,60000);
+}
+async function loadReps(){try{const r=await fetch(API+'/reps');if(r.ok)reps=await r.json();}catch(e){}}
+async function loadSharedViews(){try{const r=await fetch(API+'/shared_views');if(r.ok)sharedViews=await r.json();}catch(e){}}
+async function loadCorrections(){try{const r=await fetch(API+'/corrections');if(r.ok)corrections=await r.json();}catch(e){}}
 
-    def _get_calls(self):
-        try:
-            # Optional ?slim=1 strips transcript text from response (for list views)
-            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
-            slim = qs.get("slim", ["0"])[0] == "1"
+function nav(page,opts={}){
+  currentPage=page;
+  document.querySelectorAll('.sb-btn').forEach(el=>el.classList.remove('active'));
+  const btn=g('nav-'+page);if(btn)btn.classList.add('active');
+  const titles={overview:'Overview',library:'Call Library',profiles:'Rep Profiles',management:'Rep Management',shared:'Shared Views',corrections:'Correction Log',txcorrections:'Transcript Rules',costs:'Running Costs',compare:'Rep Comparison',add:'Add Calls'};
+  g('tb-title').textContent=opts.title||titles[page]||page;
+  // Only rebuild tb-right in share mode (location dropdown lives there in normal mode, managed via HTML)
+  if(SHARE_MODE)g('tb-right').innerHTML='';
+  closeMob();
+  ({overview:renderOverview,library:renderLibrary,profiles:renderProfiles,management:renderManagement,shared:renderShared,corrections:renderCorrections,txcorrections:renderTxCorrections,vonage:renderVonage,costs:renderCosts,compare:renderCompare,add:renderAdd})[page]?.(opts);
+}
+function openMob(){g('sidebar').classList.add('mobile-open');g('mob-overlay').classList.add('on');}
+function closeMob(){g('sidebar').classList.remove('mobile-open');g('mob-overlay').classList.remove('on');}
 
-            slim_select = "id,filename,storage_filename,rep_name,rep_name_detected,caller_name,call_purpose,call_type,move_type,move_category,call_outcome,loss_reason,soft_pipeline_reason,word_count,exclude_from_scoring,exclusion_reason,call_summary,key_details,talk_ratio_rep,talk_ratio_customer,keywords_detected,keyword_positions,objections_detected,objection_positions,customer_sentiment,scores,checklist,strengths,coaching_points,tags,manager_notes,score_overrides,call_date,audio_url,share_token,availability_decline,turned_away,onsite_suggested,call_quality,is_continuation,continuation_group_id,evaluation_confidence,is_diarized,close_attempts,objections_overcome,objections_abandoned,pipeline_recovery_quality,salesmanship_score,value_props_used,missed_rapport_opportunities,input_tokens,output_tokens,pricing_model,move_timeline,created_at"
+function getFC(attn=''){
+  const repLocMap={};reps.forEach(r=>{if(r.location){if(r.full_name)repLocMap[r.full_name]=r.location;if(r.nickname)repLocMap[r.nickname]=r.location;}});
+  // Date bounds: explicit calendar range takes priority over relative dateFilter
+  let fromDt=null,toDt=null;
+  if(dateFrom||dateTo){
+    if(dateFrom) fromDt=new Date(dateFrom+'T00:00:00');
+    if(dateTo)   toDt=new Date(dateTo+'T23:59:59');
+  } else if(dateFilter>0){
+    fromDt=new Date(new Date()-dateFilter*86400000);
+  }
+  return allCalls.filter(c=>{
+    const dt=new Date(c.call_date||c.created_at);
+    if(fromDt&&dt<fromDt)return false;
+    if(toDt&&dt>toDt)return false;
+    if(locationFilter&&repLocMap[c.rep_name]!==locationFilter)return false;
+    if(attn==='decline'&&!c.availability_decline)return false;
+    if(attn==='onsite'&&!c.onsite_suggested)return false;
+    if(attn==='turned_away'&&!c.turned_away)return false;
+    if(attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
+    return true;
+  });
+}
+function scc(src){return(src||getFC()).filter(c=>!c.exclude_from_scoring);}
+function avg(arr,k){const v=(arr||[]).map(c=>c.scores?.[k]?.score||0).filter(v=>v>0);return v.length?(v.reduce((a,b)=>a+b,0)/v.length).toFixed(1):'—';}
+function getScore(c,k){
+  // information_control: use new key, fall back to average of old keys for pre-v12 calls
+  if(k==='information_control'){
+    const v=c.scores?.information_control?.score;
+    if(v>0)return v;
+    const old=((c.scores?.info_sequence?.score||0)+(c.scores?.call_control?.score||0))/2;
+    return old||0;
+  }
+  return c.scores?.[k]?.score||c.score_overrides?.[k]||0;
+}
+function scCol(s){const n=parseFloat(s);if(isNaN(n))return'#6a8f6c';return n>=8?'#66bb6a':n>=5?'#ffb74d':'#ef5350';}
+function chip(s){const n=parseFloat(s);if(isNaN(n)||s==='—')return'<span class="chip chip-n">—</span>';const c=n>=8?'chip-g':n>=5?'chip-y':'chip-r';return`<span class="chip ${c}">${typeof s==='number'?n.toFixed(1):s}</span>`;}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function fmt(d){if(!d)return'—';return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
+function fmtS(d){if(!d)return'—';return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric'});}
+function ini(n){return(n||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);}
+function set(id,html){const el=g(id);if(el)el.innerHTML=html;}
+function g(id){return document.getElementById(id);}
 
-            # Supabase caps at 1000 rows per request — paginate to get all calls
-            PAGE_SIZE = 1000
-            all_calls = []
-            offset = 0
-            while True:
-                if slim:
-                    page = supa("GET", f"calls?order=created_at.desc&limit={PAGE_SIZE}&offset={offset}&select={slim_select}")
-                else:
-                    page = supa("GET", f"calls?order=created_at.desc&limit={PAGE_SIZE}&offset={offset}")
-                if not page:
-                    break
-                all_calls.extend(page)
-                if len(page) < PAGE_SIZE:
-                    break  # Last page — no more rows
-                offset += PAGE_SIZE
-                if offset > 20000:
-                    log(f"  Warning: _get_calls hit 20k row safety cap at offset {offset}")
-                    break
+// ── OVERVIEW ──
+// SVG donut path generator — same approach as mockup
+function svgDonutPaths(segments, cx, cy, rOuter, rInner) {
+  // segments: [{value, color}]; returns array of path strings
+  const total = segments.reduce((s, x) => s + x.value, 0);
+  if (total === 0) return [];
+  const paths = [];
+  let angle = -Math.PI / 2; // start at top
+  segments.forEach(seg => {
+    if (seg.value <= 0) return;
+    const portion = seg.value / total;
+    const a1 = angle;
+    const a2 = angle + portion * 2 * Math.PI;
+    const large = portion > 0.5 ? 1 : 0;
+    const x1o = cx + rOuter * Math.cos(a1);
+    const y1o = cy + rOuter * Math.sin(a1);
+    const x2o = cx + rOuter * Math.cos(a2);
+    const y2o = cy + rOuter * Math.sin(a2);
+    const x1i = cx + rInner * Math.cos(a2);
+    const y1i = cy + rInner * Math.sin(a2);
+    const x2i = cx + rInner * Math.cos(a1);
+    const y2i = cy + rInner * Math.sin(a1);
+    const d = `M ${x1o.toFixed(2)} ${y1o.toFixed(2)} A ${rOuter} ${rOuter} 0 ${large} 1 ${x2o.toFixed(2)} ${y2o.toFixed(2)} L ${x1i.toFixed(2)} ${y1i.toFixed(2)} A ${rInner} ${rInner} 0 ${large} 0 ${x2i.toFixed(2)} ${y2i.toFixed(2)} Z`;
+    paths.push({ d, color: seg.color, value: seg.value, label: seg.label });
+    angle = a2;
+  });
+  return paths;
+}
 
-            log(f"  _get_calls: returning {len(all_calls)} calls (paginated)")
-            self._ok(all_calls)
-        except Exception as e:
-            self._err(500, str(e))
+// Build a chart card with a donut + legend
+function buildDonutCard(title, meta, items, centerLabel) {
+  // items: [{label, value, color}], pre-sorted desc
+  const total = items.reduce((s, i) => s + i.value, 0);
+  if (total === 0) {
+    return `<div class="chart-card">
+      <div class="chart-card-header">
+        <div class="chart-card-title">${esc(title)}</div>
+        <div class="chart-card-meta">${esc(meta)}</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12.5px;padding:24px 0;text-align:center">No data yet</div>
+    </div>`;
+  }
+  const paths = svgDonutPaths(items, 80, 80, 72, 46);
+  const svgPaths = paths.map(p => `<path d="${p.d}" fill="${p.color}"/>`).join('');
+  const legend = items.map(i => {
+    const pct = Math.round(i.value / total * 100);
+    return `<div class="donut-legend-item">
+      <span class="donut-legend-swatch" style="background:${i.color}"></span>
+      <span class="donut-legend-label">${esc(i.label)}</span>
+      <span class="donut-legend-value">${i.value}<span class="donut-legend-pct">·${pct}%</span></span>
+    </div>`;
+  }).join('');
+  return `<div class="chart-card">
+    <div class="chart-card-header">
+      <div class="chart-card-title">${esc(title)}</div>
+      <div class="chart-card-meta">${esc(meta)}</div>
+    </div>
+    <div class="donut-wrap">
+      <svg class="donut-svg" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+        ${svgPaths}
+        <text class="donut-center-num" x="80" y="82" text-anchor="middle">${total}</text>
+        <text class="donut-center-label" x="80" y="98" text-anchor="middle">${esc(centerLabel)}</text>
+      </svg>
+      <div class="donut-legend">${legend}</div>
+    </div>
+  </div>`;
+}
 
-    def _extract_zip(self, body):
-        try:
-            import base64
-            p = json.loads(body)
-            zip_bytes = base64.b64decode(p.get("zip", ""))
-            audio_exts = {".mp3",".m4a",".wav",".ogg",".mp4",".webm",".mpeg",".mpga"}
-            results = []
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-                for name in zf.namelist():
-                    if name.startswith("__") or name.startswith(".") or name.endswith("/"):
-                        continue
-                    ext = os.path.splitext(name)[1].lower()
-                    if ext not in audio_exts:
-                        continue
-                    filename = os.path.basename(name)
-                    if not filename:
-                        continue
-                    audio_data = zf.read(name)
-                    results.append({"filename": filename, "audio": base64.b64encode(audio_data).decode(), "size": len(audio_data)})
-            self._ok({"files": results, "count": len(results)})
-        except zipfile.BadZipFile:
-            self._err(400, "Invalid zip file")
-        except Exception as e:
-            self._err(500, f"Zip extraction failed: {str(e)}")
+// Group calls by move category and loss reason
+function buildMoveTypeChart(scoredCalls) {
+  const palette = {
+    standard: 'var(--lg-green)',
+    specialty: '#7B61C9',          // purple — distinct from blue
+    long_distance: 'var(--blue)',
+    commercial: 'var(--lg-red)',   // brand red — full saturation, very distinct
+    unload_only: 'var(--lg-gold)',
+    in_house: '#3B8C8C',           // teal
+    storage: '#9BAFC9',            // warm gray-blue
+    non_move: 'var(--ink5)'
+  };
+  const labels = {
+    standard: 'Local · Standard',
+    specialty: 'Specialty',
+    long_distance: 'Long distance',
+    commercial: 'Commercial',
+    unload_only: 'Unload only',
+    in_house: 'In-house',
+    storage: 'Storage',
+    non_move: 'Non-move'
+  };
+  const counts = {};
+  scoredCalls.forEach(c => {
+    const cat = c.move_category;
+    if (cat && cat !== 'unknown' && labels[cat]) {
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+  });
+  const items = Object.entries(counts)
+    .map(([k, v]) => ({ label: labels[k], value: v, color: palette[k] }))
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  return buildDonutCard('Move type', total > 0 ? `${total} categorized` : '', items, 'CALLS');
+}
 
-    def _check_dup_endpoint(self, body):
-        try:
-            p = json.loads(body)
-            is_dup = self._check_filename_exists(p.get("filename", ""))
-            self._ok({"duplicate": is_dup})
-        except Exception:
-            self._ok({"duplicate": False})
+function buildLossReasonChart(scoredCalls) {
+  const palette = {
+    price_too_high: 'var(--lg-red)',
+    went_with_competitor: 'var(--blue)',
+    no_availability: 'var(--lg-gold)',
+    wrong_timing: 'var(--lg-red-light)',
+    just_shopping: 'var(--ink5)',
+    other: '#9F9F9F'
+  };
+  const labels = {
+    price_too_high: 'Price too high',
+    went_with_competitor: 'Went w/ competitor',
+    no_availability: 'No availability',
+    wrong_timing: 'Wrong timing',
+    just_shopping: 'Just shopping',
+    other: 'Other'
+  };
+  const counts = {};
+  scoredCalls.forEach(c => {
+    if (c.call_outcome !== 'lost') return;
+    const r = c.loss_reason;
+    if (r && labels[r]) counts[r] = (counts[r] || 0) + 1;
+  });
+  const items = Object.entries(counts)
+    .map(([k, v]) => ({ label: labels[k], value: v, color: palette[k] }))
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  return buildDonutCard('Why we lost', total > 0 ? `${total} lost deals` : 'No lost deals categorized', items, 'LOST DEALS');
+}
 
-    def _transcribe_and_analyze(self, body):
-        if not (DEEPGRAM_KEY or OPENAI_KEY):
-            self._err(500, "No transcription API configured — set DEEPGRAM_API_KEY"); return
-        if not API_KEY:
-            self._err(500, "ANTHROPIC_API_KEY not set"); return
-        if "application/json" not in self.headers.get("Content-Type", ""):
-            self._err(400, "Content-Type must be application/json"); return
-        try:
-            import base64
-            p = json.loads(body)
-            audio_bytes = base64.b64decode(p.get("audio", ""))
-            filename = p.get("filename", "call.mp3")
-        except Exception as e:
-            self._err(400, f"Bad request: {e}"); return
+function buildPricingModelChart(scoredCalls) {
+  const palette = {
+    pointed: 'var(--lg-green)',
+    hourly: 'var(--blue)',
+  };
+  const labels = {
+    pointed: 'Pointed / Flat-Rate',
+    hourly: 'Hourly',
+  };
+  const counts = { pointed: 0, hourly: 0 };
+  scoredCalls.forEach(c => {
+    const m = c.pricing_model;
+    if (m === 'pointed') counts.pointed++;
+    else if (m === 'hourly') counts.hourly++;
+    // 'unknown' and missing values intentionally skipped — only show
+    // calls where the rep clearly used one model or the other.
+  });
+  const items = Object.entries(counts)
+    .filter(([, v]) => v > 0)
+    .map(([k, v]) => ({ label: labels[k], value: v, color: palette[k] }))
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  return buildDonutCard('Pricing model', total > 0 ? `${total} categorized` : 'No pricing detected', items, 'CALLS');
+}
 
-        try:
-            with _analysis_semaphore:
-                # Use cached keyterms — no Supabase query needed on every call
-                try:
-                    keyterms = get_cached_keyterms()
-                    tx_corrections = get_transcript_corrections()
-                except Exception:
-                    keyterms = build_keyterms()
-                    tx_corrections = []
+function buildObjectionsCard(scoredCalls) {
+  const counts = {};
+  scoredCalls.forEach(c => {
+    // Schema field is objections_detected (array of strings).
+    // Older code referenced c.objections; keep that as a fallback for
+    // any legacy records that might still use the old shape.
+    let arr = c.objections_detected;
+    if (!arr) arr = c.objections;
+    if (!arr) return;
+    if (typeof arr === 'string') {
+      try { arr = JSON.parse(arr); } catch(e) { arr = []; }
+    }
+    if (!Array.isArray(arr)) return;
+    arr.forEach(o => {
+      const raw = (typeof o === 'string') ? o : (o?.objection || o?.text || '');
+      const k = normObj(raw);
+      if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (sorted.length === 0) {
+    return `<div class="chart-card">
+      <div class="chart-card-header">
+        <div class="chart-card-title">Top objections</div>
+        <div class="chart-card-meta">across all calls</div>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12.5px;padding:24px 0;text-align:center">No objections recorded yet</div>
+    </div>`;
+  }
+  const max = sorted[0][1];
+  const rows = sorted.map(([label, val], i) => `
+    <div class="objection-row">
+      <div class="objection-rank${i === 0 ? ' top' : ''}">${i + 1}</div>
+      <div class="objection-content">
+        <div class="objection-label">${esc(label)}</div>
+        <div class="objection-bar-wrap"><div class="objection-bar-fill" style="width:${Math.round(val/max*100)}%"></div></div>
+      </div>
+      <div class="objection-count">${val}</div>
+    </div>`).join('');
+  return `<div class="chart-card">
+    <div class="chart-card-header">
+      <div class="chart-card-title">Top objections</div>
+      <div class="chart-card-meta">across all calls</div>
+    </div>
+    <div class="objection-list">${rows}</div>
+  </div>`;
+}
 
-                log(f"  Transcribing {filename} ({len(audio_bytes)} bytes) via {'Deepgram' if DEEPGRAM_KEY else 'Whisper'}...")
-                transcript, is_diarized, word_timestamps = transcribe_audio(audio_bytes, filename, keyterms=keyterms)
-                if not transcript or not transcript.strip():
-                    self._err(400, "Transcription empty — audio may be silent"); return
-                log(f"  Transcription done: {len(transcript)} chars, diarized={is_diarized}, timestamps={len(word_timestamps)}")
+// Score color helper
+function scoreClass(s) {
+  const n = parseFloat(s);
+  if (isNaN(n)) return '';
+  if (n >= 8) return 'score-good';
+  if (n >= 5) return 'score-mid';
+  return 'score-low';
+}
 
-                # Apply corrections
-                clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
+// Outcome distribution bar for the Calls hero card
+function buildOutcomeBar(sc) {
+  const counts = { booked: 0, estimate_sent: 0, soft_pipeline: 0, lost: 0, other: 0 };
+  sc.forEach(c => {
+    const o = c.call_outcome;
+    if (o === 'booked') counts.booked++;
+    else if (o === 'estimate_sent') counts.estimate_sent++;
+    else if (o === 'soft_pipeline') counts.soft_pipeline++;
+    else if (o === 'lost') counts.lost++;
+    else counts.other++;
+  });
+  const total = sc.length;
+  if (total === 0) return '';
+  const pct = k => total ? (counts[k] / total * 100) : 0;
+  const segments = [];
+  if (counts.booked > 0)        segments.push(`<div class="outcome-bar-segment" style="width:${pct('booked')}%;background:var(--lg-green)"></div>`);
+  if (counts.estimate_sent > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('estimate_sent')}%;background:var(--blue)"></div>`);
+  if (counts.soft_pipeline > 0) segments.push(`<div class="outcome-bar-segment" style="width:${pct('soft_pipeline')}%;background:var(--lg-gold)"></div>`);
+  if (counts.lost > 0)          segments.push(`<div class="outcome-bar-segment" style="width:${pct('lost')}%;background:var(--lg-red-light)"></div>`);
+  if (counts.other > 0)         segments.push(`<div class="outcome-bar-segment" style="width:${pct('other')}%;background:var(--ink5)"></div>`);
+  const legend = [];
+  if (counts.booked)        legend.push(`<span style="--c:var(--lg-green)">${counts.booked} booked</span>`);
+  if (counts.estimate_sent) legend.push(`<span style="--c:var(--blue)">${counts.estimate_sent} estimate</span>`);
+  if (counts.soft_pipeline) legend.push(`<span style="--c:var(--lg-gold)">${counts.soft_pipeline} pipeline</span>`);
+  if (counts.lost)          legend.push(`<span style="--c:var(--lg-red-light)">${counts.lost} lost</span>`);
+  if (counts.other)         legend.push(`<span style="--c:var(--ink5)">${counts.other} other</span>`);
+  return `<div class="outcome-bar">${segments.join('')}</div>
+    <div class="outcome-bar-legend">${legend.join('')}</div>`;
+}
 
-                result = run_claude_analysis(clean_transcript, filename, is_diarized=is_diarized)
 
-            result["transcript"] = clean_transcript
-            result["filename"] = filename
-            result["is_diarized"] = is_diarized
-            if word_timestamps:
-                result["word_timestamps"] = word_timestamps
+function buildScoreDist(sc){
+  // Tally scored calls by score band based on overall score
+  let high = 0, mid = 0, low = 0;
+  let n = 0;
+  sc.forEach(c => {
+    const s = c.score_overrides?.overall ?? c.scores?.overall?.score ?? 0;
+    if (!s) return;
+    n++;
+    if (s >= 8) high++;
+    else if (s >= 5) mid++;
+    else low++;
+  });
+  if (n === 0) return '';
+  const pct = (x) => Math.round(x / n * 100);
+  const row = (label, count, pctVal, cls) => `<div class="score-dist-row">
+    <span class="score-dist-label">${label}</span>
+    <div class="score-dist-bar"><div class="score-dist-bar-fill ${cls}" style="width:${pctVal}%"></div></div>
+    <span class="score-dist-pct">${pctVal}%</span>
+  </div>`;
+  return `<div class="score-dist">
+    ${row('8–10', high, pct(high), 'high')}
+    ${row('5–7',  mid,  pct(mid),  'mid')}
+    ${row('1–4',  low,  pct(low),  'low')}
+  </div>`;
+}
 
-            # Upload audio to storage (best effort)
-            try:
-                enforce_storage_cap()
-                # Sanitize filename for storage — remove spaces and special chars
-                safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
-                supa_storage_upload("call-audio", safe_filename, audio_bytes, "audio/mpeg")
-                result["audio_url"] = supa_storage_signed_url("call-audio", safe_filename)
-                result["storage_filename"] = safe_filename
-            except Exception as e:
-                log(f"  Audio storage warning: {e}")
-                result["audio_url"] = ""
-                result["storage_filename"] = ""
 
-            self._ok(result)
-        except urllib.error.HTTPError as e:
-            self._err(e.code, f"API error: {e.read().decode()}")
-        except Exception as e:
-            self._err(500, f"Processing failed: {str(e)}")
+function renderOverview(){
+  const fc=getFC(),sc=scc(fc);
+  const turnedAway=fc.filter(c=>c.turned_away).length;
+  const badQ=fc.filter(c=>c.call_quality&&c.call_quality!=='normal').length;
+  const booked=sc.filter(c=>c.call_outcome==='booked').length;
+  const softPipeline=sc.filter(c=>c.call_outcome==='soft_pipeline').length;
+  const lost=sc.filter(c=>c.call_outcome==='lost').length;
+  const unscored=fc.length - sc.length - fc.filter(c=>c.exclude_from_scoring).length;
+  const avgOverall=avg(sc,'overall');
+  const repCount=new Set(sc.map(c=>c.rep_name)).size;
+  const dateRangeLabel = dateFilter===0 ? 'all time' : `last ${dateFilter} days`;
 
-    def _analyze(self, body):
-        if not API_KEY:
-            self._err(500, "ANTHROPIC_API_KEY not set"); return
-        try:
-            p = json.loads(body)
-            transcript = p.get("transcript", "").strip()
-            filename = p.get("filename", "call.txt")
-            if not transcript:
-                self._err(400, "No transcript"); return
-            with _analysis_semaphore:
-                result = run_claude_analysis(transcript, filename)
-            result["filename"] = filename
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
+  // Build attention items list (replaces the old colored attn-cards)
+  const attnItems = [];
+  if (turnedAway > 0) attnItems.push({type:'warn', title:`${turnedAway} call${turnedAway===1?'':'s'} flagged "turned away"`, desc:'Customers were declined service. Review for coaching.', click:`navFilter('turned_away')`});
+  if (unscored > 0) attnItems.push({type:'alert', title:`${unscored} unscored call${unscored===1?'':'s'}`, desc:'Missed analysis — run bulk re-analyze.', click:`nav('library')`});
+  if (badQ > 0) attnItems.push({type:'alert', title:`${badQ} call${badQ===1?'':'s'} with poor audio`, desc:'Disconnected or low quality recordings.', click:`navFilter('quality')`});
 
-    def _check_duplicate(self, filename, transcript):
-        try:
-            # Normalize filename for comparison: strip spaces/underscores/dots variations
-            def norm_filename(fn):
-                return re.sub(r'[\s_\-]+', '', fn).lower()
+  set('page',`
+    <div class="hero-grid hero-2up">
+      <div class="hero-card featured">
+        <div class="hero-label">Average Score</div>
+        <div class="hero-value">${avgOverall}<span class="hero-value-suffix">/10</span></div>
+        <div class="hero-detail">${sc.length} scored call${sc.length===1?'':'s'} · ${repCount} rep${repCount===1?'':'s'}</div>
+        ${buildScoreDist(sc)}
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Scored Calls</div>
+        <div class="hero-value">${sc.length}</div>
+        ${unscored > 0 ? `<div class="hero-detail" style="color:var(--ink3)">${unscored} unscored not shown</div>` : ''}
+        ${buildOutcomeBar(sc)}
+      </div>
+    </div>
 
-            norm = norm_filename(filename)
-            clean = filename.replace("'", "''")
+    <div class="chart-row">
+      ${buildMoveTypeChart(sc)}
+      ${buildPricingModelChart(sc)}
+      ${buildLossReasonChart(sc)}
+      ${buildObjectionsCard(sc)}
+    </div>
 
-            # Exact filename match (case-insensitive)
-            existing = supa("GET", f"calls?filename=ilike.{urllib.parse.quote(clean)}&limit=1")
-            if existing:
-                return True, f"Duplicate filename: {filename}"
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Top performers <em>${dateRangeLabel}</em></div>
+          <div class="panel-meta" id="lb-cnt"></div>
+        </div>
+        <div class="lb-row lb-header">
+          <div class="lb-rank">#</div>
+          <div class="lb-name-text">Rep</div>
+          <div class="lb-score">Overall</div>
+          <div class="lb-score">Rapport</div>
+          <div class="lb-score">Close</div>
+          <div class="lb-score">Calls</div>
+        </div>
+        <div id="lb-body"></div>
+        <div class="lb-expand" id="lb-expand" style="padding:10px 22px;text-align:center;color:var(--ink3);font-size:12px;cursor:pointer" onclick="lbShowAll=!lbShowAll;renderLB()"></div>
+      </div>
 
-            # Normalized filename match (catches space vs underscore differences)
-            all_filenames = supa("GET", "calls?select=filename,id&limit=5000")
-            for c in (all_filenames or []):
-                fn = c.get("filename", "")
-                if fn and norm_filename(fn) == norm:
-                    return True, f"Duplicate filename (normalized): {fn}"
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Needs attention</div>
+          <div class="panel-meta">${attnItems.length} item${attnItems.length===1?'':'s'}</div>
+        </div>
+        ${attnItems.length === 0
+          ? `<div style="padding:24px 22px;color:var(--ink3);font-size:13px;text-align:center">All caught up — nothing flagged</div>`
+          : attnItems.map(a=>`
+              <div class="attn-item" onclick="${a.click}">
+                <div class="attn-dot ${a.type}"></div>
+                <div class="attn-content">
+                  <div class="attn-title">${esc(a.title)}</div>
+                  <div class="attn-desc">${esc(a.desc)}</div>
+                </div>
+              </div>`).join('')}
+      </div>
+    </div>
 
-            # Content match — compare first 200 chars of transcript
-            if transcript and len(transcript) > 100:
-                tx_start = transcript[:200].strip()
-                all_calls = supa("GET", "calls?select=transcript,filename&limit=5000")
-                for c in (all_calls or []):
-                    ctx = (c.get("transcript") or "")[:200].strip()
-                    if ctx and ctx == tx_start:
-                        return True, f"Duplicate content (matches {c.get('filename','unknown')})"
-            return False, ""
-        except Exception as e:
-            log(f"  _check_duplicate error: {e}")
-            return False, ""
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-hdr"><h3>Process Compliance by Group</h3><span style="font-size:11px;color:var(--ink3)">Click to expand steps</span></div>
+      <div id="comp-groups"></div>
+    </div>
 
-    def _find_duplicates(self):
-        """Scan all calls for duplicate filenames or transcript content. Returns grouped duplicates."""
-        try:
-            calls = supa("GET", "calls?select=id,filename,created_at,rep_name,transcript&order=created_at.asc&limit=5000") or []
+    <div class="grid-3">
+      <div class="card"><div class="card-hdr"><h3>Talk Ratio</h3></div><div id="talk-viz"></div></div>
+      <div class="card"><div class="card-hdr"><h3>Keywords</h3></div><div id="kw-viz"></div></div>
+      <div class="card"><div class="card-hdr"><h3>Date Filter</h3></div>
+        <div style="font-size:12px;color:var(--ink3)">Showing ${fc.length} calls · <span style="cursor:pointer;text-decoration:underline" onclick="toggleDatePicker()">change date range</span></div>
+      </div>
+    </div>`);
+  renderLB();renderCompGroups(sc);renderTalk(sc);renderKW(sc);renderObj(sc);
+}
+function navFilter(attn){libFilters.attn=attn;nav('library');}
+function sortLB(k){if(lbKey===k)lbDir*=-1;else{lbKey=k;lbDir=-1;}renderLB();}
+function renderLB(){
+  const sc=scc(getFC());
+  const repNames=[...new Set(sc.map(c=>c.rep_name))].filter(r=>r&&r!=='Unknown'&&sc.filter(c=>c.rep_name===r).length>=5);
+  const data=repNames.map(r=>{
+    const rc=sc.filter(c=>c.rep_name===r);
+    const a=k=>rc.length?(rc.reduce((s,c)=>s+(c.scores?.[k]?.score||0),0)/rc.length):0;
+    return{rep_name:r,overall:a('overall'),rapport_tone:a('rapport_tone'),price_delivery:a('price_delivery'),salesmanship:a('salesmanship'),closing_attempt:a('closing_attempt'),calls:rc.length};
+  });
+  // Sort by overall desc by default
+  data.sort((a,b)=>(b[lbKey||'overall']||0) - (a[lbKey||'overall']||0));
+  const cnt=g('lb-cnt');
+  if(cnt)cnt.textContent=`${data.length} rep${data.length!==1?'s':''} · ≥5 calls`;
+  const body=g('lb-body');if(!body)return;
+  const disp=lbShowAll?data:data.slice(0,10);
+  const exp=g('lb-expand');
+  if(exp){exp.style.display=data.length<=10?'none':'block';exp.textContent=lbShowAll?'▲ Show top 10':`▼ Show all ${data.length} reps`;}
+  if(disp.length === 0){
+    body.innerHTML = '<div style="padding:24px 22px;color:var(--ink3);font-size:13px;text-align:center">No reps with 5+ scored calls in this period</div>';
+    return;
+  }
+  body.innerHTML=disp.map((d,i)=>{
+    const rankClass = i < 2 ? 'top' : '';
+    const ini2 = ini(d.rep_name);
+    return `<div class="lb-row" onclick="nav('profiles',{rep:'${esc(d.rep_name)}'})">
+      <div class="lb-rank ${rankClass}">${i+1}</div>
+      <div class="lb-name">
+        <div class="lb-avatar">${ini2}</div>
+        <div>
+          <div class="lb-name-text">${esc(d.rep_name)}</div>
+          <div class="lb-name-sub">${d.calls} call${d.calls===1?'':'s'}</div>
+        </div>
+      </div>
+      <div class="lb-score ${scoreClass(d.overall)}">${d.overall.toFixed(1)}</div>
+      <div class="lb-score ${scoreClass(d.rapport_tone)}">${d.rapport_tone.toFixed(1)}</div>
+      <div class="lb-score ${scoreClass(d.closing_attempt)}">${d.closing_attempt.toFixed(1)}</div>
+      <div class="lb-score" style="color:var(--ink3)">${d.calls}</div>
+    </div>`;
+  }).join('');
+}
+function renderTrend(sc){
+  const canvas=document.getElementById('trend-chart');if(!canvas)return;
+  const sorted=[...(sc||scc(getFC()))].sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
+  if(trendChart){trendChart.destroy();trendChart=null;}
+  trendChart=new Chart(canvas,{type:'line',data:{labels:sorted.map(c=>fmtS(c.call_date||c.created_at)),datasets:[
+    {label:'Overall',data:sorted.map(c=>c.scores?.overall?.score||0),borderColor:'#4a7c3f',backgroundColor:'rgba(74,124,63,.07)',borderWidth:2.5,pointRadius:2.5,tension:.4,fill:true},
+    {label:'Rapport',data:sorted.map(c=>c.scores?.rapport_tone?.score||0),borderColor:'#3461c1',backgroundColor:'transparent',borderWidth:2,pointRadius:2,tension:.4,borderDash:[5,4]},
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true,labels:{font:{size:11,family:'Inter'},boxWidth:14,padding:12}}},scales:{y:{min:0,max:10,ticks:{stepSize:2,color:'#7a857a',font:{size:10}},grid:{color:'rgba(0,0,0,.04)'}},x:{ticks:{color:'#7a857a',maxRotation:45,autoSkip:true,maxTicksLimit:10,font:{size:10}},grid:{display:false}}}}});
+}
+function renderCompGroups(sc){
+  const el=g('comp-groups');if(!el)return;
+  if(!sc||!sc.length){el.innerHTML='<div style="color:var(--ink3);font-size:12px;text-align:center;padding:20px">No scored calls in period</div>';return;}
+  el.innerHTML=CK_GROUPS.map((grp,gi)=>{
+    const pct=Math.round(sc.reduce((a,c)=>a+grp.keys.filter(k=>c.checklist?.[k]).length,0)/(sc.length*grp.keys.length)*100);
+    const col=pct>=80?'#16a34a':pct>=50?'#d97706':'#dc2626';
+    const steps=grp.keys.map(k=>{
+      const sp=Math.round(sc.filter(c=>c.checklist?.[k]).length/sc.length*100);
+      const sc2=sp>=80?'#16a34a':sp>=50?'#d97706':'#dc2626';
+      const idx=CK.indexOf(k);
+      return`<div class="comp-step"><span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:180px">${CKFULL[idx]||k}</span><div class="comp-step-bar"><div class="comp-step-fill" style="width:${sp}%;background:${sc2}"></div></div><span class="comp-step-pct" style="color:${sc2}">${sp}%</span></div>`;
+    }).join('');
+    return`<div class="comp-group">
+      <div class="comp-group-header" onclick="toggleCG(${gi})">
+        <span class="comp-group-name">${grp.name}</span>
+        <span class="comp-group-pct" style="color:${col}">${pct}%</span>
+        <span style="font-size:11px;color:var(--ink4)">▾</span>
+      </div>
+      <div class="comp-bar-wrap"><div class="comp-bar" style="width:${pct}%;background:${col}"></div></div>
+      <div class="comp-steps" id="cg-${gi}">${steps}</div>
+    </div>`;
+  }).join('');
+}
+function toggleCG(i){const el=g('cg-'+i);if(el)el.classList.toggle('open');}
+function renderTalk(sc){
+  const w=(sc||[]).filter(c=>c.talk_ratio_rep>0);const el=g('talk-viz');if(!el)return;
+  if(!w.length){el.innerHTML='<div style="color:var(--tx3);font-size:13px">No data yet</div>';return;}
+  const ar=Math.round(w.reduce((a,c)=>a+c.talk_ratio_rep,0)/w.length),ac=100-ar;
+  el.innerHTML=`<div class="tr-bar" style="margin-bottom:9px"><div class="tr-rep" style="width:${ar}%">${ar}%</div><div class="tr-cust" style="width:${ac}%">${ac}%</div></div>
+    <div style="display:flex;gap:14px;font-size:12px;color:var(--tx3);margin-bottom:8px"><span style="color:var(--g)">■ Rep ${ar}%</span><span style="color:var(--blue)">■ Cust ${ac}%</span></div>
+    <div style="font-size:12px;color:var(--tx3)">Ideal: rep 40% · customer 60%</div>`;
+}
+function renderKW(sc){
+  const cnt={};KWS.forEach(k=>cnt[k]=0);(sc||[]).forEach(c=>(c.keywords_detected||[]).forEach(k=>{if(cnt[k]!==undefined)cnt[k]++;}));
+  const sorted=Object.entries(cnt).sort((a,b)=>b[1]-a[1]),mx=Math.max(...sorted.map(([,v])=>v),1);
+  const el=g('kw-viz');if(!el)return;
+  el.innerHTML=sorted.map(([k,v])=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer" onclick="libFilters.kw='${k}';libFilters.attn='';nav('library')" title="Filter calls with: ${k}"><span style="min-width:90px;font-size:11.5px;color:var(--ink2)">${k}</span><div style="flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden"><div style="width:${Math.round(v/mx*100)}%;height:100%;background:var(--g);border-radius:2px"></div></div><span style="font-size:12.5px;font-weight:700;color:var(--g);min-width:18px;text-align:right">${v}</span></div>`).join('');
+}
+function normObj(raw){
+  if(!raw)return raw;
+  const s=raw.toLowerCase().replace(/_/g,' ').replace(/-/g,' ').replace(/[.,!?]+$/,'').trim();
+  if(s.includes('price')||s.includes('too high')||s.includes('expensive')||s.includes('cost')){
+    if(s.includes('another quote')||s.includes('other quote')||s.includes('already have')||s.includes('have a quote'))return'Already have another quote';
+    return'Price too high';
+  }
+  if(s.includes('think')||s.includes('consider')||s.includes('need time')||s.includes('not sure'))return'Need to think about it';
+  if(s.includes('partner')||s.includes('spouse')||s.includes('check with')||s.includes('talk to')||s.includes('husband')||s.includes('wife'))return'Need to check with partner';
+  if(s.includes('timing')||s.includes('not ready')||s.includes('wrong time')||s.includes('bad time'))return'Wrong timing';
+  if(s.includes('another quote')||s.includes('other quote')||s.includes('already have')||s.includes('other company')||s.includes('other mover'))return'Already have another quote';
+  return raw.trim();
+}
+function renderObj(sc){
+  const cnt={};(sc||[]).forEach(c=>(c.objections_detected||[]).forEach(o=>{const n=normObj(o);cnt[n]=(cnt[n]||0)+1;}));
+  const sorted=Object.entries(cnt).sort((a,b)=>b[1]-a[1]);const el=g('obj-viz');if(!el)return;
+  el.innerHTML=sorted.length?sorted.map(([o,v])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer" onclick="libFilters.obj='${o}';libFilters.attn='';nav('library')" title="Filter calls with: ${o}"><span style="color:var(--ink2)">${o}</span><span style="font-size:11px;font-weight:700;background:rgba(239,83,80,.15);color:#ef9a9a;padding:2px 9px;border-radius:10px">${v}</span></div>`).join(''):'<div style="color:var(--ink4);font-size:13px">No objections recorded</div>';
+}
 
-            def norm_filename(fn):
-                return re.sub(r'[\s_\-]+', '', fn).lower()
+// ── LIBRARY ──
+function renderLibrary(opts={}){
+  if(opts.attn)libFilters.attn=opts.attn;
+  if(opts.openCallId)window._pendingOpenCallId=opts.openCallId;
+  const repOpts=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort().map(r=>`<option value="${r}"${libFilters.rep===r?' selected':''}>${r}</option>`).join('');
+  const job=window._lastJobStatus||{status:'idle'};
 
-            # Group by normalized filename
-            fn_groups = {}
-            for c in calls:
-                fn = c.get("filename", "")
-                if not fn:
-                    continue
-                norm = norm_filename(fn)
-                fn_groups.setdefault(norm, []).append(c)
+  // Pre-compute counts for filter chips
+  const fc=getFC();
+  const countOut = (v) => fc.filter(c=>c.call_outcome===v && !c.exclude_from_scoring).length;
+  const cBooked=countOut('booked');
+  const cEstimate=countOut('estimate_sent');
+  const cLost=countOut('lost');
+  const cPipeline=countOut('soft_pipeline');
 
-            # Group by first 200 chars of transcript
-            tx_groups = {}
-            for c in calls:
-                tx = (c.get("transcript") or "")[:200].strip()
-                if not tx or len(tx) < 50:
-                    continue
-                tx_groups.setdefault(tx, []).append(c)
+  const bulkBar = SHARE_MODE ? '' : `<div class="bulk-bar-mockup">
+    <div class="bulk-bar-title">⚡ Bulk Actions</div>
+    <button class="btn btn-primary btn-sm" onclick="startReanalyze()" id="reanalyze-btn" ${job.status==='running'?'disabled':''}>${job.status==='running'?'<span class="spin spin-dark"></span> Running…':'⚡ Re-analyze all'}</button>
+    <button class="btn btn-secondary btn-sm" onclick="checkUnscored()">🔍 Check unscored</button>
+    <span style="color:var(--ink3);margin-left:auto;font-size:12px">Re-run Claude on all transcripts · ~$0.02/call</span>
+    ${job.status==='running'?`<div style="background:var(--surface);border-radius:9px;padding:12px;margin-top:10px;border:1px solid var(--border2);width:100%"><div class="prog"><div class="prog-fill" id="reanalyze-prog" style="width:${job.total?Math.round(job.processed/job.total*100):0}%"></div></div><div class="prog-label" id="reanalyze-status">Processing ${job.processed}/${job.total}: ${esc(job.current||'…')}</div></div>`:''}
+    <div id="unscored-results" style="margin-top:10px;width:100%"></div>
+  </div>`;
 
-            duplicates = []
-            seen_ids = set()
+  // Build outcome filter chips
+  const chip = (val, label, count) => {
+    const active = libFilters.out === val;
+    return `<button class="filter-chip${active?' active':''}" onclick="libFilters.out='${active?'':val}';renderCallList()">${label}${count>0?`<span class="chip-count">${count}</span>`:''}</button>`;
+  };
 
-            for norm, group in fn_groups.items():
-                if len(group) > 1:
-                    ids = [c["id"] for c in group]
-                    if any(i in seen_ids for i in ids):
-                        continue
-                    seen_ids.update(ids)
-                    duplicates.append({
-                        "type": "filename",
-                        "key": group[0].get("filename", ""),
-                        "calls": [{"id": c["id"], "filename": c.get("filename"), "created_at": c.get("created_at"), "rep_name": c.get("rep_name")} for c in group]
-                    })
+  set('page', bulkBar + `
+    <div class="lib-toolbar-mockup">
+      <div class="search-box">
+        <span style="color:var(--ink3)">🔍</span>
+        <input type="text" placeholder="Search by caller, rep, summary, keyword, or transcript…" value="${esc(libFilters.search)}" oninput="libFilters.search=this.value;renderCallList()" />
+      </div>
+      ${chip('booked','Booked',cBooked)}
+      ${chip('estimate_sent','Estimate',cEstimate)}
+      ${chip('soft_pipeline','Pipeline',cPipeline)}
+      ${chip('lost','Lost',cLost)}
+      <select class="fsel" onchange="libFilters.rep=this.value;renderCallList()" style="font-size:12px;padding:6px 10px"><option value="">All reps</option>${repOpts}</select>
+      <select class="fsel" onchange="libFilters.score=this.value;renderCallList()" style="font-size:12px;padding:6px 10px">
+        <option value="">All scores</option>
+        <option value="high"${libFilters.score==='high'?' selected':''}>8–10</option>
+        <option value="mid"${libFilters.score==='mid'?' selected':''}>5–7</option>
+        <option value="low"${libFilters.score==='low'?' selected':''}>1–4</option>
+      </select>
+      <select class="fsel" onchange="libFilters.move_cat=this.value;renderCallList()" style="font-size:12px;padding:6px 10px">
+        <option value="">All move types</option>
+        <option value="standard"${libFilters.move_cat==='standard'?' selected':''}>Standard</option>
+        <option value="specialty"${libFilters.move_cat==='specialty'?' selected':''}>Specialty</option>
+        <option value="unload_only"${libFilters.move_cat==='unload_only'?' selected':''}>Unload only</option>
+        <option value="in_house"${libFilters.move_cat==='in_house'?' selected':''}>In-house</option>
+        <option value="commercial"${libFilters.move_cat==='commercial'?' selected':''}>Commercial</option>
+        <option value="storage"${libFilters.move_cat==='storage'?' selected':''}>Storage</option>
+      </select>
+      <select class="fsel" onchange="libFilters.sort=this.value;renderCallList()" style="font-size:12px;padding:6px 10px">
+        <option value="newest"${libFilters.sort==='newest'?' selected':''}>Newest</option>
+        <option value="oldest"${libFilters.sort==='oldest'?' selected':''}>Oldest</option>
+        <option value="score_high"${libFilters.sort==='score_high'?' selected':''}>Highest score</option>
+        <option value="score_low"${libFilters.sort==='score_low'?' selected':''}>Lowest score</option>
+        <option value="location"${libFilters.sort==='location'?' selected':''}>By location</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="clearLibF()">Clear</button>
+    </div>
 
-            for tx_key, group in tx_groups.items():
-                if len(group) > 1:
-                    ids = [c["id"] for c in group]
-                    if any(i in seen_ids for i in ids):
-                        continue
-                    seen_ids.update(ids)
-                    duplicates.append({
-                        "type": "content",
-                        "key": tx_key[:80] + "…",
-                        "calls": [{"id": c["id"], "filename": c.get("filename"), "created_at": c.get("created_at"), "rep_name": c.get("rep_name")} for c in group]
-                    })
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;font-size:12px;color:var(--ink3);flex-wrap:wrap">
+      <span class="lib-count" id="lib-cnt"></span>
+      <label class="toggle-excl" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" ${libFilters.showExcl?'checked':''} onchange="libFilters.showExcl=this.checked;renderCallList()" /> Show excluded</label>
+      ${libFilters.attn?`<span class="bdg-amber bdg" style="cursor:pointer" onclick="libFilters.attn='';renderCallList()">✕ ${libFilters.attn.replace('_',' ')} filter</span>`:''}
+      ${libFilters.obj?`<span class="bdg" style="background:var(--lg-red-bg);color:var(--lg-red);cursor:pointer" onclick="libFilters.obj='';renderCallList()">✕ objection: ${esc(libFilters.obj)}</span>`:''}
+      ${libFilters.kw?`<span class="bdg-blue bdg" style="cursor:pointer" onclick="libFilters.kw='';renderCallList()">✕ keyword: ${esc(libFilters.kw)}</span>`:''}
+      ${!SHARE_MODE?`<span style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-secondary btn-sm" onclick="toggleSelAll()">☐ Select all</button>${libFilters.showExcl?`<button class="btn btn-d btn-sm" onclick="bulkDelExcluded()">🗑 Delete all excluded</button>`:''}</span>`:''}
+    </div>
 
-            self._ok({"total_calls": len(calls), "duplicate_groups": len(duplicates), "duplicates": duplicates})
-        except Exception as e:
-            self._err(500, str(e))
+    ${!SHARE_MODE?`<div class="bulk-bar" id="bulk-bar"><span id="bulk-cnt">0 selected</span><button class="btn btn-d btn-sm" onclick="bulkDel()">🗑 Delete</button><button class="btn btn-secondary btn-sm" onclick="clearSel()">Cancel</button></div>`:''}
 
-    def _check_filename_exists(self, filename):
-        try:
-            clean = filename.replace("'", "''")
-            existing = supa("GET", f"calls?filename=ilike.{urllib.parse.quote(clean)}&limit=1")
-            return bool(existing)
-        except Exception:
-            return False
+    <div class="call-list" id="call-list"></div>
+  `);
+  renderCallList();
+}
 
-    def _save(self, body):
-        try:
-            p = json.loads(body)
+function clearLibF(){libFilters={rep:'',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};renderLibrary();}
 
-            if p.get("check_duplicate", True) or not p.get("force_save", False):
-                is_dup, dup_reason = self._check_duplicate(p.get("filename", ""), p.get("transcript", ""))
-                if is_dup:
-                    self._ok({"duplicate": True, "reason": dup_reason}); return
+function renderCallList(){
+  const q=(libFilters.search||'').toLowerCase();
+  const base=getFC();
+  let list=base.filter(c=>{
+    if(!libFilters.showExcl&&c.exclude_from_scoring)return false;
+    if(libFilters.rep&&c.rep_name!==libFilters.rep)return false;
+    if(libFilters.out&&c.call_outcome!==libFilters.out)return false;
+    if(libFilters.score==='high'&&(c.scores?.overall?.score||0)<8)return false;
+    if(libFilters.score==='mid'){const s=c.scores?.overall?.score||0;if(s<5||s>7)return false;}
+    if(libFilters.score==='low'&&(c.scores?.overall?.score||0)>4)return false;
+    if(libFilters.attn==='decline'&&!c.availability_decline)return false;
+    if(libFilters.attn==='turned_away'&&!c.turned_away)return false;
+    if(libFilters.attn==='quality'&&(!c.call_quality||c.call_quality==='normal'))return false;
+    if(libFilters.attn==='onsite'&&!c.onsite_suggested)return false;
+    if(libFilters.obj&&!(c.objections_detected||[]).some(o=>normObj(o)===libFilters.obj))return false;
+    if(libFilters.kw&&!(c.keywords_detected||[]).includes(libFilters.kw))return false;
+    if(libFilters.move_cat&&c.move_category!==libFilters.move_cat)return false;
+    if(libFilters.confidence==='low'&&(c.evaluation_confidence||10)>5)return false;
+    if(q){const hay=[c.rep_name,c.caller_name,c.call_purpose,c.call_summary,c.transcript,c.filename].join(' ').toLowerCase();if(!hay.includes(q))return false;}
+    return true;
+  });
+  if(libFilters.sort==='newest')list.sort((a,b)=>new Date(b.call_date||b.created_at)-new Date(a.call_date||a.created_at));
+  else if(libFilters.sort==='oldest')list.sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
+  else if(libFilters.sort==='score_high')list.sort((a,b)=>(b.scores?.overall?.score||0)-(a.scores?.overall?.score||0));
+  else if(libFilters.sort==='score_low')list.sort((a,b)=>(a.scores?.overall?.score||0)-(b.scores?.overall?.score||0));
+  else if(libFilters.sort==='location'){
+    const repLocMap={};reps.forEach(r=>{if(r.location){if(r.full_name)repLocMap[r.full_name]=r.location;if(r.nickname)repLocMap[r.nickname]=r.location;}});
+    list.sort((a,b)=>{const la=repLocMap[a.rep_name]||'zzz',lb=repLocMap[b.rep_name]||'zzz';return la.localeCompare(lb)||a.rep_name.localeCompare(b.rep_name)||new Date(b.call_date||b.created_at)-new Date(a.call_date||a.created_at);});
+  }
+  const cnt=g('lib-cnt');if(cnt)cnt.textContent=`${list.length} call${list.length!==1?'s':''}`;
+  const el=g('call-list');if(!el)return;
+  el.innerHTML=list.length?list.map(c=>buildRow(c)).join(''):`<div class="empty" style="padding:48px 24px;text-align:center;color:var(--ink3)"><span class="empty-ico" style="font-size:32px">📞</span><p style="margin-top:12px">No calls match the current filters.</p></div>`;
+  updateBB();
+  // Auto-expand a specific call if requested via nav('library', {openCallId: '...'})
+  if(window._pendingOpenCallId){
+    const callId=window._pendingOpenCallId;
+    window._pendingOpenCallId=null;
+    setTimeout(()=>{
+      const row=g('row-'+callId);
+      const detail=g('detail-'+callId);
+      if(row&&detail){
+        row.classList.add('expanded');
+        detail.style.display='grid';
+        row.scrollIntoView({behavior:'smooth',block:'start'});
+      }
+    },80);
+  }
+}
 
-            # Parse call date from filename
-            call_date = parse_call_date_from_filename(p.get("filename", ""))
+// Score color band helper for stripes
+function scoreStripeBand(s){
+  if(!s||s===0)return 'mid';
+  if(s>=8)return 'good';
+  if(s>=5)return 'mid';
+  return 'low';
+}
 
-            # Rep name matching against reps table
-            rep_name_raw = p.get("rep_name") or p.get("rep_name_detected") or "Unknown"
-            try:
-                rep_list = supa("GET", "reps?active=eq.true")
-                matched_name, confidence = fuzzy_match_rep(rep_name_raw, rep_list)
-                rep_name = matched_name if confidence >= 0.90 else rep_name_raw
-            except Exception:
-                rep_name = rep_name_raw
+// Verdict-text generator: a one-sentence summary based on score
+function buildVerdictText(c){
+  const s = c.scores?.overall?.score || 0;
+  const explicit = c.call_summary;
+  if (explicit) return explicit;
+  if (s >= 8) return 'Strong performance across the call.';
+  if (s >= 5) return 'Mixed performance — some highlights, some coaching opportunities.';
+  if (s > 0) return 'Several coaching opportunities identified — review recommended.';
+  return 'No score available.';
+}
 
-            # Continuation handling
-            caller_name = p.get("caller_name", "")
-            is_continuation = p.get("is_continuation", False)
-            continuation_group_id = ""
-            if is_continuation:
-                continuation_group_id = find_or_create_continuation_group(rep_name, caller_name)
-                retroactively_link_continuation(rep_name, caller_name, continuation_group_id)
+// ── AUDIO PLAYBACK ──
+// Fetches a fresh signed URL from /audio_url/<callId>, replaces the play button's
+// container with a native <audio controls> element, and starts playback. Click the
+// button again to pause; if the page re-renders, the player is rebuilt fresh.
+async function playAudio(callId, btnEl) {
+  if (!btnEl) return;
+  const wrap = btnEl.closest('.audio-player-mockup');
+  if (!wrap) return;
 
-            # Auto-exclude disconnected
-            call_quality = p.get("call_quality", "normal")
-            exclude = p.get("exclude_from_scoring", False)
-            exclusion_reason = p.get("exclusion_reason", "")
-            if call_quality == "disconnected" and not exclude:
-                exclude = True
-                exclusion_reason = "Disconnected/short call — auto excluded"
+  // If we already have a player attached for this call, toggle play/pause
+  const existing = wrap.querySelector('audio.lg-audio-el');
+  if (existing) {
+    if (existing.paused) {
+      existing.play();
+      btnEl.innerHTML = '⏸';
+    } else {
+      existing.pause();
+      btnEl.innerHTML = '▶';
+    }
+    return;
+  }
 
-            record = {
-                "rep_name": rep_name,
-                "filename": p.get("filename", ""),
-                "transcript": p.get("transcript", ""),
-                "caller_name": caller_name,
-                "call_purpose": p.get("call_purpose", ""),
-                "call_type": p.get("call_type", "sales_estimate"),
-                "move_type": p.get("move_type", ""),
-                "call_outcome": p.get("call_outcome", "unknown"),
-                "word_count": p.get("word_count", 0),
-                "exclude_from_scoring": exclude,
-                "exclusion_reason": exclusion_reason,
-                "call_summary": p.get("call_summary", ""),
-                "key_details": p.get("key_details_captured", ""),
-                "talk_ratio_rep": p.get("talk_ratio_rep", 0),
-                "talk_ratio_customer": p.get("talk_ratio_customer", 0),
-                "keywords_detected": p.get("keywords_detected", []),
-                "keyword_positions": p.get("keyword_positions", {}),
-                "objections_detected": p.get("objections_detected", []),
-                "objection_positions": p.get("objection_positions", {}),
-                "customer_sentiment": p.get("customer_sentiment", "neutral"),
-                "scores": p.get("scores", {}),
-                "checklist": p.get("checklist", {}),
-                "strengths": p.get("strengths", []),
-                "coaching_points": p.get("coaching_points", []),
-                "tags": p.get("tags", []),
-                "manager_notes": p.get("manager_notes", ""),
-                "score_overrides": p.get("score_overrides", {}),
-                "call_date": call_date,
-                "audio_url": p.get("audio_url", ""),
-                "share_token": p.get("share_token", ""),
-                "availability_decline": p.get("availability_decline", False),
-                "turned_away": p.get("turned_away", False),
-                "onsite_suggested": p.get("onsite_suggested", False),
-                "call_quality": call_quality,
-                "is_continuation": is_continuation,
-                "continuation_group_id": continuation_group_id,
-                "move_category": p.get("move_category", "standard"),
-                "loss_reason": p.get("loss_reason", ""),
-                "soft_pipeline_reason": p.get("soft_pipeline_reason", ""),
-                "evaluation_confidence": p.get("evaluation_confidence", 8),
-                "is_diarized": p.get("is_diarized", False),
-                "close_attempts": p.get("close_attempts", 0),
-                "objections_overcome": p.get("objections_overcome", []),
-                "objections_abandoned": p.get("objections_abandoned", []),
-                "pipeline_recovery_quality": p.get("pipeline_recovery_quality", 0),
-                "salesmanship_score": p.get("salesmanship_score", 0),
-                "value_props_used": p.get("value_props_used", []),
-                "missed_rapport_opportunities": p.get("missed_rapport_opportunities", []),
-                "storage_filename": p.get("storage_filename", ""),
-                "input_tokens": p.get("input_tokens", 0),
-                "output_tokens": p.get("output_tokens", 0),
-                "pricing_model": p.get("pricing_model", "unknown"),
-                "move_timeline": p.get("move_timeline", "unknown"),
-                "word_timestamps": p.get("word_timestamps") or None,
+  // Fetch a fresh signed URL
+  btnEl.innerHTML = '<span class="spin"></span>';
+  btnEl.disabled = true;
+  let url = '';
+  try {
+    const r = await fetch(API + '/audio_url/' + encodeURIComponent(callId));
+    if (!r.ok) {
+      const errBody = await r.text();
+      throw new Error(r.status + ' ' + errBody.substring(0, 100));
+    }
+    const data = await r.json();
+    url = data.url;
+  } catch (e) {
+    btnEl.innerHTML = '▶';
+    btnEl.disabled = false;
+    // Show an inline error replacing the meta block, but keep the play button visible
+    const meta = wrap.querySelector('.audio-meta');
+    if (meta) meta.innerHTML = `<span style="color:var(--lg-red);font-size:11px">Audio unavailable: ${esc(e.message)}</span>`;
+    return;
+  }
+  if (!url) {
+    btnEl.innerHTML = '▶';
+    btnEl.disabled = false;
+    return;
+  }
+
+  // Create audio element and add it to the player wrap
+  const audio = document.createElement('audio');
+  audio.className = 'lg-audio-el';
+  audio.controls = true;
+  audio.src = url;
+  audio.style.cssText = 'flex:1;height:36px;outline:none';
+  // Stop click on audio bubbling up to the row toggle
+  audio.onclick = (e) => e.stopPropagation();
+  audio.onended = () => { btnEl.innerHTML = '▶'; };
+  audio.onpause = () => { if (!audio.ended) btnEl.innerHTML = '▶'; };
+  audio.onplay = () => { btnEl.innerHTML = '⏸'; };
+
+  // Replace the meta block with the audio element so the player looks tidy
+  const meta = wrap.querySelector('.audio-meta');
+  if (meta) meta.style.display = 'none';
+  wrap.appendChild(audio);
+
+  btnEl.disabled = false;
+  try {
+    await audio.play();
+  } catch (e) {
+    // Autoplay can be blocked — that's fine, the user can press the native control
+    btnEl.innerHTML = '▶';
+  }
+}
+
+function buildRow(c){
+  const s=c.scores?.overall?.score||0;
+  const eff=c.score_overrides?.overall??s;
+  const isExcl=c.exclude_from_scoring;
+  const sel=selected.has(c.id);
+  const stripeClass = isExcl ? '' : (c.turned_away || c.call_quality==='disconnected') ? 'flagged' : scoreStripeBand(eff);
+  const flaggedRow = (c.turned_away || c.call_quality==='disconnected') && !isExcl;
+
+  // Outcome badge
+  const outcomeMap = {
+    booked:    {cls:'outcome-booked', label:'Booked'},
+    estimate_sent: {cls:'outcome-estimate', label:'Estimate'},
+    lost:      {cls:'outcome-lost', label:'Lost'},
+    soft_pipeline: {cls:'outcome-pipeline', label:'Pipeline'}
+  };
+  const o = outcomeMap[c.call_outcome] || {cls:'outcome-unknown', label:'Unknown'};
+
+  // Categorization badges
+  const catBadges = [];
+  if (c.move_category && c.move_category !== 'unknown') {
+    const mc = c.move_category;
+    const lbl = mc==='long_distance' ? 'Long distance' : mc.replace(/_/g,' ');
+    const mod = mc==='specialty' ? ' specialty' : mc==='commercial' ? ' commercial' : mc==='long_distance' ? ' long-distance' : '';
+    catBadges.push(`<span class="cat-badge${mod}">${esc(lbl)}</span>`);
+  }
+  if (c.pricing_model && c.pricing_model !== 'unknown') {
+    catBadges.push(`<span class="cat-badge">${c.pricing_model==='pointed'?'Pointed':'Hourly'}</span>`);
+  }
+  if (c.move_timeline && c.move_timeline !== 'unknown') {
+    const tl={'exact_date':'Exact date','this_week':'This week','two_to_four_weeks':'2-4 wks','one_to_three_months':'1-3 mo','three_plus_months':'3+ mo'}[c.move_timeline];
+    if (tl) catBadges.push(`<span class="cat-badge">${tl}</span>`);
+  }
+  if (c.turned_away) catBadges.push(`<span class="cat-badge flagged">Turned away</span>`);
+  if (c.call_quality && c.call_quality !== 'normal') catBadges.push(`<span class="cat-badge flagged">${esc(c.call_quality)}</span>`);
+
+  // ---- Build the row header ----
+  const repName = c.rep_name && c.rep_name !== 'Unknown' ? c.rep_name : 'Unknown';
+  const repIni = ini(repName);
+  const callerLine = `${esc(c.caller_name || 'Unknown caller')}${c.call_purpose ? ' · ' + esc(c.call_purpose) : ''}`;
+  const summaryLine = esc(c.call_summary || c.move_type || '');
+
+  const rowHtml = `<div class="call-row${isExcl?' excl':''}${flaggedRow?' flagged-row':''}" id="row-${c.id}" onclick="toggleRow('${c.id}')">
+    <div class="score-stripe ${stripeClass}"></div>
+    <div class="call-score">
+      ${isExcl ? '<span class="call-score-num" style="color:var(--ink4);font-size:14px">EXCL</span>' : `<span class="call-score-num ${scoreClass(eff)}">${eff || '—'}</span>`}
+      ${!isExcl ? '<span class="call-score-label">overall</span>' : ''}
+    </div>
+    <div class="call-meta-main">
+      <div class="call-caller">${callerLine}</div>
+      <div class="call-summary">${summaryLine}</div>
+      ${catBadges.length ? `<div class="call-categorization">${catBadges.join('')}</div>` : ''}
+    </div>
+    <div class="call-rep">
+      <div class="call-rep-avatar">${repIni}</div>
+      <span class="call-rep-name" onclick="event.stopPropagation();handleRepClick('${c.id}','${esc(repName.replace(/'/g,''))}')">${esc(repName)}</span>
+    </div>
+    <div><span class="outcome-badge ${o.cls}">${o.label}</span></div>
+    <div class="call-date">${fmt(c.call_date||c.created_at)}</div>
+    <div class="row-arrow">›</div>
+  </div>`;
+
+  // ---- Build the detail panel (sibling element, hidden until row.expanded) ----
+  // Verdict
+  const verdictBand = isExcl ? 'excluded' : scoreStripeBand(eff);
+  const verdictLabelText = isExcl ? 'Excluded' : (eff >= 8 ? 'Strong' : eff >= 5 ? 'Mixed' : 'Needs work');
+  const verdictBadge = `<div class="verdict-badge ${verdictBand}">${isExcl ? 'EXCL' : (eff || '—')} · ${verdictLabelText}</div>`;
+  const verdictText = `<div class="verdict-text">${esc(buildVerdictText(c))}${c.key_details ? `<br><strong>Details:</strong> ${esc(c.key_details)}` : ''}</div>`;
+
+  // Score breakdown rows — six skill categories, overall excluded (shown separately as weighted header)
+  const scoreRows = SK.filter(k=>k!=='overall').map((k,i)=>{
+    const v = c.score_overrides?.[k] ?? c.scores?.[k]?.score ?? 0;
+    const lbl = SL[i] || k.replace(/_/g,' ');
+    const fillCls = v>=8 ? '' : v>=5 ? 'mid' : 'low';
+    const valCls = scoreClass(v);
+    return `<div class="score-row">
+      <div class="score-row-label">${esc(lbl)}</div>
+      <div class="score-bar"><div class="score-bar-fill ${fillCls}" style="width:${v*10}%"></div></div>
+      <div class="score-row-value ${valCls}">${v || '—'}</div>
+    </div>`;
+  }).join('');
+
+  // Checklist counts (the collapsible pill)
+  const ckHits = CK.filter(k=>c.checklist?.[k]===true).length;
+  const ckNa = CK.filter(k=>c.checklist?.[k]==='na').length;
+  const ckTotal = CK.length;
+  const ckScored = ckTotal - ckNa;
+  const ckPillCls = ckHits >= ckScored*0.8 ? '' : ckHits >= ckScored*0.5 ? 'mid' : 'low';
+  const ckGridHtml = CK.map((k,i) => {
+    const v = c.checklist?.[k];
+    const cls = v===true ? 'hit' : v==='na' ? 'na' : 'miss';
+    const icon = v===true ? '✓' : v==='na' ? 'N/A' : '✗';
+    return `<div class="ck-item-mockup ${cls}"><span class="ck-icon">${icon}</span><span>${esc(CKFULL[i])}</span></div>`;
+  }).join('');
+
+  // Talk ratio
+  const tRep = c.talk_ratio_rep || 0;
+  const tCust = c.talk_ratio_customer || 0;
+  const tTotal = tRep + tCust;
+  const repPct = tTotal > 0 ? Math.round(tRep/tTotal*100) : 0;
+  const custPct = tTotal > 0 ? 100 - repPct : 0;
+  const talkBar = tTotal > 0
+    ? `<div class="talk-ratio-bar">
+        ${repPct > 0 ? `<div class="talk-ratio-rep" style="width:${repPct}%">${repPct}% Rep</div>` : ''}
+        ${custPct > 0 ? `<div class="talk-ratio-cust" style="width:${custPct}%">${custPct}% Cust</div>` : ''}
+       </div>
+       <div class="talk-ratio-meta"><span>Rep ${repPct}%</span><span>Customer ${custPct}%</span></div>`
+    : '<div style="color:var(--ink3);font-size:12px">No talk-ratio data</div>';
+
+  // Strengths and coaching
+  const strengthList = (c.strengths||[]).map(s=>`<li class="strength">${esc(s)}</li>`).join('') || '<li class="strength" style="color:var(--ink3)">No specific strengths noted</li>';
+  const coachingList = (c.coaching_points||[]).map(p=>`<li>${esc(p)}</li>`).join('') || '<li style="color:var(--ink3)">No coaching points noted</li>';
+
+  // Override controls
+  const ovCnt = c.score_overrides && Object.keys(c.score_overrides).length;
+  const ovrHtml = !SHARE_MODE ? `<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+    <select id="ok-${c.id}" style="font-size:12px;padding:6px 9px;border:1px solid var(--border);border-radius:6px"><option value="">Category…</option>${SK.map(k=>`<option value="${k}">${k.replace(/_/g,' ')}</option>`).join('')}<option value="__na__">Mark as N/A</option></select>
+    <input type="number" min="1" max="10" placeholder="1-10" id="ov-${c.id}" style="width:64px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none" />
+    <input type="text" placeholder="Reason (optional)" id="on-${c.id}" style="width:180px;font-size:12px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;outline:none;font-family:var(--font-ui)" />
+    <button class="btn btn-primary btn-sm" onclick="applyOv('${c.id}')">Apply</button>
+    ${ovCnt?`<button class="btn btn-d btn-sm" onclick="clrOv('${c.id}')">Clear</button>`:''}
+  </div>${ovCnt?`<div style="margin-top:5px;font-size:11px;color:var(--ink3)">Active: ${Object.entries(c.score_overrides).map(([k,v])=>`${k}:${v}`).join(', ')}</div>`:''}` : '';
+
+  // Audio + transcript on left
+  const audioBlock = c.filename ? `<div class="audio-player-mockup">
+    <button class="audio-play-btn" onclick="event.stopPropagation();playAudio('${c.id}',this)">▶</button>
+    <div class="audio-meta">
+      <span>${esc(c.filename||'')}</span>
+      <span>${c.word_count?`~${c.word_count} words`:''}</span>
+    </div>
+  </div>` : '';
+  const hasTimedTx = Array.isArray(c.word_timestamps) && c.word_timestamps.length;
+  const txHint = hasTimedTx ? `<div style="font-family:var(--font-label);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink4);margin-bottom:6px">▸ Click any word to play audio from there</div>` : '';
+  const transcriptBlock = `${c.transcript ? txHint : ''}<div class="transcript-wrap-mockup" id="tx-${c.id}">${c.transcript ? buildTxHtml(c) : '<div style="color:var(--ink3);font-size:12px;padding:12px">No transcript available</div>'}</div>`;
+
+  // Action buttons
+  const actionsBar = `<div class="detail-actions">
+    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();exportPDFCall('${c.id}')">↓ PDF</button>
+    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openEditTranscript('${c.id}')">✏ Edit transcript</button>
+    <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();reapplyCorrections('${c.id}',this)">↻ Re-analyze</button>
+    ${!SHARE_MODE?`<button class="btn btn-d btn-sm" style="margin-left:auto" onclick="event.stopPropagation();delCall('${c.id}')">🗑 Delete</button>`:''}
+  </div>`;
+
+  // Banners (excl, low confidence, loss reason)
+  const banners = `${isExcl?`<div class="excl-banner" style="background:var(--surface-sunken);border:1px solid var(--border);padding:10px 14px;border-radius:8px;font-size:12.5px;color:var(--ink2);margin-bottom:8px">⚠ Excluded — ${esc(c.exclusion_reason||c.call_type||'marked excluded')}</div>`:''}
+    ${c.evaluation_confidence&&c.evaluation_confidence<=5?`<div style="background:rgba(227,177,36,0.1);border:1px solid rgba(227,177,36,0.3);border-radius:8px;padding:10px 14px;font-size:12.5px;color:#8A6420;margin-bottom:8px">⚠ Low confidence (${c.evaluation_confidence}/10) — manager review recommended</div>`:''}
+    ${c.loss_reason?`<div style="background:var(--lg-red-bg);border:1px solid rgba(201,37,44,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-red);margin-bottom:8px">Lost — ${esc(c.loss_reason.replace(/_/g,' '))}</div>`:''}
+    ${c.soft_pipeline_reason?`<div style="background:rgba(0,102,179,0.08);border:1px solid rgba(0,102,179,0.2);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--lg-blue);margin-bottom:8px">Pipeline — ${esc(c.soft_pipeline_reason.replace(/_/g,' '))}</div>`:''}`;
+
+  // Tags + objections + keywords
+  const tagsRow = `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">
+    ${(c.tags||[]).map(t=>`<span class="tag" style="background:var(--surface-sunken);color:var(--ink2);padding:3px 8px;border-radius:4px;font-size:11px">${esc(t)}${!SHARE_MODE?` <span class="tag-rm" onclick="event.stopPropagation();rmTag('${c.id}','${esc(t)}')" style="cursor:pointer;color:var(--ink4);margin-left:4px">✕</span>`:''}</span>`).join('')}
+    ${!SHARE_MODE?`<input class="tag-inp" placeholder="+ tag" onkeydown="addTag(event,'${c.id}')" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;outline:none;font-family:var(--font-ui);width:80px" />`:''}
+  </div>`;
+
+  const keywordsBlock = (c.keywords_detected||[]).length ? `<div style="margin-top:10px"><div class="score-card-title" style="margin-bottom:8px">Keywords</div><div style="display:flex;flex-wrap:wrap;gap:5px">${c.keywords_detected.map((k,i)=>{const pos=c.keyword_positions?.[k];const spanId=`txs-${c.id}-kw-${i}`;return`<span class="cat-badge specialty" style="cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="event.stopPropagation();jumpTx(event,'${spanId}')"`:''}>${esc(k)}</span>`;}).join('')}</div></div>` : '';
+
+  const objectionsBlock = (c.objections_detected||[]).length ? `<div style="margin-top:10px"><div class="score-card-title" style="margin-bottom:8px">Objections</div><div style="display:flex;flex-wrap:wrap;gap:5px">${c.objections_detected.map((ob,i)=>{const norm=normObj(ob);const pos=c.objection_positions?.[ob]||c.objection_positions?.[norm];const spanId=`txs-${c.id}-obj-${i}`;const isAbn=(c.objections_abandoned||[]).some(a=>normObj(a)===norm);return`<span class="cat-badge flagged" style="cursor:${pos!==undefined?'pointer':'default'}" ${pos!==undefined?`onclick="event.stopPropagation();jumpTx(event,'${spanId}')"`:''}>${esc(norm)}${isAbn?' ⚠':''}</span>`;}).join('')}</div></div>` : '';
+
+  // The detail block (sibling to call-row, hidden via CSS until .expanded)
+  const detailHtml = `<div class="call-detail" id="detail-${c.id}" style="display:none">
+    <div class="call-detail-hero">
+      ${verdictBadge}
+      ${verdictText}
+    </div>
+
+    <div class="detail-main">
+      ${banners}
+      ${audioBlock}
+      ${transcriptBlock}
+      ${keywordsBlock}
+      ${objectionsBlock}
+      ${tagsRow}
+      ${actionsBar}
+    </div>
+
+    <div class="detail-side">
+      ${!isExcl?`<div class="score-card">
+        <div class="score-card-title"><span>Score breakdown</span><span style="font-family:var(--font-display);font-size:18px;font-weight:700;color:${eff>=8?'var(--lg-green)':eff>=5?'var(--lg-gold)':'var(--lg-red)'}">${eff||'—'}<span style="font-size:12px;color:var(--ink3);font-weight:400">/10</span></span></div>
+        ${scoreRows}
+      </div>`:''}
+
+      <div class="detail-section" id="ck-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('ck-section-${c.id}')">
+          <span class="detail-section-title">22-step checklist</span>
+          <span class="detail-section-pill ${ckPillCls}">${ckHits}/${ckScored} ✓${ckNa>0?` · ${ckNa} N/A`:''}</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">
+          <div class="ck-grid-mockup">${ckGridHtml}</div>
+        </div>
+      </div>
+
+      <div class="score-card">
+        <div class="score-card-title">Strengths</div>
+        <ul class="coaching-list">${strengthList}</ul>
+      </div>
+
+      <div class="score-card">
+        <div class="score-card-title">Coaching opportunities</div>
+        <ul class="coaching-list">${coachingList}</ul>
+      </div>
+
+      <div class="detail-section" id="talk-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('talk-section-${c.id}')">
+          <span class="detail-section-title">Talk ratio</span>
+          <span class="detail-section-pill">${repPct}% / ${custPct}%</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">${talkBar}</div>
+      </div>
+
+      ${!SHARE_MODE?`<div class="detail-section" id="mgr-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('mgr-section-${c.id}')">
+          <span class="detail-section-title">Manager feedback</span>
+          <span class="detail-section-pill">${c.manager_notes?'Has notes':'Add notes'}</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">
+          <textarea class="mgr-textarea" id="nt-${c.id}" placeholder="Add coaching notes for this call…">${esc(c.manager_notes||'')}</textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();saveNotes('${c.id}')">Save notes</button>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-left:auto"><input type="checkbox" ${c.exclude_from_scoring?'checked':''} onchange="event.stopPropagation();toggleExcl('${c.id}',this.checked)" />Exclude from scoring</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-section" id="ov-section-${c.id}">
+        <div class="detail-section-head" onclick="event.stopPropagation();toggleDetailSection('ov-section-${c.id}')">
+          <span class="detail-section-title">Score override</span>
+          <span class="detail-section-pill ${ovCnt?'mid':''}">${ovCnt?`${ovCnt} active`:'None'}</span>
+          <span class="detail-section-chev">›</span>
+        </div>
+        <div class="detail-section-body">${ovrHtml}</div>
+      </div>`:''}
+    </div>
+  </div>`;
+
+  return rowHtml + detailHtml;
+}
+
+// New helper: toggle a single detail section (checklist, talk ratio, manager feedback)
+function toggleDetailSection(id){
+  const el = g(id);
+  if (el) el.classList.toggle('open');
+}
+
+function markTxEdited(callId){
+  const tx=g('tx-'+callId);if(!tx)return;
+  tx.style.outline='2px solid var(--amber)';
+}
+
+async function saveTranscriptCorrection(callId){
+  const find=g('tx-find-'+callId)?.value.trim();
+  const replace=g('tx-replace-'+callId)?.value.trim();
+  const tx=g('tx-'+callId);
+  if(!find){alert('Enter the incorrect phrase to find');return;}
+  if(!replace){alert('Enter the correct replacement');return;}
+  const newTranscript=tx?tx.innerText:'';
+  try{
+    const r=await fetch(API+'/transcript_corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({find_text:find,replace_text:replace,call_id:callId,new_transcript:newTranscript})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);
+    // Update local call
+    const idx=allCalls.findIndex(c=>c.id===callId);
+    if(idx>=0){allCalls[idx].transcript=newTranscript;}
+    if(g('tx-find-'+callId))g('tx-find-'+callId).value='';
+    if(g('tx-replace-'+callId))g('tx-replace-'+callId).value='';
+    if(tx){tx.style.outline='2px solid var(--g)';setTimeout(()=>{tx.style.outline='';},1500);}
+    alert('✓ Correction saved! Will apply to all future transcripts.');
+  }catch(e){alert('Failed: '+e.message);}
+}
+
+function buildTxHtml(c){
+  if(!c.transcript)return'';
+  // If we have word-level timestamps, render the transcript as clickable word spans.
+  // Each click seeks the audio player for this call to that word's start time.
+  if(Array.isArray(c.word_timestamps) && c.word_timestamps.length){
+    return buildTxHtmlTimed(c);
+  }
+  // Fallback: legacy character-based rendering with keyword/objection highlights only.
+  return buildTxHtmlLegacy(c);
+}
+
+// New path: render every word as a clickable span tied to its audio time.
+// Speaker turns are inserted by detecting speaker changes between consecutive
+// words. Keyword/objection highlights are layered on top by matching the
+// underlying word text — character positions from Claude are unreliable here
+// because we're rebuilding the text from the words array.
+function buildTxHtmlTimed(c){
+  const words=c.word_timestamps;
+  const callId=c.id;
+  const abandoned=new Set(c.objections_abandoned||[]);
+  // Lowercased phrase -> {cls, label} for highlight detection
+  const highlightPhrases=[];
+  (c.keywords_detected||[]).forEach(k=>{
+    if(k)highlightPhrases.push({phrase:k.toLowerCase(),cls:'tx-kw',label:k});
+  });
+  (c.objections_detected||[]).forEach(o=>{
+    if(!o)return;
+    const cls=abandoned.has(o)?'tx-obj-abandoned':'tx-obj';
+    highlightPhrases.push({phrase:o.toLowerCase(),cls,label:o});
+  });
+  abandoned.forEach(o=>{
+    if(!o||highlightPhrases.some(p=>p.label===o))return;
+    highlightPhrases.push({phrase:o.toLowerCase(),cls:'tx-obj-abandoned',label:o});
+  });
+  // For each word, decide if it's part of a highlighted phrase by sliding-window match.
+  // Build a lowercase-stripped token array first.
+  const toks=words.map(w=>(w.w||'').toLowerCase().replace(/[.,!?;:"'\(\)]/g,''));
+  const wordCls=new Array(words.length).fill(null);  // cls per word index
+  highlightPhrases.forEach(({phrase,cls})=>{
+    const phraseToks=phrase.replace(/[.,!?;:"'\(\)]/g,'').split(/\s+/).filter(Boolean);
+    if(!phraseToks.length)return;
+    for(let i=0;i<=toks.length-phraseToks.length;i++){
+      let match=true;
+      for(let j=0;j<phraseToks.length;j++){
+        if(toks[i+j]!==phraseToks[j]){match=false;break;}
+      }
+      if(match){
+        for(let j=0;j<phraseToks.length;j++){
+          if(!wordCls[i+j])wordCls[i+j]=cls;
+        }
+      }
+    }
+  });
+  // Render with speaker labels at each speaker change.
+  let html='';
+  let curSpeaker=null;
+  let inLine=false;
+  words.forEach((w,i)=>{
+    const sp=(w.sp!==undefined&&w.sp!==null)?w.sp:0;
+    if(sp!==curSpeaker){
+      if(inLine)html+='<br>';
+      html+=`<span class="tx-speaker">Speaker ${sp}:</span> `;
+      curSpeaker=sp;
+      inLine=true;
+    }
+    const wt=escHtml(w.w||'');
+    const start=Number(w.s)||0;
+    const cls=wordCls[i];
+    const classes=cls?` ${cls}`:'';
+    html+=`<span class="tx-word${classes}" data-t="${start}" onclick="event.stopPropagation();seekAudio('${callId}',${start},this)">${wt}</span> `;
+  });
+  return html;
+}
+
+// Legacy path — used when word_timestamps is absent (older calls).
+function buildTxHtmlLegacy(c){
+  const tx=c.transcript;
+  const abandoned=new Set(c.objections_abandoned||[]);
+  const marks=[];
+  (c.keywords_detected||[]).forEach((k,i)=>{
+    const pos=c.keyword_positions?.[k];
+    if(pos==null)return;
+    const search=k.toLowerCase();
+    const start=tx.toLowerCase().indexOf(search,Math.max(0,pos-30));
+    if(start<0)return;
+    marks.push({start,end:start+k.length,cls:'tx-kw',id:`txs-${c.id}-kw-${i}`,label:k});
+  });
+  (c.objections_detected||[]).forEach((o,i)=>{
+    const pos=c.objection_positions?.[o];
+    if(pos==null)return;
+    const search=o.toLowerCase();
+    const start=tx.toLowerCase().indexOf(search,Math.max(0,pos-30));
+    if(start<0)return;
+    const cls=abandoned.has(o)?'tx-obj-abandoned':'tx-obj';
+    marks.push({start,end:start+o.length,cls,id:`txs-${c.id}-obj-${i}`,label:o});
+  });
+  abandoned.forEach((o,i)=>{
+    const alreadyMarked=marks.some(m=>m.label===o);
+    if(alreadyMarked)return;
+    const search=o.toLowerCase();
+    const start=tx.toLowerCase().indexOf(search);
+    if(start<0)return;
+    marks.push({start,end:start+o.length,cls:'tx-obj-abandoned',id:`txs-${c.id}-abn-${i}`,label:o});
+  });
+  if(!marks.length)return escHtml(tx);
+  marks.sort((a,b)=>a.start-b.start);
+  const filtered=[];let cursor=0;
+  marks.forEach(m=>{if(m.start>=cursor){filtered.push(m);cursor=m.end;}});
+  let html='';let pos=0;
+  filtered.forEach(m=>{
+    if(m.start>pos)html+=escHtml(tx.slice(pos,m.start));
+    html+=`<span class="${m.cls}" id="${m.id}" onclick="jumpTx(event,'${m.id}')">${escHtml(tx.slice(m.start,m.end))}</span>`;
+    pos=m.end;
+  });
+  if(pos<tx.length)html+=escHtml(tx.slice(pos));
+  return html;
+}
+
+// Click handler for transcript words — seeks the call's audio to the given
+// time. If the audio player isn't loaded yet, loads it first then seeks.
+async function seekAudio(callId, time, wordEl){
+  // Find the audio player for this call
+  const detail=document.getElementById('detail-'+callId);
+  if(!detail)return;
+  const wrap=detail.querySelector('.audio-player-mockup');
+  if(!wrap){return;}
+  let audio=wrap.querySelector('audio.lg-audio-el');
+  if(!audio){
+    // No player yet — trigger playAudio to fetch URL and inject element
+    const btn=wrap.querySelector('.audio-play-btn');
+    if(!btn)return;
+    await playAudio(callId,btn);
+    audio=wrap.querySelector('audio.lg-audio-el');
+    if(!audio)return;
+  }
+  audio.currentTime=time;
+  if(audio.paused){
+    try{await audio.play();}catch(e){}
+  }
+  // Briefly highlight the clicked word for visual feedback
+  if(wordEl){
+    wordEl.classList.add('tx-word-active');
+    setTimeout(()=>wordEl.classList.remove('tx-word-active'),1400);
+  }
+}
+
+function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function jumpTx(evt,spanId){
+  // Find which call this belongs to
+  const span=document.getElementById(spanId);if(!span)return;
+  const txBox=span.closest('.txb');if(!txBox)return;
+  // The .txb lives inside .call-detail (id="detail-${callId}"). Find the matching .call-row and ensure it's open.
+  const detail=txBox.closest('.call-detail');
+  let row=null,wasOpen=true;
+  if(detail&&detail.id.startsWith('detail-')){
+    const callId=detail.id.replace('detail-','');
+    row=document.getElementById('row-'+callId);
+    if(row&&!row.classList.contains('expanded')){
+      wasOpen=false;
+      row.classList.add('expanded');
+      detail.style.display='grid';
+    }
+  }
+  // Clear any previously active spans in this box
+  txBox.querySelectorAll('.tx-kw.active,.tx-obj.active,.tx-obj-abandoned.active').forEach(el=>el.classList.remove('active'));
+  span.classList.add('active');
+  // Scroll
+  setTimeout(()=>{
+    span.scrollIntoView({behavior:'smooth',block:'center'});
+    setTimeout(()=>span.classList.remove('active'),2500);
+  },wasOpen?50:200);
+}
+async function toggleRow(id){
+  const r=g('row-'+id);
+  const d=g('detail-'+id);
+  if(!r) return;
+  const isOpen = r.classList.toggle('expanded');
+  if(d) d.style.display = isOpen ? 'grid' : 'none';
+
+  // If opening and transcript not yet loaded, fetch it now (slim mode omits transcripts)
+  if(isOpen){
+    const c = allCalls.find(x=>x.id===id);
+    if(c && !c.transcript){
+      const txWrap = g('tx-'+id);
+      if(txWrap) txWrap.innerHTML = '<div style="color:var(--ink3);font-size:12px;padding:12px"><span class="spin"></span> Loading transcript\u2026</div>';
+      try{
+        const res = await fetch(API+'/calls?id=eq.'+id+'&select=transcript,word_timestamps&limit=1');
+        if(res.ok){
+          const data = await res.json();
+          if(data[0]){
+            c.transcript = data[0].transcript;
+            c.word_timestamps = data[0].word_timestamps;
+            if(txWrap){
+              if(c.transcript){
+                const hasTimedTx = Array.isArray(c.word_timestamps) && c.word_timestamps.length;
+                const txHint = hasTimedTx ? '<div style="font-family:var(--font-label);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink4);margin-bottom:6px">\u25b8 Click any word to play audio from there</div>' : '';
+                txWrap.innerHTML = txHint + buildTxHtml(c);
+              } else {
+                txWrap.innerHTML = '<div style="color:var(--ink3);font-size:12px;padding:12px">No transcript available</div>';
+              }
             }
-            result = supa("POST", "calls", record)
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _update(self, body):
-        try:
-            p = json.loads(body)
-            cid = p.pop("id")
-            supa("PATCH", f"calls?id=eq.{cid}", p)
-            self._ok({"updated": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _delete(self, body):
-        try:
-            p = json.loads(body)
-            supa("DELETE", f"calls?id=eq.{p['id']}")
-            self._ok({"deleted": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _bulk_delete(self, body):
-        try:
-            p = json.loads(body)
-            ids = p.get("ids", [])
-            if not ids:
-                self._ok({"deleted": 0}); return
-            id_list = ",".join(f'"{i}"' for i in ids)
-            supa("DELETE", f"calls?id=in.({id_list})")
-            self._ok({"deleted": len(ids)})
-        except Exception as e:
-            self._err(500, str(e))
-
-    # ── CORRECTIONS ──
-
-    def _get_corrections(self):
-        try:
-            result = supa("GET", "corrections?order=created_at.desc&limit=200")
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _get_audio_url(self):
-        try:
-            call_id = self.path.split("/audio_url/")[1].split("?")[0]
-            result = supa("GET", f"calls?id=eq.{call_id}&select=filename,storage_filename&limit=1")
-            if not result:
-                self._err(404, "Call not found"); return
-            # Use storage_filename if saved, otherwise sanitize the original filename
-            storage_filename = result[0].get("storage_filename") or re.sub(r'[^\w\-_\.]', '_', result[0].get("filename", ""))
-            if not storage_filename:
-                self._err(404, "No audio filename"); return
-            signed_url = supa_storage_signed_url("call-audio", storage_filename, expires=3600)
-            if not signed_url:
-                self._err(404, "Audio file not found in storage"); return
-            self._ok({"url": signed_url})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _save_correction(self, body):
-        try:
-            p = json.loads(body)
-            record = {
-                "call_id": p.get("call_id"),
-                "category": p.get("category"),
-                "original_score": p.get("original_score"),
-                "corrected_score": p.get("corrected_score"),
-                "manager_note": p.get("manager_note", ""),
-                "used_in_prompt": p.get("used_in_prompt", True),
-            }
-            result = supa("POST", "corrections", record)
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    # ── TRANSCRIPT CORRECTIONS ──
-
-    def _get_transcript_corrections_endpoint(self):
-        try:
-            result = supa("GET", "transcript_corrections?order=created_at.asc&limit=500")
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _save_transcript_correction(self, body):
-        try:
-            p = json.loads(body)
-            find_text = p.get("find_text", "").strip()
-            replace_text = p.get("replace_text", "").strip()
-            call_id = p.get("call_id")
-            new_transcript = p.get("new_transcript")
-
-            # If neither a rule nor a transcript edit is provided, that's an error
-            if not find_text and not (call_id and new_transcript):
-                self._err(400, "Either find_text or (call_id + new_transcript) is required"); return
-
-            response = {"saved": True}
-
-            # If find_text was provided, save/update the rule
-            if find_text:
-                existing = supa("GET", f"transcript_corrections?find_text=ilike.{urllib.parse.quote(find_text)}&limit=1")
-                if existing:
-                    supa("PATCH", f"transcript_corrections?id=eq.{existing[0]['id']}", {"replace_text": replace_text})
-                    response["rule"] = {"updated": True, "id": existing[0]["id"]}
-                else:
-                    rule_result = supa("POST", "transcript_corrections", {"find_text": find_text, "replace_text": replace_text})
-                    response["rule"] = {"created": True, "data": rule_result}
-
-            # If call transcript was edited, save it before responding (so we don't _ok twice)
-            if call_id and new_transcript:
-                supa("PATCH", f"calls?id=eq.{call_id}", {"transcript": new_transcript})
-                response["transcript_updated"] = True
-
-            self._ok(response)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _delete_transcript_correction(self, body):
-        try:
-            p = json.loads(body)
-            supa("DELETE", f"transcript_corrections?id=eq.{p['id']}")
-            self._ok({"deleted": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _update_transcript_correction(self, body):
-        try:
-            p = json.loads(body)
-            rid = p.get("id")
-            find_text = p.get("find_text", "").strip()
-            replace_text = p.get("replace_text", "").strip()
-            if not rid or not find_text or not replace_text:
-                self._err(400, "id, find_text, and replace_text are required"); return
-            supa("PATCH", f"transcript_corrections?id=eq.{rid}", {
-                "find_text": find_text,
-                "replace_text": replace_text,
-            })
-            self._ok({"updated": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _reapply_corrections(self, body):
-        """Re-apply transcript corrections to a single call and re-analyze."""
-        try:
-            p = json.loads(body)
-            call_id = p.get("call_id")
-            if not call_id:
-                self._err(400, "call_id required"); return
-            result = supa("GET", f"calls?id=eq.{call_id}&limit=1")
-            if not result:
-                self._err(404, "Call not found"); return
-            call = result[0]
-            transcript = call.get("transcript", "")
-            filename = call.get("filename", "call.txt")
-            if not transcript:
-                self._err(400, "No transcript"); return
-            tx_corrections = get_transcript_corrections()
-            clean_transcript = apply_transcript_corrections(transcript, tx_corrections)
-            analysis = run_claude_analysis(clean_transcript, filename)
-            update_data = {
-                "transcript": clean_transcript,
-                "scores": analysis.get("scores", {}),
-                "checklist": analysis.get("checklist", {}),
-                "strengths": analysis.get("strengths", []),
-                "coaching_points": analysis.get("coaching_points", []),
-                "call_summary": analysis.get("call_summary", ""),
-                "keywords_detected": analysis.get("keywords_detected", []),
-                "keyword_positions": analysis.get("keyword_positions", {}),
-                "objections_detected": analysis.get("objections_detected", []),
-                "objection_positions": analysis.get("objection_positions", {}),
-                "move_category": analysis.get("move_category", "standard"),
-                "evaluation_confidence": analysis.get("evaluation_confidence", 8),
-                "loss_reason": analysis.get("loss_reason", ""),
-                "soft_pipeline_reason": analysis.get("soft_pipeline_reason", ""),
-            }
-            supa("PATCH", f"calls?id=eq.{call_id}", update_data)
-            self._ok({"reanalyzed": True, "call_id": call_id})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _create_share(self, body):
-        try:
-            p = json.loads(body)
-            token = secrets.token_urlsafe(32)
-            record = {
-                "token": token,
-                "label": p.get("label", ""),
-                "filters": p.get("filters", {}),
-                "view_type": p.get("view_type", "location"),
-                "view_level": p.get("view_level", "manager"),
-                "rep_ids": p.get("rep_ids", []),
-            }
-            supa("POST", "shared_views", record)
-            share_url = f"{self.headers.get('Origin', 'https://lgms-call-analyzer.onrender.com')}/share/{token}"
-            self._ok({"token": token, "url": share_url})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _delete_share(self, body):
-        try:
-            p = json.loads(body)
-            supa("DELETE", f"shared_views?id=eq.{p['id']}")
-            self._ok({"deleted": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _get_shared_views(self):
-        try:
-            result = supa("GET", "shared_views?order=created_at.desc")
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _get_shared_view_by_token(self):
-        try:
-            token = self.path.split("/share/")[1].split("?")[0]
-            # Validate token format (only allow URL-safe base64 characters that secrets.token_urlsafe produces)
-            if not re.match(r'^[A-Za-z0-9_-]{1,128}$', token):
-                self._err(404, "Share link not found"); return
-            result = supa("GET", f"shared_views?token=eq.{token}&limit=1")
-            if not result:
-                self._err(404, "Share link not found"); return
-            view = result[0]
-            html = read_html()
-            # Use json.dumps for ALL injected values — this safely escapes quotes, backslashes, </script>, etc.
-            inject_payload = {
-                "SHARE_TOKEN": token,
-                "SHARE_VIEW_LEVEL": view.get("view_level", "manager"),
-                "SHARE_REP_IDS": view.get("rep_ids", []),
-                "SHARE_LABEL": view.get("label", ""),
-            }
-            # Build script with each window assignment using json.dumps for safe escaping
-            assignments = ";".join(f"window.{k}={json.dumps(v)}" for k, v in inject_payload.items())
-            inject = f'<script>{assignments};</script>'
-            html = html.replace(b"</head>", inject.encode() + b"</head>", 1)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(html)
-        except Exception as e:
-            self._err(500, str(e))
-
-    # ── REPS ──
-
-    def _get_reps(self):
-        try:
-            result = supa("GET", "reps?order=full_name.asc")
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _save_rep(self, body):
-        try:
-            p = json.loads(body)
-            record = {
-                "full_name": p.get("full_name", ""),
-                "nickname": p.get("nickname", ""),
-                "location": p.get("location", ""),
-                "alternate_names": p.get("alternate_names", []),
-                "active": p.get("active", True),
-            }
-            result = supa("POST", "reps", record)
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _update_rep(self, body):
-        try:
-            p = json.loads(body)
-            rid = p.pop("id")
-            supa("PATCH", f"reps?id=eq.{rid}", p)
-            self._ok({"updated": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _delete_rep(self, body):
-        try:
-            p = json.loads(body)
-            supa("DELETE", f"reps?id=eq.{p['id']}")
-            self._ok({"deleted": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _dedup_reps(self, body):
-        try:
-            rep_names_raw = supa("GET", "calls?select=rep_name&order=rep_name.asc")
-            unique_names = list(set(r["rep_name"] for r in rep_names_raw if r.get("rep_name") and r["rep_name"] != "Unknown"))
-            if len(unique_names) < 2:
-                self._ok({"suggestions": [], "message": "Not enough rep names"}); return
-
-            dedup_prompt = f"""Analyze this list of sales rep names from a call center.
-Identify names that likely refer to the same person (misspellings, nicknames, partial names, abbreviations).
-Rep names: {json.dumps(unique_names)}
-Return ONLY valid JSON (no markdown):
-{{"suggestions":[{{"canonical":"John Smith","variants":["John","Johnny S"],"confidence":0.95,"reason":"Nickname and abbreviation variants"}}],"confidence_overall":0.90}}
-If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
-
-            def call_claude(model):
-                req_body = json.dumps({"model": model, "max_tokens": 1000, "messages": [{"role": "user", "content": dedup_prompt}]}).encode()
-                req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=req_body,
-                    headers={"Content-Type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"}, method="POST")
-                with urllib.request.urlopen(req, timeout=60) as r:
-                    resp = json.loads(r.read())
-                tb = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
-                if not tb: raise Exception("No response")
-                raw = tb["text"].strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-                return json.loads(raw)
-
-            result = call_claude("claude-sonnet-4-6")
-            if result.get("confidence_overall", 1.0) < 0.85:
-                log("  Dedup: escalating to Opus")
-                result = call_claude("claude-opus-4-6")
-
-            self._ok(result)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _bulk_rename_rep(self, body):
-        try:
-            p = json.loads(body)
-            old_name = p.get("old_name", "")
-            new_name = p.get("new_name", "")
-            if not old_name or not new_name:
-                self._err(400, "old_name and new_name required"); return
-            result = supa("PATCH", f"calls?rep_name=eq.{urllib.parse.quote(old_name)}", {"rep_name": new_name},
-                         extra_headers={"Prefer": "return=representation,count=exact"})
-            count = len(result) if isinstance(result, list) else 0
-            self._ok({"renamed": count, "old_name": old_name, "new_name": new_name})
-        except Exception as e:
-            self._err(500, str(e))
-
-    # ── RE-ANALYZE ──
-
-    def _reanalyze_start(self, body):
-        global _reanalyze_job
-        with _reanalyze_lock:
-            if _reanalyze_job["status"] == "running":
-                self._ok({"message": "Already running", "status": _reanalyze_job}); return
-        if _batch_job.get("status") == "running":
-            self._ok({"message": "Batch upload in progress — wait for it to finish before re-analyzing", "blocked": True}); return
-        with _reanalyze_lock:
-            _reanalyze_job = {
-                "status": "running",
-                "total": 0, "processed": 0, "current": "", "errors": 0,
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "finished_at": None,
-                "stop_requested": False,
-                "skipped": 0,
-                "failed_calls": [],
-            }
-        t = threading.Thread(target=_reanalyze_worker, daemon=True)
-        t.start()
-        self._ok({"message": "Started", "status": _reanalyze_job})
-
-    def _reanalyze_status(self):
-        with _reanalyze_lock:
-            status = dict(_reanalyze_job)
-        self._ok(status)
-
-    def _reanalyze_stop(self, body=None):
-        with _reanalyze_lock:
-            if _reanalyze_job["status"] != "running":
-                self._ok({"message": "No job running", "status": _reanalyze_job["status"]}); return
-            _reanalyze_job["stop_requested"] = True
-        self._ok({"message": "Stop requested — will halt after current call completes"})
-
-    def _reanalyze_unscored(self):
-        """Return count and list of calls with no scores (never analyzed or failed)."""
-        try:
-            calls = supa("GET", "calls?select=id,filename,created_at,rep_name&order=created_at.desc&limit=5000")
-            unscored = []
-            for c in calls:
-                # A call is considered unscored if scores is missing/empty or overall score is 0
-                scores = c.get("scores") or {}
-                overall = scores.get("overall", {})
-                score_val = overall.get("score", 0) if isinstance(overall, dict) else 0
-                if not scores or score_val == 0:
-                    unscored.append({
-                        "id": c.get("id"),
-                        "filename": c.get("filename"),
-                        "created_at": c.get("created_at"),
-                        "rep_name": c.get("rep_name"),
-                    })
-            self._ok({"total": len(calls), "unscored_count": len(unscored), "unscored": unscored})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _batch_upload_start_streamed(self, content_length):
-        """Stream the incoming ZIP directly to disk — never hold it fully in RAM."""
-        global _batch_job
-        with _batch_lock:
-            if _batch_job["status"] == "running":
-                self._ok({"message": "Already running", "status": _batch_job}); return
-        if _reanalyze_job.get("status") == "running":
-            self._ok({"message": "Bulk re-analyze in progress — wait for it to finish", "blocked": True}); return
-
-        content_type = self.headers.get("Content-Type", "")
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="lgms_batch_")
-        try:
-            if "multipart/form-data" in content_type:
-                # Stream the multipart body to disk in chunks, then parse boundary
-                CHUNK = 256 * 1024  # 256KB chunks
-                with os.fdopen(tmp_fd, "wb") as tmp_f:
-                    remaining = content_length
-                    while remaining > 0:
-                        chunk = self.rfile.read(min(CHUNK, remaining))
-                        if not chunk:
-                            break
-                        tmp_f.write(chunk)
-                        remaining -= len(chunk)
-                tmp_fd = None  # fd closed by context manager
-
-                # Now parse the multipart from the temp file to extract the ZIP part
-                boundary = re.search(r'boundary=([^\s;]+)', content_type)
-                if not boundary:
-                    os.unlink(tmp_path); self._err(400, "Missing boundary"); return
-                bound = boundary.group(1).encode()
-
-                # Read back from disk to find the ZIP data within the multipart envelope
-                with open(tmp_path, "rb") as f:
-                    raw = f.read()
-                os.unlink(tmp_path)  # delete the full multipart dump
-
-                # Extract the actual ZIP bytes from the multipart
-                zip_bytes = None
-                parts = raw.split(b"--" + bound)
-                for part in parts[1:]:
-                    if part in (b"--\r\n", b"--", b"\r\n"): continue
-                    header_end = part.find(b"\r\n\r\n")
-                    if header_end < 0: continue
-                    data = part[header_end+4:]
-                    if data.endswith(b"\r\n"): data = data[:-2]
-                    if b'filename=' in part[:header_end] and len(data) > 100:
-                        zip_bytes = data
-                        break
-                raw = None  # release full multipart body
-
-                if not zip_bytes or len(zip_bytes) < 100:
-                    self._err(400, "No ZIP found in multipart upload"); return
-
-                # Write the extracted ZIP bytes to a fresh temp file
-                tmp_fd2, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="lgms_zip_")
-                with os.fdopen(tmp_fd2, "wb") as f:
-                    f.write(zip_bytes)
-                zip_size = len(zip_bytes)
-                zip_bytes = None  # release now — it's on disk
-
-            else:
-                # JSON/base64 path — less common but keep working
-                import base64
-                CHUNK = 256 * 1024
-                with os.fdopen(tmp_fd, "wb") as tmp_f:
-                    remaining = content_length
-                    while remaining > 0:
-                        chunk = self.rfile.read(min(CHUNK, remaining))
-                        if not chunk: break
-                        tmp_f.write(chunk)
-                        remaining -= len(chunk)
-                tmp_fd = None
-                with open(tmp_path, "rb") as f:
-                    raw = f.read()
-                os.unlink(tmp_path)
-                p = json.loads(raw); raw = None
-                zip_bytes = base64.b64decode(p.get("zip", "")); p = None
-                if len(zip_bytes) < 100:
-                    self._err(400, "ZIP too small"); return
-                tmp_fd2, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="lgms_zip_")
-                with os.fdopen(tmp_fd2, "wb") as f:
-                    f.write(zip_bytes)
-                zip_size = len(zip_bytes)
-                zip_bytes = None
-
-        except Exception as e:
-            if tmp_fd is not None:
-                try: os.close(tmp_fd)
-                except: pass
-            if os.path.exists(tmp_path):
-                try: os.unlink(tmp_path)
-                except: pass
-            self._err(400, f"Upload failed: {e}"); return
-
-        with _batch_lock:
-            _batch_job = {
-                "status": "running",
-                "total": 0, "processed": 0, "skipped": 0, "errors": 0,
-                "current": "Indexing ZIP...",
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "finished_at": None,
-                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
-                "error_list": [],
-                "stop_requested": False,
-            }
-
-        t = threading.Thread(target=_batch_upload_worker, args=(tmp_path,), daemon=True)
-        t.start()
-        log(f"  Batch upload started: {zip_size:,} bytes at {tmp_path}")
-        self._ok({"message": "Batch upload started", "status": _batch_job})
-
-    def _batch_upload_start(self, body):
-        """Legacy entry point — should not be called now that do_POST routes to _batch_upload_start_streamed."""
-        self._err(500, "Use the streamed upload path")
-
-    def _batch_upload_status(self):
-        with _batch_lock:
-            status = dict(_batch_job)
-        self._ok(status)
-
-    def _batch_cleanup_empty(self, body=None):
-        """Delete calls that have no transcript — broken records from failed uploads."""
-        try:
-            from datetime import date
-            today = date.today().isoformat()
-            # Fetch up to 1000 records with null transcript created today
-            null_calls = supa("GET", f"calls?transcript=is.null&created_at=gte.{today}T00:00:00&select=id,filename&limit=1000") or []
-            # Also fetch records with empty string transcript
-            empty_calls = supa("GET", f"calls?transcript=eq.&created_at=gte.{today}T00:00:00&select=id,filename&limit=1000") or []
-            all_empty = null_calls + empty_calls
-            # Deduplicate by id in case a record matched both filters
-            seen = set()
-            deduped = []
-            for c in all_empty:
-                if c["id"] not in seen:
-                    seen.add(c["id"])
-                    deduped.append(c)
-            if not deduped:
-                self._ok({"deleted": 0, "message": "No incomplete records found from today — nothing to clean up"})
-                return
-            # Bulk delete by ID list — one request instead of N requests
-            ids = [str(c["id"]) for c in deduped]
-            # Supabase IN filter: id=in.(id1,id2,...)
-            id_list = ",".join(ids)
-            log(f"  Cleanup: deleting {len(ids)} incomplete records from today")
-            supa("DELETE", f"calls?id=in.({id_list})")
-            log(f"  Cleanup: done — deleted {len(ids)} records")
-            self._ok({"deleted": len(ids), "total_found": len(deduped), "message": f"Deleted {len(ids)} incomplete records from today"})
-        except Exception as e:
-            log(f"  Cleanup error: {e}")
-            self._err(500, f"Cleanup failed: {e}")
-
-    def _batch_upload_errors(self):
-        """Return full error list for the last batch job."""
-        with _batch_lock:
-            errors = list(_batch_job.get("error_list", []))
-            status = _batch_job.get("status", "idle")
-            total = _batch_job.get("total", 0)
-            processed = _batch_job.get("processed", 0)
-            skipped = _batch_job.get("skipped", 0)
-        self._ok({"status": status, "total": total, "processed": processed, "skipped": skipped, "errors": errors})
-
-    def _batch_upload_stop(self, body=None):
-        with _batch_lock:
-            if _batch_job.get("status") != "running":
-                self._ok({"message": "No batch upload running", "status": _batch_job.get("status")}); return
-            _batch_job["stop_requested"] = True
-        self._ok({"message": "Stop requested — will halt after current files finish"})
-
-    # ── EXPORT ──
-
-    def _export_csv(self):
-        try:
-            calls = supa("GET", "calls?order=created_at.desc&limit=5000")
-            # v12 checklist keys (no pitched_fvp; added v12 items like got_email)
-            ck_keys = ["got_move_date","got_customer_name","got_phone_number","got_cities","got_home_type","got_stairs_info","did_full_inventory","asked_forgotten_items","asked_about_boxes","gave_price_on_call","attempted_to_close","offered_email_estimate","mentioned_confirmations","thanked_customer","asked_name_at_start","led_estimate_process","got_email","scheduled_onsite_attempt","offered_alternatives","took_rapport_opportunities","completed_booking_wrapup","captured_lead"]
-            # v12 score categories: overall, rapport_tone, information_control (merged), price_delivery, closing_attempt, salesmanship, professionalism
-            hdrs = ["Date","Call Date","Rep","Caller","Purpose","Type","Move","Outcome","Sentiment","Excluded","Overall","Rapport","Info & Control","Price","Closing","Salesmanship","Prof.","Compliance%","Talk Rep%","Talk Cust%","Words","Quality","Declined","Turned Away","Onsite","Continuation","Keywords","Objections","Strengths","Coaching"]
-            rows = []
-            for c in calls:
-                s = c.get("scores", {}) or {}
-                ck = c.get("checklist", {}) or {}
-                comp = round(sum(1 for k in ck_keys if ck.get(k)) / len(ck_keys) * 100)
-                rows.append([
-                    (c.get("created_at",""))[:10], (c.get("call_date","") or "")[:10],
-                    c.get("rep_name",""), c.get("caller_name",""), c.get("call_purpose",""),
-                    c.get("call_type",""), c.get("move_type",""), c.get("call_outcome",""),
-                    c.get("customer_sentiment",""), "Yes" if c.get("exclude_from_scoring") else "No",
-                    (s.get("overall") or {}).get("score",""), (s.get("rapport_tone") or {}).get("score",""),
-                    (s.get("information_control") or {}).get("score",""), (s.get("price_delivery") or {}).get("score",""),
-                    (s.get("closing_attempt") or {}).get("score",""), (s.get("salesmanship") or {}).get("score",""),
-                    (s.get("professionalism") or {}).get("score",""),
-                    comp, c.get("talk_ratio_rep",""), c.get("talk_ratio_customer",""), c.get("word_count",""),
-                    c.get("call_quality","normal"), "Yes" if c.get("availability_decline") else "No",
-                    "Yes" if c.get("turned_away") else "No",
-                    "Yes" if c.get("onsite_suggested") else "No", "Yes" if c.get("is_continuation") else "No",
-                    "; ".join(c.get("keywords_detected") or []), "; ".join(c.get("objections_detected") or []),
-                    "; ".join(c.get("strengths") or []), "; ".join(c.get("coaching_points") or []),
-                ])
-            csv_text = "\n".join(",".join(f'"{str(v).replace(chr(34),chr(34)+chr(34))}"' for v in row) for row in [hdrs] + rows)
-            self.send_response(200)
-            self._cors()
-            self.send_header("Content-Type", "text/csv")
-            self.send_header("Content-Disposition", f'attachment; filename="lgms_calls_{datetime.now().strftime("%Y-%m-%d")}.csv"')
-            self.end_headers()
-            self.wfile.write(csv_text.encode("utf-8"))
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _export_pdf_call(self):
-        try:
-            call_id = self.path.split("/export/pdf/call/")[1].split("?")[0]
-            result = supa("GET", f"calls?id=eq.{call_id}&limit=1")
-            if not result:
-                self._err(404, "Call not found"); return
-            pdf_bytes = generate_call_pdf(result[0])
-            self.send_response(200)
-            self._cors()
-            self.send_header("Content-Type", "application/pdf")
-            self.send_header("Content-Disposition", f'attachment; filename="scorecard_{call_id[:8]}.pdf"')
-            self.end_headers()
-            self.wfile.write(pdf_bytes)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _export_pdf_rep(self):
-        try:
-            rep_name = urllib.parse.unquote(self.path.split("/export/pdf/rep/")[1].split("?")[0])
-            calls = supa("GET", f"calls?rep_name=eq.{urllib.parse.quote(rep_name)}&order=created_at.desc&limit=100")
-            if not calls:
-                self._err(404, "No calls found"); return
-            sc_calls = [c for c in calls if not c.get("exclude_from_scoring")]
-            avg_overall = round(sum(c.get("scores",{}).get("overall",{}).get("score",0) for c in sc_calls) / max(len(sc_calls),1), 1)
-            summary_call = {
-                "rep_name": rep_name,
-                "caller_name": f"{len(sc_calls)} scored calls",
-                "call_outcome": f"Avg overall: {avg_overall}/10",
-                "call_summary": f"Rep profile for {rep_name}. Total: {len(calls)} calls. Scored: {len(sc_calls)}. Avg overall: {avg_overall}/10.",
-                "scores": {sk: {"score": round(sum((c.get("scores",{}) or {}).get(sk,{}).get("score",0) for c in sc_calls)/max(len(sc_calls),1),1), "note": f"Avg across {len(sc_calls)} calls"} for sk in ["rapport_tone","information_control","price_delivery","closing_attempt","salesmanship","professionalism","overall"]},
-                "checklist": {},
-                "coaching_points": list({cp for c in sc_calls for cp in (c.get("coaching_points") or [])}),
-                "manager_notes": "",
-                "score_overrides": {},
-                "created_at": datetime.now().isoformat(),
-            }
-            pdf_bytes = generate_call_pdf(summary_call)
-            safe = re.sub(r'[^a-zA-Z0-9_]', '_', rep_name)
-            self.send_response(200)
-            self._cors()
-            self.send_header("Content-Type", "application/pdf")
-            self.send_header("Content-Disposition", f'attachment; filename="rep_{safe}.pdf"')
-            self.end_headers()
-            self.wfile.write(pdf_bytes)
-        except Exception as e:
-            self._err(500, str(e))
-
-    # ── VONAGE ──
-
-    def _vonage_status(self):
-        """Return current polling worker state plus a recent-activity summary."""
-        try:
-            with _vonage_lock:
-                state = dict(_vonage_job)
-            state["configured"] = _vonage_configured()
-            state["poll_interval_seconds"] = VONAGE_POLL_INTERVAL
-            state["autostart_enabled"] = VONAGE_AUTOSTART
-            # Add a count of recent ingestions for at-a-glance UI
-            try:
-                cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-                rows = supa("GET", f"vonage_recordings?ingested_at=gte.{cutoff}&select=status")
-                state["last_24h"] = {
-                    "done":      sum(1 for r in rows if r.get("status") == "done"),
-                    "skipped":   sum(1 for r in rows if r.get("status") == "skipped"),
-                    "failed":    sum(1 for r in rows if r.get("status") == "failed"),
-                    "pending":   sum(1 for r in rows if r.get("status") in ("pending", "downloaded")),
-                }
-            except Exception:
-                state["last_24h"] = None
-            self._ok(state)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_get_extension_map_endpoint(self):
-        try:
-            rows = supa("GET", "vonage_extension_map?order=extension_id.asc")
-            self._ok(rows)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_get_recent(self):
-        """Recent ingestions joined with call info for the dashboard table."""
-        try:
-            rows = supa("GET", "vonage_recordings?order=ingested_at.desc&limit=50")
-            # Optionally enrich with rep_name from the linked call
-            call_ids = [r["call_id"] for r in rows if r.get("call_id")]
-            calls_by_id = {}
-            if call_ids:
-                ids_csv = ",".join(call_ids)
-                try:
-                    cs = supa("GET", f"calls?id=in.({ids_csv})&select=id,rep_name,filename")
-                    calls_by_id = {c["id"]: c for c in cs}
-                except Exception:
-                    pass
-            for r in rows:
-                cid = r.get("call_id")
-                if cid and cid in calls_by_id:
-                    r["call_rep_name"] = calls_by_id[cid].get("rep_name")
-                    r["call_filename"] = calls_by_id[cid].get("filename")
-            self._ok(rows)
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_start_endpoint(self, body):
-        try:
-            started = _vonage_start_worker()
-            self._ok({"started": started})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_stop_endpoint(self, body):
-        try:
-            stopped = _vonage_stop_worker()
-            self._ok({"stopped": stopped})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_pause_endpoint(self, body):
-        try:
-            _vonage_pause_worker()
-            self._ok({"paused": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_resume_endpoint(self, body):
-        try:
-            _vonage_resume_worker()
-            self._ok({"resumed": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_poll_now_endpoint(self, body):
-        """Trigger a single poll cycle on demand. Useful for testing."""
-        if not _vonage_configured():
-            self._err(400, "Vonage not configured")
-            return
-        try:
-            ingested, skipped, errors = _vonage_poll_once()
-            self._ok({"ingested": ingested, "skipped": skipped, "errors": errors})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_save_extension(self, body):
-        try:
-            p = json.loads(body)
-            extension_id = str(p.get("extension_id", "")).strip()
-            rep_name = str(p.get("rep_name", "")).strip()
-            notes = p.get("notes", "")
-            if not extension_id or not rep_name:
-                self._err(400, "extension_id and rep_name required")
-                return
-            record = {
-                "rep_name": rep_name,
-                "notes": notes,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            existing = supa("GET", f"vonage_extension_map?extension_id=eq.{urllib.parse.quote(extension_id)}&limit=1")
-            if existing:
-                supa("PATCH", f"vonage_extension_map?extension_id=eq.{urllib.parse.quote(extension_id)}", record, prefer_minimal=True)
-            else:
-                record["extension_id"] = extension_id
-                supa("POST", "vonage_extension_map", record, prefer_minimal=True)
-            self._ok({"saved": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    def _vonage_delete_extension(self, body):
-        try:
-            p = json.loads(body)
-            extension_id = str(p.get("extension_id", "")).strip()
-            if not extension_id:
-                self._err(400, "extension_id required")
-                return
-            supa("DELETE", f"vonage_extension_map?extension_id=eq.{urllib.parse.quote(extension_id)}")
-            self._ok({"deleted": True})
-        except Exception as e:
-            self._err(500, str(e))
-
-    # ── HELPERS ──
-
-    def _ok(self, data):
-        body = json.dumps(data).encode()
-        self.send_response(200)
-        self._cors()
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _err(self, code, msg):
-        body = json.dumps({"error": msg}).encode()
-        self.send_response(code)
-        self._cors()
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _cors(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST,GET,OPTIONS,DELETE,PATCH")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-
-
-# ──────────────────────────────────────────────────────────────
-# DATA RETENTION — runs daily at startup and every 24 hours
-# ──────────────────────────────────────────────────────────────
-
-AUDIO_RETENTION_DAYS    = 60   # Delete audio files older than this (keep call record + scores)
-EXCLUDED_RETENTION_DAYS = 14   # Delete system-excluded calls older than this
-# Exclusion reasons that were set by a MANAGER (not auto) — these are NEVER auto-purged
-MANUAL_EXCLUSION_REASONS = {"manually excluded", "manager excluded", "excluded by manager"}
-
-def _retention_worker():
-    """Daily retention job — runs in background thread, loops every 24 hours."""
-    # Wait 2 minutes after startup before first run so server is fully ready
-    time.sleep(120)
-    while True:
-        try:
-            _run_retention()
-        except Exception as e:
-            log(f"  Retention job error: {e}")
-        # Sleep 24 hours before next run
-        time.sleep(86400)
-
-def _run_retention():
-    """Execute both retention passes: audio file cleanup and excluded call purge."""
-    log("  === Daily retention job starting ===")
-    _purge_old_audio()
-    _purge_excluded_calls()
-    log("  === Daily retention job complete ===")
-
-def _purge_old_audio():
-    """Remove audio files from storage for calls older than AUDIO_RETENTION_DAYS.
-    Keeps the call record, transcript, and scores — just removes the audio playback file."""
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=AUDIO_RETENTION_DAYS)).isoformat()
-        # Find calls that still have audio URLs and are old enough
-        old_calls = supa("GET", f"calls?audio_url=neq.&created_at=lt.{cutoff}&select=id,audio_url,filename&limit=500")
-        if not old_calls:
-            log(f"  Audio retention: no files older than {AUDIO_RETENTION_DAYS} days")
-            return
-        deleted = 0
-        failed = 0
-        for call in old_calls:
-            audio_url = call.get("audio_url", "")
-            if not audio_url:
-                continue
-            path_match = re.search(r'/call-audio/(.+?)(\?|$)', audio_url)
-            if not path_match:
-                continue
-            storage_path = path_match.group(1)
-            try:
-                supa_storage_delete("call-audio", [storage_path])
-                supa("PATCH", f"calls?id=eq.{call['id']}", {"audio_url": "", "storage_filename": ""})
-                deleted += 1
-            except Exception as e:
-                log(f"  Audio retention: failed to delete {storage_path}: {e}")
-                failed += 1
-        log(f"  Audio retention: deleted {deleted} audio files older than {AUDIO_RETENTION_DAYS} days ({failed} failed)")
-    except Exception as e:
-        log(f"  Audio retention error: {e}")
-
-def _purge_excluded_calls():
-    """Delete system-excluded call records older than EXCLUDED_RETENTION_DAYS.
-    Only purges calls excluded for automatic reasons (too short, voicemail, etc.)
-    Never purges calls that were manually excluded by a manager."""
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=EXCLUDED_RETENTION_DAYS)).isoformat()
-        # Get old excluded calls
-        excluded = supa("GET", f"calls?exclude_from_scoring=eq.true&created_at=lt.{cutoff}&select=id,exclusion_reason,filename,audio_url&limit=1000")
-        if not excluded:
-            log(f"  Excluded purge: no excluded calls older than {EXCLUDED_RETENTION_DAYS} days")
-            return
-        # Filter out manually excluded calls — never auto-delete those
-        to_delete = [
-            c for c in excluded
-            if (c.get("exclusion_reason") or "").lower().strip() not in MANUAL_EXCLUSION_REASONS
-        ]
-        if not to_delete:
-            log(f"  Excluded purge: all old excluded calls were manually excluded — skipping")
-            return
-        # Delete audio files first for any that have them
-        audio_deleted = 0
-        for call in to_delete:
-            audio_url = call.get("audio_url", "")
-            if not audio_url:
-                continue
-            path_match = re.search(r'/call-audio/(.+?)(\?|$)', audio_url)
-            if path_match:
-                try:
-                    supa_storage_delete("call-audio", [path_match.group(1)])
-                    audio_deleted += 1
-                except Exception:
-                    pass
-        # Bulk delete the call records
-        ids = [str(c["id"]) for c in to_delete]
-        id_list = ",".join(ids)
-        supa("DELETE", f"calls?id=in.({id_list})")
-        log(f"  Excluded purge: deleted {len(ids)} system-excluded calls older than {EXCLUDED_RETENTION_DAYS} days ({audio_deleted} audio files removed)")
-    except Exception as e:
-        log(f"  Excluded purge error: {e}")
-
-
-if __name__ == "__main__":
-    log("=" * 55)
-    log("  Little Guys Movers — Call Analyzer Server v14")
-    log("=" * 55)
-    missing = [v for v in ["ANTHROPIC_API_KEY","SUPABASE_URL","SUPABASE_KEY","DEEPGRAM_API_KEY"] if not os.environ.get(v)]
-    if missing:
-        log("\n  WARNING: Missing env vars: " + ", ".join(missing))
-    else:
-        log("\n  All environment variables loaded")
-
-    # Vonage VBC integration — auto-start worker if configured
-    if _vonage_configured():
-        if VONAGE_AUTOSTART:
-            log("  Vonage VBC: configured, auto-starting polling worker")
-            _vonage_start_worker()
-        else:
-            log("  Vonage VBC: configured but autostart disabled — start manually from dashboard")
-    else:
-        log("  Vonage VBC: not configured (env vars missing) — integration dormant")
-
-    # Start daily retention job in background
-    retention_thread = threading.Thread(target=_retention_worker, daemon=True, name="retention")
-    retention_thread.start()
-    log("  Retention policy: audio purged after 60 days, excluded calls after 14 days")
-
-    log(f"  Running at http://127.0.0.1:{PORT}")
-    log("  Press Ctrl+C to stop\n")
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+          }
+        }
+      }catch(e){
+        if(txWrap) txWrap.innerHTML = '<div style="color:var(--ink3);font-size:12px;padding:12px">Failed to load transcript</div>';
+      }
+    }
+  }
+}
+function toggleSel(id){if(selected.has(id))selected.delete(id);else selected.add(id);updateBB();const r=g('row-'+id);if(r){const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=selected.has(id);}}
+function updateBB(){const b=g('bulk-bar');if(!b)return;const n=selected.size;b.classList.toggle('on',n>0);const c=g('bulk-cnt');if(c)c.textContent=`${n} call${n!==1?'s':''} selected`;}
+function clearSel(){selected.clear();updateBB();renderCallList();}
+function toggleSelAll(){const rows=document.querySelectorAll('#call-list .call-row');const ids=[...rows].map(el=>el.id.replace('row-',''));const allSel=ids.every(id=>selected.has(id));if(allSel)ids.forEach(id=>selected.delete(id));else ids.forEach(id=>selected.add(id));updateBB();renderCallList();}
+async function bulkDel(){const n=selected.size;if(!n||!confirm(`Delete ${n} call${n!==1?'s':''}?`))return;try{await fetch(API+'/bulk_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...selected]})});allCalls=allCalls.filter(c=>!selected.has(c.id));selected.clear();renderCallList();}catch(e){alert(e.message);}}
+async function bulkDelExcluded(){
+  const base=locationFilter?getFC():allCalls;
+  const ids=base.filter(c=>c.exclude_from_scoring).map(c=>c.id);
+  if(!ids.length){alert('No excluded calls to delete.');return;}
+  if(!confirm(`Permanently delete ${ids.length} excluded call${ids.length!==1?'s':''}${locationFilter?` in ${locationFilter}`:''}? This cannot be undone.`))return;
+  try{
+    await fetch(API+'/bulk_delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+    allCalls=allCalls.filter(c=>!c.exclude_from_scoring);
+    selected.clear();renderCallList();
+  }catch(e){alert(e.message);}
+}
+async function delCall(id){if(!confirm('Delete?'))return;try{await fetch(API+'/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});allCalls=allCalls.filter(c=>c.id!==id);selected.delete(id);renderCallList();}catch(e){alert(e.message);}}
+async function toggleExcl(id,val){await updCall(id,{exclude_from_scoring:val,exclusion_reason:val?'Manually excluded':''});}
+async function addTag(e,id){if(e.key!=='Enter')return;const inp=e.target,tag=inp.value.trim();if(!tag)return;const c=allCalls.find(x=>x.id===id);if(!c)return;await updCall(id,{tags:[...(c.tags||[]),tag]});inp.value='';}
+async function rmTag(id,tag){const c=allCalls.find(x=>x.id===id);if(!c)return;await updCall(id,{tags:(c.tags||[]).filter(t=>t!==tag)});}
+async function saveNotes(id){await updCall(id,{manager_notes:g('nt-'+id)?.value||''});}
+async function applyOv(id){
+  const k=g('ok-'+id)?.value,note=g('on-'+id)?.value||'';
+  if(!k){alert('Select a category');return;}
+  const c=allCalls.find(x=>x.id===id);
+  if(k==='__na__'){
+    const cat=note||'general';
+    try{
+      const r=await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:cat,original_score:0,corrected_score:null,manager_note:'N/A for this move type'})});
+      if(!r.ok){const t=await r.text();alert('Correction save failed: '+t);return;}
+      await loadCorrections();
+    }catch(e){alert('Correction save error: '+e.message);}
+    return;
+  }
+  const v=parseInt(g('ov-'+id)?.value);
+  if(isNaN(v)||v<1||v>10){alert('Select a category and enter 1-10');return;}
+  const orig=c?.scores?.[k]?.score||0;
+  await updCall(id,{score_overrides:{...(c?.score_overrides||{}),[k]:v}});
+  try{
+    const r=await fetch(API+'/corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({call_id:id,category:k,original_score:orig,corrected_score:v,manager_note:note})});
+    if(!r.ok){const t=await r.text();alert('Correction save failed: '+t);return;}
+    await loadCorrections();
+  }catch(e){alert('Correction save error: '+e.message);}
+}
+async function clrOv(id){await updCall(id,{score_overrides:{}});}
+
+function handleRepClick(callId, repName){
+  if(!repName||repName==='Unknown')openAssignRep(callId);
+  else nav('profiles',{rep:repName});
+}
+function openAssignRep(callId){
+  const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(r=>r&&r!=='Unknown').sort();
+  const opts=repNames.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  // Build a small inline modal
+  const existing=g('assign-rep-modal');if(existing)existing.remove();
+  const modal=document.createElement('div');
+  modal.id='assign-rep-modal';
+  modal.className='modal-bg';
+  modal.style.display='flex';
+  modal.innerHTML=`<div class="modal-box"><h2>Assign Rep</h2>
+    <p style="font-size:12px;color:var(--ink3);margin-bottom:12px">Select the rep who handled this call. This updates the call record immediately.</p>
+    <div class="fg"><label>Rep</label>
+      <select id="assign-rep-sel" class="fsel" style="width:100%">
+        <option value="">— select rep —</option>${opts}
+        <option value="__custom__">Enter name manually…</option>
+      </select>
+    </div>
+    <div class="fg" id="assign-rep-custom-wrap" style="display:none"><label>Name</label>
+      <input type="text" id="assign-rep-custom" class="ovr-inp" placeholder="First name" style="width:100%" />
+    </div>
+    <div id="assign-rep-msg"></div>
+    <div class="modal-btns">
+      <button class="btn btn-g" onclick="g('assign-rep-modal').remove()">Cancel</button>
+      <button class="btn btn-p" onclick="doAssignRep('${callId}')">Assign</button>
+    </div>
+  </div>`;
+  // Show custom input when "Enter manually" selected
+  modal.querySelector('#assign-rep-sel').onchange=function(){
+    g('assign-rep-custom-wrap').style.display=this.value==='__custom__'?'block':'none';
+  };
+  document.body.appendChild(modal);
+}
+
+async function doAssignRep(callId){
+  const sel=g('assign-rep-sel');
+  let repName=sel?.value;
+  if(repName==='__custom__'){repName=g('assign-rep-custom')?.value?.trim();}
+  if(!repName){g('assign-rep-msg').innerHTML='<div class="msg-err">Select or enter a rep name</div>';return;}
+  try{
+    await updCall(callId,{rep_name:repName});
+    g('assign-rep-modal').remove();
+  }catch(e){
+    if(g('assign-rep-msg'))g('assign-rep-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;
+  }
+}
+async function updCall(id,data){
+  try{
+    const r = await fetch(API+'/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,...data})});
+    if(!r.ok){
+      const errText = await r.text().catch(()=>'');
+      throw new Error('Server returned ' + r.status + (errText?': '+errText.substring(0,100):''));
+    }
+    const i=allCalls.findIndex(c=>c.id===id);if(i>=0)allCalls[i]={...allCalls[i],...data};
+    // In-place update: rebuild just this row if it exists in the DOM, otherwise full re-render
+    const row=g('row-'+id);
+    if(row&&currentPage==='library'){
+      const wasOpen=row.classList.contains('expanded');
+      const oldDetail=g('detail-'+id);
+      // buildRow returns row + detail as two sibling top-level elements
+      const tmp=document.createElement('div');tmp.innerHTML=buildRow(allCalls[i]);
+      const newRow=tmp.querySelector('#row-'+CSS.escape(id));
+      const newDetail=tmp.querySelector('#detail-'+CSS.escape(id));
+      if(wasOpen&&newRow){
+        newRow.classList.add('expanded');
+        if(newDetail)newDetail.style.display='grid';
+      }
+      if(newRow)row.replaceWith(newRow);
+      if(oldDetail&&newDetail)oldDetail.replaceWith(newDetail);
+      updateBB();
+    } else if(currentPage==='overview'){
+      renderOverview();
+    }
+  }catch(e){
+    if(typeof showToast==='function') showToast('Save failed: '+e.message, 'error');
+    else alert('Save failed: '+e.message);
+  }
+}
+
+// ── REP PROFILES ──
+function renderProfiles(opts={}) {
+  // Build store list from reps table
+  const stores = [...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
+  const storeFilter = locationFilter || opts.store || '';
+
+  // Filter rep names by store if filter active. Only show reps with at least 1 scored call.
+  let repNames = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean);
+  if (storeFilter) {
+    const storeReps = new Set(reps.filter(r=>r.location===storeFilter).flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
+    repNames = repNames.filter(r => storeReps.has(r));
+  }
+  repNames = repNames.filter(r => allCalls.some(c => c.rep_name===r && !c.exclude_from_scoring));
+
+  // Look up location for each rep
+  const repLocation = {};
+  repNames.forEach(r => {
+    const dbRep = reps.find(x => x.full_name===r || x.nickname===r);
+    repLocation[r] = dbRep?.location || 'Unassigned';
+  });
+
+  // Group by location, then sort alphabetically within each
+  const byLocation = {};
+  repNames.forEach(r => {
+    const loc = repLocation[r];
+    (byLocation[loc] = byLocation[loc] || []).push(r);
+  });
+  Object.keys(byLocation).forEach(loc => byLocation[loc].sort((a,b) => a.localeCompare(b)));
+  // Sort location keys: known locations alphabetically, then "Unassigned" last
+  const locationOrder = Object.keys(byLocation).sort((a,b) => {
+    if (a === 'Unassigned') return 1;
+    if (b === 'Unassigned') return -1;
+    return a.localeCompare(b);
+  });
+
+  // Determine selected rep — prefer opts.rep, else top performer overall, else first
+  const allReps = repNames.slice();
+  const overall = (r) => {
+    const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
+    return rc.length ? rc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rc.length : 0;
+  };
+  // Only open a rep profile if explicitly requested via opts.rep.
+  // (Previously auto-selected top performer on first load — removed by user request.)
+  let selectedRep = opts.rep && allReps.includes(opts.rep) ? opts.rep : null;
+
+  // Helper to compute a sparkline from a rep's last N scored calls
+  const buildCard = (r) => {
+    const rc = allCalls.filter(c => c.rep_name===r && !c.exclude_from_scoring);
+    const sorted = [...rc].sort((a,b) => new Date(a.call_date||a.created_at) - new Date(b.call_date||b.created_at));
+    const recent = sorted.slice(-10);
+    const sc = overall(r);
+    const cls = scoreClass(sc);
+
+    // Booking rate for this rep
+    const booked = rc.filter(c => c.call_outcome==='booked').length;
+    const bookRate = rc.length ? Math.round(booked/rc.length*100) : 0;
+
+    // Trend: split sorted in half, compare averages
+    const half = Math.floor(sorted.length / 2);
+    let trendLabel = '', trendCls = '';
+    if (sorted.length >= 4 && half > 0) {
+      const firstAvg = sorted.slice(0,half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/half;
+      const recentAvg = sorted.slice(half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/(sorted.length-half);
+      const delta = recentAvg - firstAvg;
+      if (delta > 0.3) { trendLabel = `↑ ${delta.toFixed(1)}`; trendCls = 'up'; }
+      else if (delta < -0.3) { trendLabel = `↓ ${Math.abs(delta).toFixed(1)}`; trendCls = 'down'; }
+    }
+    const trendPill = trendLabel ? `<span class="trend-pill ${trendCls}">${trendLabel}</span>` : '';
+
+    // Sparkline — last up-to-10 scored calls, oldest left → newest right.
+    // Each bar gets a native title tooltip with date + score for hover detail.
+    const fmtDate = (d) => {
+      if (!d) return 'Unknown date';
+      try {
+        const dt = new Date(d);
+        return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      } catch (e) { return 'Unknown date'; }
+    };
+    const sparkBars = recent.length ? recent.map(c => {
+      const v = c.scores?.overall?.score || 0;
+      const h = Math.max(8, v*10);
+      const color = v >= 8 ? 'var(--lg-green)' : v >= 5 ? 'var(--lg-gold)' : v > 0 ? 'var(--lg-red)' : 'var(--ink5)';
+      const tip = `${fmtDate(c.call_date || c.created_at)} · ${v ? v.toFixed(1) + '/10' : 'unscored'}`;
+      return `<div class="rep-card-spark-bar" style="height:${h}%;background:${color}" title="${esc(tip)}"></div>`;
+    }).join('') : '<div style="flex:1;color:var(--ink4);font-size:10px;text-align:center;align-self:center">No data</div>';
+    const sparkBlock = recent.length
+      ? `<div class="rep-card-spark-wrap">
+          <div class="rep-card-spark-label">
+            <span>Last ${recent.length} call${recent.length===1?'':'s'}</span>
+            <span class="rep-card-spark-label-meta">oldest → newest</span>
+          </div>
+          <div class="rep-card-spark">${sparkBars}</div>
+        </div>`
+      : `<div class="rep-card-spark-wrap"><div class="rep-card-spark">${sparkBars}</div></div>`;
+
+    const isActive = r === selectedRep;
+
+    return `<div class="rep-card-v2${isActive?' active':''}" onclick="renderProfiles({rep:'${esc(r)}'${storeFilter?`,store:'${esc(storeFilter)}'`:''}})">
+      <div class="rep-card-head">
+        <div class="rep-card-avatar">${ini(r)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="rep-card-name">${esc(r)}</div>
+          <div class="rep-card-meta">${esc(repLocation[r])}</div>
+        </div>
+      </div>
+      <div class="rep-card-score-row">
+        <span class="rep-card-score-big ${cls}">${sc.toFixed(1)}<span class="rep-card-score-suffix">/10</span></span>
+        ${trendPill ? `<span class="rep-card-score-trend">${trendPill}</span>` : ''}
+      </div>
+      <div class="rep-card-stats">
+        <div>
+          <div class="rep-card-stat-label">Calls</div>
+          <div class="rep-card-stat-val muted">${rc.length}</div>
+        </div>
+        <div>
+          <div class="rep-card-stat-label">Booking</div>
+          <div class="rep-card-stat-val ${scoreClass(bookRate/10)}">${bookRate}%</div>
+        </div>
+      </div>
+      ${sparkBlock}
+    </div>`;
+  };
+
+  // Build location sections
+  const sectionsHtml = locationOrder.map(loc => {
+    const cards = byLocation[loc].map(buildCard).join('');
+    return `<div class="rep-location-section">
+      <div class="rep-location-header">${esc(loc)}<span class="rep-location-header-count">${byLocation[loc].length} rep${byLocation[loc].length!==1?'s':''}</span></div>
+      <div class="rep-card-grid">${cards}</div>
+    </div>`;
+  }).join('');
+
+  // Store filter bar
+  const storeOpts = stores.map(s=>`<option value="${s}"${storeFilter===s?' selected':''}>${esc(s)}</option>`).join('');
+  const storeBar = (!locationFilter && stores.length) ? `<div class="profile-page-header">
+    <span style="font-family:var(--font-label);font-size:11px;color:var(--ink3);letter-spacing:.08em;text-transform:uppercase">Filter by location:</span>
+    <select class="fsel" onchange="renderProfiles({store:this.value})" style="font-size:13px;padding:6px 12px"><option value="">All locations</option>${storeOpts}</select>
+    ${storeFilter?`<span class="bdg" style="cursor:pointer" onclick="renderProfiles({})">✕ ${esc(storeFilter)}</span>`:''}
+  </div>` : '';
+
+  if (allReps.length === 0) {
+    set('page', `${storeBar}<div class="profile-empty">
+      <div class="profile-empty-icon">👤</div>
+      <p>No rep data yet${storeFilter?` for ${esc(storeFilter)}`:''}.</p>
+    </div>`);
+    return;
+  }
+
+  set('page', `${storeBar}
+    ${sectionsHtml}
+    <div id="rep-detail" style="margin-top:8px"></div>`);
+
+  if (selectedRep) openRepProfile(selectedRep);
+}
+
+function openRepProfile(repName){
+  const rc = allCalls.filter(c => c.rep_name===repName);
+  const sc = rc.filter(c => !c.exclude_from_scoring);
+  const sorted = [...sc].sort((a,b) => new Date(b.call_date||b.created_at) - new Date(a.call_date||a.created_at));
+  const teamSc = scc(getFC());
+
+  // Compute the rep's average overall and per-skill scores
+  const repAvg = (k) => sc.length ? sc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/sc.length : 0;
+  const teamAvg = (k) => teamSc.length ? teamSc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/teamSc.length : 0;
+
+  const overall = repAvg('overall');
+  const teamOverall = teamAvg('overall');
+
+  // Compute leaderboard rank — only reps with 5+ scored calls
+  const allReps = [...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean);
+  const eligible = allReps.filter(r => allCalls.filter(c=>c.rep_name===r && !c.exclude_from_scoring).length >= 5);
+  const ranked = eligible.map(r => ({
+    name: r,
+    score: (() => {
+      const rrc = allCalls.filter(c=>c.rep_name===r && !c.exclude_from_scoring);
+      return rrc.length ? rrc.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/rrc.length : 0;
+    })()
+  })).sort((a,b) => b.score - a.score);
+  const myRank = ranked.findIndex(x => x.name === repName) + 1;
+
+  // Booking rate
+  const booked = sc.filter(c => c.call_outcome==='booked').length;
+  const bookingRate = sc.length ? Math.round(booked/sc.length*100) : 0;
+  const teamBooked = teamSc.filter(c => c.call_outcome==='booked').length;
+  const teamBookingRate = teamSc.length ? Math.round(teamBooked/teamSc.length*100) : 0;
+  const bookingDelta = bookingRate - teamBookingRate;
+
+  // Avg call length (from word count if duration not present — rough proxy)
+  const repWordCount = sc.filter(c=>c.word_count).map(c=>c.word_count);
+  const avgWords = repWordCount.length ? Math.round(repWordCount.reduce((a,b)=>a+b,0)/repWordCount.length) : 0;
+  const avgMinutes = avgWords ? (avgWords / 150).toFixed(1) : '—'; // ~150 wpm conversational rate
+
+  // Talk ratio
+  const repTalkSamples = sc.filter(c=>c.talk_ratio_rep && c.talk_ratio_customer);
+  const repTalkAvg = repTalkSamples.length ? Math.round(repTalkSamples.reduce((a,c)=>a+c.talk_ratio_rep,0)/repTalkSamples.length) : 0;
+  const custTalkAvg = repTalkSamples.length ? 100-repTalkAvg : 0;
+
+  // Compliance %
+  const compHits = sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]===true).length, 0);
+  const compPossible = sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]!=='na').length, 0);
+  const compPct = compPossible ? Math.round(compHits/compPossible*100) : 0;
+  const teamCompHits = teamSc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]===true).length, 0);
+  const teamCompPossible = teamSc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]!=='na').length, 0);
+  const teamCompPct = teamCompPossible ? Math.round(teamCompHits/teamCompPossible*100) : 0;
+  const compDelta = compPct - teamCompPct;
+
+  // Trend: split scored calls in half and compare
+  const oldest = [...sc].sort((a,b) => new Date(a.call_date||a.created_at) - new Date(b.call_date||b.created_at));
+  const half = Math.floor(oldest.length / 2);
+  const firstHalfAvg = half > 0 ? oldest.slice(0,half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/half : 0;
+  const recentHalfAvg = half > 0 ? oldest.slice(half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/(oldest.length-half) : overall;
+  const overallDelta = recentHalfAvg - firstHalfAvg;
+  const overallTrend = overallDelta > 0.3 ? 'up' : overallDelta < -0.3 ? 'down' : 'flat';
+
+  // Verdict for hero
+  const verdictLine = overall >= 8 ? `${repName.split(' ')[0]} is crushing it` :
+                      overall >= 6.5 ? `${repName.split(' ')[0]} is performing well` :
+                      overall >= 5 ? `${repName.split(' ')[0]} has room to grow` :
+                      `${repName.split(' ')[0]} needs coaching`;
+
+  // Strongest / weakest skills
+  const skillKeys = ['rapport_tone', 'information_control', 'price_delivery', 'closing_attempt', 'salesmanship', 'professionalism'];
+  const skillLabels = {
+    rapport_tone: 'Rapport & Tone',
+    information_control: 'Information Control',
+    price_delivery: 'Price Delivery',
+    closing_attempt: 'Closing Attempt',
+    salesmanship: 'Salesmanship',
+    professionalism: 'Professionalism'
+  };
+  const skillScores = skillKeys.map(k => ({ key: k, label: skillLabels[k], score: repAvg(k), team: teamAvg(k) }))
+    .filter(s => s.score > 0); // Only consider skills with actual data
+  skillScores.sort((a,b) => b.score - a.score);
+  const strongest = skillScores[0];
+  const weakest = skillScores[skillScores.length - 1];
+
+  // Build skill cards HTML
+  const skillCardsHtml = strongest && weakest && strongest !== weakest ? `<div class="skill-cards">
+    <div class="skill-card strength">
+      <div class="skill-card-label"><span class="skill-card-icon">★</span>Strongest skill</div>
+      <div class="skill-card-name">${esc(strongest.label)}</div>
+      <div class="skill-card-score ${scoreClass(strongest.score)}">${strongest.score.toFixed(1)}<span class="skill-card-score-suffix">/10</span></div>
+      <div class="skill-card-detail"><strong>${(strongest.score-strongest.team)>=0?'+':''}${(strongest.score-strongest.team).toFixed(1)} vs team avg.</strong> ${esc(repName.split(' ')[0])} consistently performs best in this area. ${strongest.score>=8?'Use as a training example for newer reps.':'Keep building on this strength.'}</div>
+    </div>
+    <div class="skill-card weakness">
+      <div class="skill-card-label"><span class="skill-card-icon">!</span>Coaching opportunity</div>
+      <div class="skill-card-name">${esc(weakest.label)}</div>
+      <div class="skill-card-score ${scoreClass(weakest.score)}">${weakest.score.toFixed(1)}<span class="skill-card-score-suffix">/10</span></div>
+      <div class="skill-card-detail"><strong>${weakest.score>=7?'Their weakest area, but still solid.':weakest.score>=5?'Notable gap vs other skills.':'Significant coaching opportunity here.'}</strong> Coaching focus area — ${(weakest.score-weakest.team)>=0?(weakest.score-weakest.team).toFixed(1)+' above':Math.abs(weakest.score-weakest.team).toFixed(1)+' below'} team avg of ${weakest.team.toFixed(1)}.</div>
+    </div>
+  </div>` : '';
+
+  // Score profile rows (left panel of two-col)
+  const scoreProfileRows = skillScores.map(s => {
+    const fillCls = s.score >= 8 ? '' : s.score >= 5 ? 'mid' : 'low';
+    const valCls = scoreClass(s.score);
+    const delta = s.score - s.team;
+    const deltaSign = delta >= 0 ? '+' : '';
+    const deltaCls = delta > 0.05 ? 'up' : delta < -0.05 ? 'down' : '';
+    return `<div class="score-row score-row-wide">
+      <div class="score-row-label">${esc(s.label)}</div>
+      <div class="score-bar"><div class="score-bar-fill ${fillCls}" style="width:${s.score*10}%"></div></div>
+      <div class="score-row-value ${valCls}">${s.score.toFixed(1)}</div>
+      <div class="score-row-delta ${deltaCls}">${deltaSign}${delta.toFixed(1)}</div>
+    </div>`;
+  }).join('');
+
+  // Build trend visualization — last N scored calls as bars
+  const trendCalls = oldest.slice(-14); // Last 14 calls
+  const trendBars = trendCalls.length > 0 ? trendCalls.map((c, i) => {
+    const v = c.scores?.overall?.score || 0;
+    const heightPct = Math.max(15, v*10); // Min 15% so empty bars are visible
+    const isRecent = i >= trendCalls.length * 0.6;
+    const color = v >= 8 ? 'var(--lg-green)' : v >= 5 ? 'var(--lg-gold)' : 'var(--lg-red)';
+    const opacity = isRecent ? '1' : '0.5';
+    return `<div class="profile-trend-bar" style="height:${heightPct}%;background:${color};opacity:${opacity}" title="${fmtS(c.call_date||c.created_at)}: ${v}/10"></div>`;
+  }).join('') : '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:12px">Not enough data</div>';
+
+  // Strengths and coaching aggregations
+  const strMap = {};
+  sc.forEach(c => (c.strengths||[]).forEach(s => { strMap[s] = (strMap[s]||0) + 1; }));
+  const topStr = Object.entries(strMap).sort((a,b) => b[1]-a[1]).slice(0,5);
+  const coachMap = {};
+  sc.forEach(c => (c.coaching_points||[]).forEach(p => { coachMap[p] = (coachMap[p]||0) + 1; }));
+  const topCoach = Object.entries(coachMap).sort((a,b) => b[1]-a[1]).slice(0,5);
+
+  // Recent calls — use mockup-style call-row markup (visual only — the Library page is where you actually click into them)
+  const recentCallsHtml = sorted.slice(0, 5).map(c => {
+    const eff = c.score_overrides?.overall ?? c.scores?.overall?.score ?? 0;
+    const stripeCls = eff >= 8 ? 'good' : eff >= 5 ? 'mid' : 'low';
+    const outcomeMap = {
+      booked: {cls:'outcome-booked', label:'Booked'},
+      estimate_sent: {cls:'outcome-estimate', label:'Estimate'},
+      lost: {cls:'outcome-lost', label:'Lost'},
+      soft_pipeline: {cls:'outcome-pipeline', label:'Pipeline'}
+    };
+    const o = outcomeMap[c.call_outcome] || {cls:'outcome-unknown', label:'Unknown'};
+    const catBadges = [];
+    if (c.move_category && c.move_category !== 'unknown') {
+      const lbl = c.move_category === 'long_distance' ? 'Long distance' : c.move_category.replace(/_/g,' ');
+      catBadges.push(`<span class="cat-badge">${esc(lbl)}</span>`);
+    }
+    if (c.move_timeline && c.move_timeline !== 'unknown') {
+      const tl = {'exact_date':'Exact date','this_week':'This week','two_to_four_weeks':'2-4 wks','one_to_three_months':'1-3 mo','three_plus_months':'3+ mo'}[c.move_timeline];
+      if (tl) catBadges.push(`<span class="cat-badge">${tl}</span>`);
+    }
+    return `<div class="call-row" onclick="libFilters={rep:'${esc(repName)}',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};nav('library',{openCallId:'${c.id}'})" style="cursor:pointer">
+      <div class="score-stripe ${stripeCls}"></div>
+      <div class="call-score">
+        <span class="call-score-num ${scoreClass(eff)}">${eff || '—'}</span>
+        <span class="call-score-label">overall</span>
+      </div>
+      <div class="call-meta-main">
+        <div class="call-caller">${esc(c.caller_name || 'Unknown caller')}${c.call_purpose ? ' · ' + esc(c.call_purpose) : ''}</div>
+        <div class="call-summary">${esc(c.call_summary || c.move_type || '')}</div>
+        ${catBadges.length ? `<div class="call-categorization">${catBadges.join('')}</div>` : ''}
+      </div>
+      <div class="call-rep">
+        <div class="call-rep-avatar">${ini(repName)}</div>
+        <span class="call-rep-name">${esc(repName.split(' ')[0])}</span>
+      </div>
+      <div><span class="outcome-badge ${o.cls}">${o.label}</span></div>
+      <div class="call-date">${fmtS(c.call_date||c.created_at)}</div>
+      <div class="row-arrow">›</div>
+    </div>`;
+  }).join('');
+
+  // Determine whether the rep has location data
+  const dbRep = reps.find(x => x.full_name===repName || x.nickname===repName);
+  const repLocation = dbRep?.location || '';
+
+  const overallDeltaTeam = overall - teamOverall;
+  const trendPillUp = overallTrend === 'up';
+  const trendPillDown = overallTrend === 'down';
+
+  const el = g('rep-detail');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="profile-header">
+      <div class="profile-avatar">${ini(repName)}</div>
+      <div>
+        <div class="profile-name">${esc(repName)}</div>
+        <div class="profile-meta">${repLocation ? esc(repLocation) + ' · ' : ''}${rc.length} total · ${sc.length} scored${myRank > 0 ? ` · ranked #${myRank} of ${ranked.length}` : ''}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="exportPDFRep('${esc(repName)}')">↓ PDF report</button>
+        <button class="btn btn-secondary btn-sm" onclick="libFilters={rep:'${esc(repName)}',out:'',score:'',search:'',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};nav('library')">View all calls</button>
+      </div>
+    </div>
+
+    <div class="hero-grid">
+      <div class="hero-card featured">
+        <div class="hero-label">Performance · ${esc(verdictLine)} ${overallTrend !== 'flat' ? `<span class="trend-pill ${trendPillUp?'up':'down'}">${trendPillUp?'↑':'↓'} ${Math.abs(overallDelta).toFixed(1)}</span>` : ''}</div>
+        <div class="hero-value">${overall.toFixed(1)}<span class="hero-value-suffix">/10</span></div>
+        <div class="hero-detail">${sc.length} scored calls${myRank > 0 ? ` · ranked #${myRank} of ${ranked.length} reps` : ''}</div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Booking Rate ${bookingDelta !== 0 ? `<span class="trend-pill ${bookingDelta>0?'up':'down'}">${bookingDelta>0?'↑':'↓'} ${Math.abs(bookingDelta)}%</span>` : ''}</div>
+        <div class="hero-value">${bookingRate}<span class="hero-value-suffix">%</span></div>
+        <div class="hero-detail">${booked} booked of ${sc.length}</div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Avg Call Length</div>
+        <div class="hero-value">${avgMinutes}<span class="hero-value-suffix">min</span></div>
+        <div class="hero-detail">${repTalkAvg > 0 ? `${repTalkAvg}% rep, ${custTalkAvg}% customer` : 'No talk ratio data'}</div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-label">Compliance ${compDelta !== 0 ? `<span class="trend-pill ${compDelta>0?'up':'down'}">${compDelta>0?'↑':'↓'} ${Math.abs(compDelta)}%</span>` : ''}</div>
+        <div class="hero-value">${compPct}<span class="hero-value-suffix">%</span></div>
+        <div class="hero-detail">checklist items hit</div>
+      </div>
+    </div>
+
+    ${skillCardsHtml}
+
+    <div class="two-col" style="grid-template-columns:1fr 1fr">
+      <div class="panel" style="padding:22px">
+        <div class="panel-header" style="padding:0 0 18px;border:none">
+          <div class="panel-title">Score profile</div>
+          <div class="panel-meta">vs team avg</div>
+        </div>
+        <div class="score-card" style="border:none;padding:0">
+          ${scoreProfileRows || '<div style="color:var(--ink3);font-size:13px">Not enough scored calls yet.</div>'}
+        </div>
+      </div>
+
+      <div class="panel" style="padding:22px">
+        <div class="panel-header" style="padding:0 0 18px;border:none">
+          <div class="panel-title">Performance trend</div>
+          <div class="panel-meta">overall · last ${trendCalls.length} calls</div>
+        </div>
+        <div class="profile-trend-frame">${trendBars}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:10px;font-family:var(--font-label);font-size:10px;color:var(--ink3);letter-spacing:0.08em;font-weight:500">
+          <span>OLDEST</span>
+          <span>RECENT</span>
+        </div>
+        ${oldest.length > 1 ? `<div class="profile-trend-summary">
+          <div>
+            <div class="profile-trend-summary-label">First half avg</div>
+            <div class="profile-trend-summary-val">${firstHalfAvg.toFixed(1)}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="profile-trend-summary-label">Recent half avg</div>
+            <div class="profile-trend-summary-val ${overallTrend==='up'?'score-good':overallTrend==='down'?'score-low':''}">${recentHalfAvg.toFixed(1)} ${overallTrend !== 'flat' ? `<span class="trend-pill ${overallTrend==='up'?'up':'down'}" style="font-size:11px;vertical-align:middle">${overallTrend==='up'?'↑':'↓'} ${Math.abs(overallDelta).toFixed(1)}</span>` : ''}</div>
+          </div>
+        </div>` : ''}
+      </div>
+    </div>
+
+    ${(topStr.length || topCoach.length) ? `<div class="two-col" style="grid-template-columns:1fr 1fr;margin-top:16px">
+      ${topStr.length ? `<div class="profile-list-panel">
+        <div class="profile-list-panel-title">Top strengths</div>
+        <ul class="profile-list strengths">
+          ${topStr.map(([s,n]) => `<li>${esc(s)}<span class="profile-list-count">${n}×</span></li>`).join('')}
+        </ul>
+      </div>` : ''}
+      ${topCoach.length ? `<div class="profile-list-panel">
+        <div class="profile-list-panel-title">Recurring coaching points</div>
+        <ul class="profile-list">
+          ${topCoach.map(([p,n]) => `<li>${esc(p)}<span class="profile-list-count">${n}×</span></li>`).join('')}
+        </ul>
+      </div>` : ''}
+    </div>` : ''}
+
+    ${recentCallsHtml ? `<div class="panel" style="margin-top:16px">
+      <div class="panel-header">
+        <div class="panel-title">Recent calls</div>
+        <div class="panel-meta">${rc.length} total · click to open in library</div>
+      </div>
+      <div class="call-list" style="border:none;border-radius:0">${recentCallsHtml}</div>
+    </div>` : ''}
+  `;
+  el.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// ── MANAGEMENT ──
+let expandedRep=null;
+function renderManagement(){
+  const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
+  // Also show unmatched reps — in calls but no roster record
+  const rosterNames=new Set(reps.flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
+  const unmatched=repNames.filter(r=>!rosterNames.has(r));
+
+  const rows=repNames.map(r=>{
+    const cnt=allCalls.filter(c=>c.rep_name===r).length;
+    const sc2=allCalls.filter(c=>c.rep_name===r&&!c.exclude_from_scoring);
+    const avgO=sc2.length?(sc2.reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/sc2.length).toFixed(1):'—';
+    const dbRep=reps.find(rep=>rep.full_name===r||rep.nickname===r);
+    const isExpanded=expandedRep===r;
+    const locs=[...new Set(reps.map(rr=>rr.location).filter(Boolean))].sort();
+    const locOpts=locs.map(l=>`<option value="${esc(l)}"${l===dbRep?.location?' selected':''}>${esc(l)}</option>`).join('');
+    const otherReps=repNames.filter(x=>x!==r).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+
+    const locCell=dbRep?.location
+      ?`<span class="loc-tag">${esc(dbRep.location)}</span>`
+      :`<span class="rmgmt-loc-empty">⚠ Unset</span>`;
+
+    const editPanel=isExpanded?`<tr class="rmgmt-edit-row" id="panel-${esc(r)}"><td colspan="6">
+      <div class="rmgmt-edit-panel">
+        <div class="rmgmt-edit-block">
+          <div class="rmgmt-edit-block-label">Rename</div>
+          <div class="rmgmt-edit-row-controls">
+            <input type="text" id="ren-${esc(r)}" class="ovr-inp" placeholder="New name" />
+            <button class="btn btn-p btn-xs" onclick="doInlineRename('${esc(r)}')">Save</button>
+          </div>
+          <div class="rmgmt-edit-msg" id="ren-msg-${esc(r)}"></div>
+        </div>
+        <div class="rmgmt-edit-block">
+          <div class="rmgmt-edit-block-label">Location</div>
+          <div class="rmgmt-edit-row-controls">
+            <input type="text" id="loc-${esc(r)}" class="ovr-inp" value="${esc(dbRep?.location||'')}" placeholder="e.g. Fayetteville" list="loc-dl-${esc(r)}" />
+            <datalist id="loc-dl-${esc(r)}">${locOpts}</datalist>
+            <button class="btn btn-p btn-xs" onclick="doInlineLoc('${esc(r)}','${esc(dbRep?.id||'')}')">Save</button>
+          </div>
+          <div class="rmgmt-edit-msg" id="loc-msg-${esc(r)}"></div>
+        </div>
+        <div class="rmgmt-edit-block danger">
+          <div class="rmgmt-edit-block-label">Merge into</div>
+          <div class="rmgmt-edit-row-controls">
+            <select id="merge-${esc(r)}" class="fsel" style="font-size:12px;padding:6px 8px"><option value="">— select rep —</option>${otherReps}</select>
+            <button class="btn btn-d btn-xs" onclick="doInlineMerge('${esc(r)}')">Merge</button>
+          </div>
+          <div class="rmgmt-edit-hint">Moves all ${cnt} calls to the selected rep.</div>
+        </div>
+      </div>
+    </td></tr>`:'';
+
+    return`<tr class="rmgmt-row${isExpanded?' expanded':''}" onclick="expandedRep=expandedRep==='${esc(r)}'?null:'${esc(r)}';renderManagement()">
+      <td><div class="rmgmt-name"><span class="rmgmt-name-chev">▶</span>${esc(r)}</div></td>
+      <td class="col-loc">${locCell}</td>
+      <td class="col-calls">${cnt}</td>
+      <td class="col-score">${chip(avgO)}</td>
+      <td class="col-status"><span class="rmgmt-status-pill">Active</span></td>
+      <td class="col-actions" onclick="event.stopPropagation()"><button class="btn btn-g btn-xs" onclick="libFilters.rep='${esc(r)}';nav('library')">View calls</button></td>
+    </tr>${editPanel}`;
+  }).join('');
+
+  const job=window._lastJobStatus||{status:'idle'};
+
+  // ── UNMATCHED REPS PANEL ──
+  const unmatchedHtml=unmatched.length?`<div class="mgmt-unmatched-card">
+    <div class="mgmt-unmatched-head">
+      <div class="mgmt-unmatched-title">⚠ Unmatched reps</div>
+      <span class="mgmt-unmatched-count">${unmatched.length} ${unmatched.length===1?'name':'names'}</span>
+    </div>
+    <div class="mgmt-unmatched-desc">These names appear in calls but have no roster record. They may be customers misidentified as reps, or reps not yet added.</div>
+    ${unmatched.map(r=>{
+      const cnt=allCalls.filter(c=>c.rep_name===r).length;
+      const otherReps=repNames.filter(x=>x!==r).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+      return`<div class="mgmt-unmatched-row">
+        <span class="mgmt-unmatched-name">${esc(r)}</span>
+        <span class="mgmt-unmatched-count-meta">${cnt} call${cnt!==1?'s':''}</span>
+        <button class="btn btn-p btn-xs" onclick="createRepFromName('${esc(r)}')">+ Add to roster</button>
+        <select id="um-merge-${esc(r)}" class="fsel" style="font-size:11px;padding:4px 7px;max-width:160px"><option value="">Merge into…</option>${otherReps}</select>
+        <button class="btn btn-g btn-xs" onclick="doUnmatchedMerge('${esc(r)}')">Merge</button>
+      </div>`;
+    }).join('')}
+  </div>`:'';
+
+  // ── RE-ANALYZE SUMMARY ──
+  const reanalyzeBody=job.status==='complete'&&job.summary?`
+    <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:4px">Completed ${fmt(job.summary.finished_at)}</div>
+    <div class="mgmt-stat-row">
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${job.summary.succeeded}</div><div class="mgmt-stat-cell-label">Succeeded</div></div>
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${job.summary.skipped}</div><div class="mgmt-stat-cell-label">Skipped</div></div>
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${job.summary.errors}</div><div class="mgmt-stat-cell-label">Errors</div></div>
+      <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${job.summary.total}</div><div class="mgmt-stat-cell-label">Total</div></div>
+    </div>
+    ${job.failed_calls&&job.failed_calls.length?`<div class="mgmt-failed-list">
+      <div class="mgmt-failed-list-title">Failed calls</div>
+      ${job.failed_calls.map(f=>`<div style="padding:2px 0">${esc(f.filename)} — ${esc(f.error)}</div>`).join('')}
+    </div>`:''}
+  `:`<div class="mgmt-empty-line">No completed runs yet.</div>`;
+
+  set('page',`
+    ${unmatchedHtml}
+    <div class="mgmt-grid">
+      <div class="mgmt-card">
+        <div class="mgmt-card-head">
+          <div class="mgmt-card-title">Rep Roster</div>
+          <button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button>
+        </div>
+        <p class="mgmt-card-subtitle">Click a rep to expand editing options.</p>
+        <div class="mgmt-card-body flush">
+          <table class="rmgmt-table-v2">
+            <colgroup>
+              <col class="col-name" />
+              <col class="col-loc" />
+              <col class="col-calls" />
+              <col class="col-score" />
+              <col class="col-status" />
+              <col class="col-actions" />
+            </colgroup>
+            <thead><tr>
+              <th>Name</th>
+              <th class="col-loc">Location</th>
+              <th class="col-calls">Calls</th>
+              <th class="col-score">Avg Score</th>
+              <th class="col-status">Status</th>
+              <th class="col-actions"></th>
+            </tr></thead>
+            <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="mgmt-stack">
+        <div class="mgmt-card">
+          <div class="mgmt-card-head">
+            <div class="mgmt-card-title">AI Deduplication</div>
+          </div>
+          <div class="mgmt-card-body">
+            <p style="font-size:12px;color:var(--ink3);margin:0 0 12px">Find rep names that may refer to the same person.</p>
+            <button class="btn btn-s btn-sm" onclick="runDedup()" id="dedup-btn">🔍 Check for duplicates</button>
+            <div id="dedup-results" style="margin-top:12px"></div>
+          </div>
+        </div>
+        <div class="mgmt-card">
+          <div class="mgmt-card-head">
+            <div class="mgmt-card-title">Last Bulk Re-Analyze</div>
+          </div>
+          <div class="mgmt-card-body">
+            <p style="font-size:12px;color:var(--ink3);margin:0 0 10px">Job results from the most recent bulk re-analyze. The action has moved to the Call Library — <a href="javascript:void(0)" onclick="nav('library')" style="color:var(--lg-green-dark);font-weight:500">go there</a> to start a new run.</p>
+            ${reanalyzeBody}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-bg" id="add-rep-modal" style="display:none"><div class="modal-box"><h2>Add Rep</h2>
+      <div class="fg"><label>Full name *</label><input type="text" id="new-rep-name" placeholder="e.g. Caleb" /></div>
+      <div class="fg"><label>Nickname</label><input type="text" id="new-rep-nick" placeholder="e.g. C" /></div>
+      <div class="fg"><label>Location tag</label><input type="text" id="new-rep-loc" placeholder="e.g. Fayetteville" /></div>
+      <div id="add-rep-msg"></div>
+      <div class="modal-btns"><button class="btn btn-g" onclick="g('add-rep-modal').style.display='none'">Cancel</button><button class="btn btn-p" onclick="doAddRep()">Add Rep</button></div>
+    </div></div>`);
+}
+
+async function doInlineRename(repName){
+  const el=g('ren-'+repName),msg=g('ren-msg-'+repName);
+  const n=el?.value?.trim();if(!n){if(msg)msg.innerHTML='<span style="color:var(--red)">Enter a new name</span>';return;}
+  try{
+    const r=await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:repName,new_name:n})});
+    const res=await r.json();if(!r.ok)throw new Error(res.error);
+    allCalls.forEach(c=>{if(c.rep_name===repName)c.rep_name=n;});
+    if(msg)msg.innerHTML=`<span style="color:var(--g)">✓ Renamed ${res.renamed} calls</span>`;
+    expandedRep=n;setTimeout(()=>renderManagement(),1200);
+  }catch(e){if(msg)msg.innerHTML=`<span style="color:var(--red)">${e.message}</span>`;}
+}
+async function doInlineLoc(repName,repId){
+  const el=g('loc-'+repName),msg=g('loc-msg-'+repName);
+  const loc=el?.value?.trim()||'';
+  try{
+    if(repId){
+      await fetch(API+'/reps/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:repId,location:loc})});
+      const idx=reps.findIndex(r=>r.id===repId);if(idx>=0)reps[idx].location=loc;
+    } else {
+      const r=await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:repName,nickname:'',location:loc})});
+      const saved=await r.json();if(!r.ok)throw new Error(saved.error||'Failed');
+      await loadReps();
+    }
+    populateLocFilter();
+    if(msg)msg.innerHTML=`<span style="color:var(--g)">✓ Saved</span>`;
+    setTimeout(()=>renderManagement(),1000);
+  }catch(e){if(msg)msg.innerHTML=`<span style="color:var(--red)">${e.message}</span>`;}
+}
+async function doInlineMerge(repName){
+  const sel=g('merge-'+repName);
+  const target=sel?.value;
+  if(!target){alert('Select a rep to merge into');return;}
+  const cnt=allCalls.filter(c=>c.rep_name===repName).length;
+  if(!confirm(`Merge all ${cnt} calls from "${repName}" into "${target}"? This cannot be undone.`))return;
+  try{
+    await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:repName,new_name:target})});
+    allCalls.forEach(c=>{if(c.rep_name===repName)c.rep_name=target;});
+    expandedRep=null;renderManagement();
+  }catch(e){alert(e.message);}
+}
+async function createRepFromName(repName){
+  try{
+    await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:repName,nickname:'',location:''})});
+    await loadReps();renderManagement();
+  }catch(e){alert(e.message);}
+}
+async function doUnmatchedMerge(repName){
+  const sel=g('um-merge-'+repName);
+  const target=sel?.value;
+  if(!target){alert('Select a rep to merge into');return;}
+  const cnt=allCalls.filter(c=>c.rep_name===repName).length;
+  if(!confirm(`Merge all ${cnt} calls from "${repName}" into "${target}"?`))return;
+  try{
+    await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:repName,new_name:target})});
+    allCalls.forEach(c=>{if(c.rep_name===repName)c.rep_name=target;});
+    renderManagement();
+  }catch(e){alert(e.message);}
+}
+function openAddRepModal(){g('new-rep-name').value='';g('new-rep-nick').value='';g('new-rep-loc').value='';g('add-rep-msg').innerHTML='';g('add-rep-modal').style.display='flex';}
+async function doAddRep(){
+  const name=g('new-rep-name').value.trim();if(!name){g('add-rep-msg').innerHTML='<div class="msg-err">Name required</div>';return;}
+  try{await fetch(API+'/reps/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full_name:name,nickname:g('new-rep-nick').value.trim(),location:g('new-rep-loc').value.trim()})});await loadReps();populateLocFilter();g('add-rep-msg').innerHTML='<div class="msg-ok">✓ Added</div>';setTimeout(()=>{g('add-rep-modal').style.display='none';renderManagement();},1000);}catch(e){g('add-rep-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+async function runDedup(){
+  const btn=g('dedup-btn'),res=g('dedup-results');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Analyzing…';
+  try{const r=await fetch(API+'/reps/deduplicate',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await r.json();btn.disabled=false;btn.textContent='🔍 Check for duplicates';
+    if(!data.suggestions?.length){res.innerHTML='<div class="msg-ok">✓ No duplicates found</div>';return;}
+    res.innerHTML=data.suggestions.map((s,i)=>`<div style="background:var(--al);border:1.5px solid #f5d070;border-radius:9px;padding:12px;margin-bottom:8px"><div style="font-size:11px;font-weight:700;margin-bottom:3px">${Math.round(s.confidence*100)}% confidence</div><div style="font-size:12px;margin-bottom:5px"><strong>${esc(s.canonical)}</strong> ← ${s.variants.map(v=>esc(v)).join(', ')}</div><div style="font-size:11px;color:var(--ink3);margin-bottom:8px">${esc(s.reason)}</div><div style="display:flex;gap:6px"><button class="btn btn-p btn-xs" onclick="acceptDedup('${esc(s.canonical)}',${JSON.stringify(s.variants)})">Accept & merge</button><button class="btn btn-g btn-xs" onclick="this.closest('[style]').remove()">Dismiss</button></div></div>`).join('');
+  }catch(e){btn.disabled=false;btn.textContent='🔍 Check for duplicates';res.innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+async function acceptDedup(canonical,variants){
+  for(const v of variants){if(v===canonical)continue;try{await fetch(API+'/reps/bulk_rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_name:v,new_name:canonical})});allCalls.forEach(c=>{if(c.rep_name===v)c.rep_name=canonical;});}catch(e){}}
+  renderManagement();
+}
+async function checkUnscored(){
+  const el=g('unscored-results');
+  if(el)el.innerHTML='<span class="spin spin-dark"></span> Checking…';
+  try{
+    const r=await fetch(API+'/reanalyze/unscored');
+    const d=await r.json();
+    if(!el)return;
+    if(d.unscored_count===0){
+      el.innerHTML='<div class="msg-ok">✓ All '+d.total+' calls have scores.</div>';
+    } else {
+      el.innerHTML=`<div style="background:var(--al);border:1px solid var(--amber);border-radius:9px;padding:12px 14px">
+        <div style="font-weight:700;color:var(--amber);margin-bottom:8px">⚠ ${d.unscored_count} of ${d.total} calls have no scores</div>
+        <div style="max-height:180px;overflow-y:auto">${d.unscored.map(c=>`<div style="font-size:11px;color:var(--ink2);padding:2px 0;border-bottom:1px solid rgba(255,183,77,.15)">${esc(c.filename||c.id)} <span style="color:var(--ink3)">${fmt(c.created_at)}</span></div>`).join('')}</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--ink3)">Run Bulk Re-Analyze to process these calls.</div>
+      </div>`;
+    }
+  }catch(e){if(el)el.innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+async function stopReanalyze(silent){
+  if(!silent && !confirm('Stop the re-analyze job? Progress so far will be saved — you can restart later.'))return false;
+  try{
+    const r = await fetch(API+'/reanalyze/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d = await r.json();
+    if(!r.ok){throw new Error(d.error || 'Server returned ' + r.status);}
+    window._lastJobStatus={...window._lastJobStatus,stop_requested:true};
+    updateStatusBar();
+    if(currentPage==='management')renderManagement();
+    return true;
+  }catch(e){
+    if(!silent) showToast('Stop failed: '+e.message, 'error');
+    return false;
+  }
+}
+async function stopBatchUpload(silent){
+  if(!silent && !confirm('Stop the batch upload? Files already processed will remain saved.'))return false;
+  try{
+    const r = await fetch(API+'/batch_upload/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d = await r.json();
+    if(!r.ok){throw new Error(d.error || 'Server returned ' + r.status);}
+    window._lastBatchStatus={...window._lastBatchStatus,stop_requested:true};
+    updateStatusBar();
+    return true;
+  }catch(e){
+    if(!silent) showToast('Stop failed: '+e.message, 'error');
+    return false;
+  }
+}
+// Global stop button — stops everything that's currently running
+async function stopAllOperations(){
+  const reanalyzeRunning = window._lastJobStatus && window._lastJobStatus.status === 'running';
+  const batchRunning = window._lastBatchStatus && window._lastBatchStatus.status === 'running';
+  if(!reanalyzeRunning && !batchRunning){
+    showToast('No operations are currently running', 'info');
+    return;
+  }
+  const things = [];
+  if(reanalyzeRunning) things.push('bulk re-analyze');
+  if(batchRunning) things.push('batch upload');
+  if(!confirm('Stop all active operations? (' + things.join(' + ') + ')\n\nProgress so far will be saved.')) return;
+  // Send stop signals in parallel — neither blocks the other
+  const ops = [];
+  if(reanalyzeRunning) ops.push(stopReanalyze(true));
+  if(batchRunning) ops.push(stopBatchUpload(true));
+  const results = await Promise.all(ops);
+  if(results.every(r => r)){
+    showToast('Stop signal sent — operations will halt shortly', 'info');
+  } else {
+    showToast('One or more stop signals failed — check status', 'error');
+  }
+}
+async function startReanalyze(){
+  const btn=g('reanalyze-btn');btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Starting…';
+  try{
+    const r=await fetch(API+'/reanalyze/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d=await r.json();
+    if(d.blocked){
+      btn.disabled=false;btn.innerHTML='⚡ Start bulk re-analyze';
+      alert('A batch upload is currently running. Wait for it to finish before starting bulk re-analyze — running both at the same time can crash the server.');
+      return;
+    }
+    startReanalPoller();
+  }catch(e){btn.disabled=false;btn.innerHTML='⚡ Start bulk re-analyze';alert('Failed: '+e.message);}
+}
+function startReanalPoller(){
+  if(reanalyzePoller)clearInterval(reanalyzePoller);
+  reanalyzePoller=setInterval(async()=>{
+    try{const r=await fetch(API+'/reanalyze/status');const d=await r.json();window._lastJobStatus=d;
+      const prog=g('reanalyze-prog');if(prog&&d.total)prog.style.width=Math.round(d.processed/d.total*100)+'%';
+      const stat=g('reanalyze-status');if(stat)stat.textContent=`Processing ${d.processed}/${d.total}: ${d.current||'…'}`;
+      const btn=g('reanalyze-btn');
+      if(d.status==='complete'||d.status==='error'){clearInterval(reanalyzePoller);reanalyzePoller=null;if(btn){btn.disabled=false;btn.textContent='⚡ Start bulk re-analyze';}await loadCalls();if(currentPage==='management')renderManagement();}
+      else if(btn){btn.disabled=true;btn.innerHTML='<span class="spin spin-dark"></span> Running…';}
+    }catch(e){}
+  },2500);
+}
+async function checkReanalStatus(){try{const r=await fetch(API+'/reanalyze/status');const d=await r.json();window._lastJobStatus=d;if(d.status==='running')startReanalPoller();}catch(e){}}
+
+// ── SHARED VIEWS ──
+function renderShared(){
+  const origin=window.location.origin;
+  const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
+  const locations=[...new Set(reps.map(r=>r.location).filter(Boolean))].sort();
+  set('page',`
+    <div class="mgmt-card">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Shared Views</div>
+        <button class="btn btn-p btn-sm" onclick="openCreateShare()">+ Create share link</button>
+      </div>
+      <p class="mgmt-card-subtitle">Read-only scoped views for location managers or reps. Links never expire unless deleted.</p>
+      <div class="mgmt-card-body">
+      ${sharedViews.length?sharedViews.map(v=>{const url=`${origin}/share/${v.token}`;const rc=v.rep_ids?.length||0;return`<div class="sv-item"><span class="sv-type ${v.view_type==='rep'?'sv-loc':'sv-mgr'}">${v.view_type==='rep'?'👤 Rep':'📍 Location'}</span><div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;margin-bottom:2px">${esc(v.label||'Untitled')}</div><div class="sv-url">${url}</div></div><div style="font-size:11px;color:var(--ink3);text-align:right;flex-shrink:0">${rc} rep${rc!==1?'s':''}<br>${fmt(v.created_at)}</div><button class="btn btn-g btn-xs" onclick="copyToClip('${url}')">Copy</button><button class="btn btn-d btn-xs" onclick="deleteShare('${v.id}')">Delete</button></div>`;}).join(''):`<div class="empty"><span class="empty-ico">📤</span><p>No share links yet.</p></div>`}
+      </div>
+    </div>
+    <div class="modal-bg" id="create-share-modal" style="display:none"><div class="modal-box">
+      <h2>Create Share Link</h2>
+      <div class="fg"><label>Label</label><input type="text" id="share-label" placeholder="e.g. Fayetteville Team — April 2026" /></div>
+      <div class="fg"><label>View type</label>
+        <div class="share-toggle" style="margin-top:6px">
+          <button id="share-loc-btn" class="active" onclick="setShareType('location')">📍 Location (multiple reps)</button>
+          <button id="share-rep-btn" onclick="setShareType('rep')">👤 Single rep</button>
+        </div>
+      </div>
+      <div id="share-loc-section">
+        <div class="fg"><label>Select reps</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:200px;overflow-y:auto;background:var(--surface);border:1.5px solid var(--border);border-radius:9px;padding:10px">
+            ${repNames.map(r=>`<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" class="share-rep-cb" value="${esc(r)}" />${esc(r)}</label>`).join('')}
+          </div>
+        </div>
+        ${locations.length?`<div class="fg"><label>Or select by location</label><select id="share-loc-sel" onchange="selectRepsByLoc(this.value)" style="width:100%;padding:8px 11px;border:1.5px solid var(--border);border-radius:9px;font-family:'Inter',sans-serif;outline:none"><option value="">— choose location —</option>${locations.map(l=>`<option value="${esc(l)}">${esc(l)}</option>`).join('')}</select></div>`:''}
+      </div>
+      <div id="share-rep-section" style="display:none">
+        <div class="fg"><label>Select rep</label><select id="share-single-rep" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-family:'Inter',sans-serif;outline:none"><option value="">— choose rep —</option>${repNames.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select></div>
+      </div>
+      <div id="share-result"></div>
+      <div class="modal-btns"><button class="btn btn-g" onclick="g('create-share-modal').style.display='none'">Cancel</button><button class="btn btn-p" onclick="createShare()">Generate link</button></div>
+    </div></div>`);
+}
+function setShareType(t){shareType=t;g('share-loc-btn').classList.toggle('active',t==='location');g('share-rep-btn').classList.toggle('active',t==='rep');g('share-loc-section').style.display=t==='location'?'block':'none';g('share-rep-section').style.display=t==='rep'?'block':'none';}
+function selectRepsByLoc(loc){if(!loc)return;const lr=reps.filter(r=>r.location===loc).map(r=>r.full_name);document.querySelectorAll('.share-rep-cb').forEach(cb=>{cb.checked=lr.includes(cb.value);});}
+function openCreateShare(){g('share-result').innerHTML='';g('share-label').value='';g('create-share-modal').style.display='flex';}
+async function createShare(){
+  const label=g('share-label').value.trim();let repIds=[];
+  if(shareType==='location'){repIds=[...document.querySelectorAll('.share-rep-cb:checked')].map(cb=>cb.value);if(!repIds.length){g('share-result').innerHTML='<div class="msg-err">Select at least one rep</div>';return;}}
+  else{const single=g('share-single-rep').value;if(!single){g('share-result').innerHTML='<div class="msg-err">Select a rep</div>';return;}repIds=[single];}
+  try{const r=await fetch(API+'/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label,view_type:shareType,view_level:'manager',rep_ids:repIds})});const data=await r.json();if(!r.ok)throw new Error(data.error);const url=`${window.location.origin}/share/${data.token}`;g('share-result').innerHTML=`<div class="msg-ok">✓ Created!<br><a href="${url}" target="_blank" style="font-family:'JetBrains Mono',monospace;font-size:11px">${url}</a><button class="btn btn-g btn-xs" style="margin-left:8px;margin-top:6px" onclick="copyToClip('${url}')">Copy</button></div>`;await loadSharedViews();setTimeout(()=>renderShared(),1500);}catch(e){g('share-result').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+async function deleteShare(id){if(!confirm('Delete?'))return;try{await fetch(API+'/share/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});sharedViews=sharedViews.filter(v=>v.id!==id);renderShared();}catch(e){}}
+function copyToClip(url){navigator.clipboard?.writeText(url).then(()=>{alert('Copied!');}).catch(()=>prompt('Copy link:',url));}
+
+// ── CORRECTIONS ──
+async function renderCorrections(){
+  await loadCorrections();
+  set('page',`<div class="mgmt-card">
+    <div class="mgmt-card-head">
+      <div class="mgmt-card-title">Correction Log</div>
+      <span class="bdg">${corrections.length} corrections</span>
+    </div>
+    <p class="mgmt-card-subtitle">Score corrections are automatically included in future Claude analysis calls as calibration examples.</p>
+    <div class="mgmt-card-body">
+    ${corrections.length?corrections.map(c=>`<div class="corr-item"><div><span style="font-weight:600">${c.category?.replace(/_/g,' ')||'unknown'}</span> <span style="color:var(--lg-red)">${c.original_score}</span> <span style="color:var(--lg-green-dark)">→ ${c.corrected_score}</span> <span style="color:var(--ink3);font-size:11px;margin-left:8px">${fmt(c.created_at)}</span>${c.used_in_prompt?'<span class="rmgmt-status-pill" style="margin-left:6px">Active</span>':''}</div>${c.manager_note?`<div style="color:var(--ink3);margin-top:2px;font-size:11px">${esc(c.manager_note)}</div>`:''}</div>`).join(''):`<div class="empty"><span class="empty-ico">✏️</span><p>No corrections yet. Use score override in any call to log a correction.</p></div>`}
+    </div>
+  </div>`);
+}
+
+// ── ADD CALLS ──
+function renderAdd(){
+  set('page',`<div style="max-width:680px;margin:0 auto"><div class="mgmt-card">
+    <div class="mgmt-card-head">
+      <div class="mgmt-card-title">Add Call Analysis</div>
+    </div>
+    <div class="mgmt-card-body">
+    <div class="tabs">
+      <div class="tab${addTab==='audio'?' active':''}" onclick="switchAddTab('audio')">🎙 Audio</div>
+      <div class="tab${addTab==='paste'?' active':''}" onclick="switchAddTab('paste')">📋 Paste Transcript</div>
+      <div class="tab${addTab==='file'?' active':''}" onclick="switchAddTab('file')">📄 Upload .txt</div>
+      <div class="tab${addTab==='bulk'?' active':''}" onclick="switchAddTab('bulk')">📦 Bulk ZIP Upload</div>
+    </div>
+    <div id="add-audio" style="display:${addTab==='audio'?'block':'none'}">
+      <div style="background:var(--lg-green-bg);border:1px solid var(--lg-green-soft);border-radius:9px;padding:10px 14px;font-size:12px;color:var(--lg-green-dark);margin-bottom:14px;font-weight:500">🎙 Drop multiple files or a ZIP. Processed 3 at a time. Duplicates skipped automatically.</div>
+      <div class="drop-zone" id="audio-drop" onclick="g('audio-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleDrop(event)">
+        <span class="dz-ico">🎙</span><div class="dz-title">Drop audio files or a ZIP here</div><div class="dz-sub">MP3, M4A, WAV, OGG — or a Vonage ZIP export</div>
+      </div>
+      <input type="file" id="audio-input" accept="audio/*,.mp3,.m4a,.wav,.ogg,.mp4,.zip" multiple style="display:none" onchange="handleSelect(this.files)" />
+      <div style="margin-top:14px;display:flex;justify-content:flex-end"><button class="btn btn-p" id="add-audio-btn" onclick="submitAudio()" disabled>Analyze & Save</button></div>
+      <div id="audio-queue" style="display:none;margin-top:12px"><div style="font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.1em;font-family:var(--font-label);margin-bottom:8px">Queue</div><div id="audio-queue-list"></div></div>
+      <div id="audio-progress" style="display:none;margin-top:10px"><div class="prog"><div class="prog-fill" id="audio-prog-bar" style="width:0%"></div></div><div class="prog-label" id="audio-prog-text">Preparing…</div><div id="audio-skipped" style="display:none;margin-top:8px"><div style="font-size:11px;font-weight:600;color:var(--lg-gold-dark, #8A6420);margin-bottom:4px">Skipped:</div><div id="audio-skipped-list" style="font-size:11px;color:var(--ink3)"></div></div></div>
+      <div id="add-audio-msg"></div>
+    </div>
+    <div id="add-paste" style="display:${addTab==='paste'?'block':'none'}">
+      <div class="fg"><label>Rep Name</label><input type="text" id="paste-rep" placeholder="Will auto-detect from transcript" /></div>
+      <div class="fg"><label>Call Outcome</label><select id="paste-out"><option value="unknown">Let AI decide</option><option value="booked">Booked</option><option value="estimate_sent">Estimate sent</option><option value="lost">Lost</option></select></div>
+      <div class="fg"><label>Transcript *</label><textarea id="paste-tx" placeholder="Paste transcript here…"></textarea></div>
+      <div id="paste-msg"></div>
+      <div style="text-align:right;margin-top:10px"><button class="btn btn-p" id="paste-btn" onclick="submitPaste()">Analyze & Save</button></div>
+    </div>
+    <div id="add-bulk" style="display:${addTab==='bulk'?'block':'none'}">
+      <div style="background:var(--lg-green-bg);border:1px solid var(--lg-green-soft);border-radius:10px;padding:11px 14px;font-size:12.5px;color:var(--lg-green-dark);margin-bottom:16px;line-height:1.6">
+        📦 Upload a ZIP file containing MP3s. Processing runs entirely in the background — you can close this tab and come back. All files are deduplicated automatically.
+        <br><br>
+        <span style="font-size:11px;color:var(--ink3)">If files were skipped as duplicates after a failed upload, use <a href="#" onclick="cleanupEmptyRecords(event)" style="color:var(--lg-green);font-weight:600">Clean up incomplete records</a> to remove them and re-upload.</span>
+      </div>
+      <div class="drop-zone" id="bulk-drop" onclick="g('bulk-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleBulkDrop(event)">
+        <span class="dz-ico">📦</span><div class="dz-title">Drop a Vonage ZIP here</div><div class="dz-sub">All MP3s inside will be queued automatically</div>
+      </div>
+      <input type="file" id="bulk-input" accept=".zip,application/zip" style="display:none" onchange="handleBulkSelect(this.files[0])" />
+      <div style="margin-top:14px;display:flex;justify-content:flex-end">
+        <button class="btn btn-p" id="bulk-btn" onclick="startBulkUpload()" disabled>Start Background Upload</button>
+      </div>
+      <div id="bulk-file-info" style="display:none;margin-top:12px;padding:10px 14px;background:var(--surface);border-radius:10px;border:1px solid var(--border);font-size:13px;color:var(--ink2)"></div>
+      <div id="bulk-progress" style="display:none;margin-top:12px">
+        <div class="prog"><div class="prog-fill" id="bulk-prog-bar" style="width:0%"></div></div>
+        <div class="prog-label" id="bulk-prog-text" style="margin-top:6px">Waiting…</div>
+      </div>
+      <div id="bulk-msg"></div>
+    </div>
+    <div id="add-file" style="display:${addTab==='file'?'block':'none'}">
+      <div class="fg"><label>Rep Name</label><input type="text" id="file-rep" placeholder="Will auto-detect" /></div>
+      <div class="fg"><label>Call Outcome</label><select id="file-out"><option value="unknown">Let AI decide</option><option value="booked">Booked</option><option value="estimate_sent">Estimate sent</option><option value="lost">Lost</option></select></div>
+      <div class="fg"><label>Transcript file (.txt)</label><input type="file" id="file-input" accept=".txt,text/plain" /></div>
+      <div id="file-msg"></div>
+      <div style="text-align:right;margin-top:10px"><button class="btn btn-p" id="file-btn" onclick="submitFile()">Analyze & Save</button></div>
+    </div>
+    </div>
+  </div></div>`);
+  // Reattach to any in-progress batch so the local progress bar updates even if we navigated away
+  reattachBulkIfRunning();
+}
+function switchAddTab(t){addTab=t;['audio','paste','file','bulk'].forEach(x=>{const el=g('add-'+x);if(el)el.style.display=x===t?'block':'none';});document.querySelectorAll('.tab').forEach((el,i)=>{el.classList.toggle('active',['audio','paste','file','bulk'][i]===t);});}
+function handleDrop(e){e.preventDefault();g('audio-drop').classList.remove('drag');handleFilesWithZip([...e.dataTransfer.files]);}
+function handleSelect(files){handleFilesWithZip([...files]);}
+async function handleFilesWithZip(files){
+  const zipFiles=files.filter(f=>f.name.toLowerCase().endsWith('.zip')||f.type.includes('zip'));
+  const audioOnly=files.filter(f=>f.type.startsWith('audio/')||f.name.match(/\.(mp3|m4a|wav|ogg|mp4|webm)$/i));
+  if(zipFiles.length){
+    const list=g('audio-queue-list'),queue=g('audio-queue');
+    if(queue)queue.style.display='block';
+    if(list)list.innerHTML=`<div class="q-item"><span class="q-ico"><span class="spin spin-dark"></span></span><span class="q-name">Extracting ZIP…</span></div>`;
+    for(const zf of zipFiles){
+      try{
+        const zip=await JSZip.loadAsync(zf);
+        const exts=new Set(['.mp3','.m4a','.wav','.ogg','.mp4','.webm','.mpeg','.mpga']);
+        const entries=Object.values(zip.files).filter(f=>{if(f.dir)return false;const n=f.name.toLowerCase();if(n.startsWith('__')||n.startsWith('.'))return false;return exts.has(n.substring(n.lastIndexOf('.')));});
+        for(const entry of entries){const blob=await entry.async('blob');audioOnly.push(new File([blob],entry.name.split('/').pop(),{type:'audio/mpeg'}));}
+        if(list)list.innerHTML=`<div class="q-item" style="background:var(--gl)"><span class="q-ico">✅</span><span class="q-name">Extracted ${entries.length} files from ${zf.name}</span></div>`;
+      }catch(err){if(list)list.innerHTML=`<div class="q-item" style="background:var(--rl)"><span class="q-ico">❌</span><span class="q-name">Failed: ${err.message}</span></div>`;return;}
+    }
+    setTimeout(()=>setAudioFiles(audioOnly),500);
+  }else{setAudioFiles(audioOnly);}
+}
+function setAudioFiles(files){
+  audioFiles=files;const btn=g('add-audio-btn');if(btn)btn.disabled=!files.length;
+  if(!files.length)return;
+  const queue=g('audio-queue'),list=g('audio-queue-list');
+  if(queue)queue.style.display='block';
+  if(list)list.innerHTML=files.map((f,i)=>`<div class="q-item" id="qi-${i}"><span class="q-ico" id="qis-${i}">⭕</span><span class="q-name">${esc(f.name)}</span><span class="q-size">${(f.size/1024/1024).toFixed(1)}MB</span></div>`).join('');
+}
+function setQS(i,s){const el=document.getElementById('qis-'+i);if(el)el.innerHTML={processing:'▶',done:'✅',skipped:'⚠️',error:'❌'}[s]||'⭕';}
+async function submitAudio(){
+  if(!audioFiles.length)return;
+  const btn=g('add-audio-btn');btn.disabled=true;btn.innerHTML='<span class="spin"></span> Processing…';
+  g('audio-progress').style.display='block';
+  const skipped=[];let processed=0;const total=audioFiles.length;
+  for(let i=0;i<total;i+=3){
+    const batch=audioFiles.slice(i,i+3);
+    await Promise.all(batch.map(async(af,bi)=>{
+      const idx=i+bi;
+      if(af.size>25*1024*1024){skipped.push(`${af.name} (too large)`);setQS(idx,'skipped');return;}
+      setQS(idx,'processing');
+      g('audio-prog-text').textContent=`Processing batch ${Math.floor(i/3)+1}/${Math.ceil(total/3)}: ${af.name}`;
+      try{
+        const dupR=await fetch(API+'/check_duplicate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:af.name})});
+        const dupD=await dupR.json();
+        if(dupD.duplicate){skipped.push(`${af.name} — already exists`);setQS(idx,'skipped');return;}
+        const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=()=>rej(new Error('Read failed'));r.readAsDataURL(af);});
+        const tr=await fetch(API+'/transcribe_and_analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:b64,filename:af.name})});
+        const trD=await tr.json();
+        if(!tr.ok){skipped.push(`${af.name} (${trD.error||'failed'})`);setQS(idx,'error');return;}
+        const repName=trD.rep_name_detected&&trD.rep_name_detected!=='Unknown'?trD.rep_name_detected:'Unknown';
+        const sr=await fetch(API+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...trD,rep_name:repName,filename:af.name,check_duplicate:true})});
+        const saved=await sr.json();
+        if(!sr.ok||saved.duplicate){skipped.push(`${af.name} (${saved.duplicate?'duplicate':saved.error||'failed'})`);setQS(idx,saved.duplicate?'skipped':'error');return;}
+        allCalls.unshift(Array.isArray(saved)?saved[0]:saved);setQS(idx,'done');processed++;
+      }catch(e){skipped.push(`${af.name} (${e.message})`);setQS(idx,'error');}
+    }));
+    g('audio-prog-bar').style.width=Math.round(Math.min(i+3,total)/total*100)+'%';
+  }
+  g('audio-prog-bar').style.width='100%';g('audio-prog-text').textContent=`Done! ${processed} analyzed${skipped.length?`, ${skipped.length} skipped`:''}`;
+  if(skipped.length){g('audio-skipped').style.display='block';g('audio-skipped-list').innerHTML=skipped.map(s=>`<div>• ${esc(s)}</div>`).join('');}
+  if(processed>0)g('add-audio-msg').innerHTML=`<div class="msg-ok">✓ ${processed} call${processed!==1?'s':''} added!</div>`;
+  btn.disabled=false;btn.textContent='Analyze & Save';audioFiles=[];
+}
+async function submitPaste(){
+  const btn=g('paste-btn'),msg=g('paste-msg');
+  const rep=g('paste-rep').value.trim(),tx=g('paste-tx').value.trim(),out=g('paste-out').value;
+  if(!tx){msg.innerHTML='<div class="msg-err">Please provide a transcript</div>';return;}
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> Analyzing…';
+  try{
+    const ar=await fetch(API+'/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:tx,filename:`${rep||'unknown'}_call.txt`})});
+    const res=await ar.json();if(!ar.ok)throw new Error(res.error);
+    if(out!=='unknown')res.call_outcome=out;
+    const sr=await fetch(API+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...res,rep_name:rep||res.rep_name_detected||'Unknown',transcript:tx})});
+    const saved=await sr.json();if(!sr.ok)throw new Error(saved.error);
+    allCalls.unshift(Array.isArray(saved)?saved[0]:saved);
+    msg.innerHTML='<div class="msg-ok">✓ Saved!</div>';g('paste-tx').value='';btn.disabled=false;btn.textContent='Analyze & Save';
+  }catch(e){msg.innerHTML=`<div class="msg-err">⚠ ${e.message}</div>`;btn.disabled=false;btn.textContent='Analyze & Save';}
+}
+async function submitFile(){
+  const btn=g('file-btn'),msg=g('file-msg');
+  const rep=g('file-rep').value.trim(),out=g('file-out').value;
+  const f=g('file-input').files[0];if(!f){msg.innerHTML='<div class="msg-err">Select a file</div>';return;}
+  const tx=await f.text();btn.disabled=true;btn.innerHTML='<span class="spin"></span> Analyzing…';
+  try{
+    const ar=await fetch(API+'/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:tx,filename:f.name})});
+    const res=await ar.json();if(!ar.ok)throw new Error(res.error);
+    if(out!=='unknown')res.call_outcome=out;
+    const sr=await fetch(API+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...res,rep_name:rep||res.rep_name_detected||'Unknown',transcript:tx,filename:f.name})});
+    const saved=await sr.json();if(!sr.ok)throw new Error(saved.error);
+    allCalls.unshift(Array.isArray(saved)?saved[0]:saved);
+    msg.innerHTML='<div class="msg-ok">✓ Saved!</div>';btn.disabled=false;btn.textContent='Analyze & Save';
+  }catch(e){msg.innerHTML=`<div class="msg-err">⚠ ${e.message}</div>`;btn.disabled=false;btn.textContent='Analyze & Save';}
+}
+
+
+async function renderTxCorrections(){
+  // Load fresh from server
+  let txc=[];
+  try{const r=await fetch(API+'/transcript_corrections');if(r.ok)txc=await r.json();}catch(e){}
+  set('page',`<div class="card">
+    <div class="card-hdr"><h3>Transcript Correction Rules</h3><span class="bdg">${txc.length} rules</span></div>
+    <p style="font-size:13px;color:var(--tx3);margin-bottom:16px;line-height:1.6">
+      These find-and-replace rules are applied to every new transcript before Claude analysis.
+      They also auto-populate Deepgram's keyterm list to improve recognition at the source.
+      Add rules here or directly from any call's transcript editor.
+    </p>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:flex-end">
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:10px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Incorrect phrase</div>
+        <input type="text" id="new-find" class="ovr-inp" placeholder="e.g. guys and neighbors" style="width:100%;padding:9px 12px;border-radius:10px" />
+      </div>
+      <div style="color:var(--tx3);padding-bottom:2px">→</div>
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:10px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px">Correct phrase</div>
+        <input type="text" id="new-replace" class="ovr-inp" placeholder="e.g. Little Guys Movers" style="width:100%;padding:9px 12px;border-radius:10px" />
+      </div>
+      <button class="btn btn-p btn-sm" onclick="addTxCorrection()" style="flex-shrink:0">Add Rule</button>
+    </div>
+    <div id="tx-rules-msg"></div>
+    ${txc.length?`<table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr>
+        <th style="padding:8px 11px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Find (incorrect)</th>
+        <th style="padding:8px 11px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Replace with</th>
+        <th style="padding:8px 11px;text-align:left;font-size:9px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;border-bottom:1px solid var(--border)">Added</th>
+        <th style="border-bottom:1px solid var(--border)"></th>
+      </tr></thead>
+      <tbody>${txc.map(c=>`<tr>
+        <td style="padding:11px;border-bottom:1px solid var(--border);color:var(--red);font-family:'JetBrains Mono',monospace;font-size:12px">${esc(c.find_text)}</td>
+        <td style="padding:11px;border-bottom:1px solid var(--border);color:#66bb6a;font-family:'JetBrains Mono',monospace;font-size:12px">${esc(c.replace_text)}</td>
+        <td style="padding:11px;border-bottom:1px solid var(--border);color:var(--tx3);font-size:12px">${fmt(c.created_at)}</td>
+        <td style="padding:11px;border-bottom:1px solid var(--border)"><button class="btn btn-d btn-xs" onclick="deleteTxCorrection('${c.id}')">Delete</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`:'<div class="empty"><span class="empty-ico">🔤</span><p>No correction rules yet.<br>Add rules here or from the transcript editor in any call.</p></div>'}
+  </div>`);
+}
+
+async function addTxCorrection(){
+  const find=g('new-find')?.value.trim(), replace=g('new-replace')?.value.trim();
+  if(!find||!replace){g('tx-rules-msg').innerHTML='<div class="msg-err">Both fields required</div>';return;}
+  try{
+    const r=await fetch(API+'/transcript_corrections/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({find_text:find,replace_text:replace})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error);
+    g('new-find').value='';g('new-replace').value='';
+    g('tx-rules-msg').innerHTML='<div class="msg-ok">✓ Rule saved</div>';
+    setTimeout(()=>renderTxCorrections(),800);
+  }catch(e){g('tx-rules-msg').innerHTML=`<div class="msg-err">${e.message}</div>`;}
+}
+
+async function deleteTxCorrection(id){
+  if(!confirm('Delete this correction rule?'))return;
+  try{
+    await fetch(API+'/transcript_corrections/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+    renderTxCorrections();
+  }catch(e){alert(e.message);}
+}
+
+
+// ── TRANSCRIPT EDITING ──
+function openEditTranscript(callId) {
+  const c = allCalls.find(x => x.id === callId);
+  if (!c) return;
+  // Build modal
+  const existing = document.getElementById('edit-tx-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'edit-tx-modal';
+  modal.className = 'modal-bg';
+  modal.innerHTML = `<div class="modal-box" style="max-width:700px">
+    <h2>Edit Transcript</h2>
+    <p style="font-size:12.5px;color:var(--tx3);margin-bottom:14px;line-height:1.6">
+      Fix transcription errors below. Optionally save a find/replace rule so future calls are corrected automatically.
+    </p>
+    <div class="fg"><label>Transcript</label>
+      <textarea id="edit-tx-text" style="min-height:300px;font-size:12px">${esc(c.transcript||'')}</textarea>
+    </div>
+    <div style="background:var(--bg2);border-radius:10px;padding:14px;border:1px solid var(--border);margin-bottom:12px">
+      <div style="font-size:10px;font-weight:700;color:var(--tx4);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px">Save as correction rule (optional)</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="edit-tx-find" placeholder="Find text (e.g. guys and neighbors)" class="ovr-inp" style="flex:1;min-width:160px" />
+        <span style="color:var(--tx3)">→</span>
+        <input type="text" id="edit-tx-replace" placeholder="Replace with (e.g. Little Guys Movers)" class="ovr-inp" style="flex:1;min-width:160px" />
+      </div>
+      <div style="font-size:11.5px;color:var(--tx3);margin-top:7px">If filled, this rule will auto-apply to all future transcripts.</div>
+    </div>
+    <div id="edit-tx-msg"></div>
+    <div class="modal-btns">
+      <button class="btn btn-g" onclick="document.getElementById('edit-tx-modal').remove()">Cancel</button>
+      <button class="btn btn-p" onclick="saveEditedTranscript('${callId}')">Save & Re-analyze</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function saveEditedTranscript(callId) {
+  const newTx = document.getElementById('edit-tx-text')?.value?.trim();
+  const findText = document.getElementById('edit-tx-find')?.value?.trim();
+  const replaceText = document.getElementById('edit-tx-replace')?.value?.trim();
+  const msg = document.getElementById('edit-tx-msg');
+  if (!newTx) { msg.innerHTML = '<div class="msg-err">Transcript cannot be empty</div>'; return; }
+  const btn = document.querySelector('#edit-tx-modal .btn-p');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Saving…';
+  try {
+    // Save transcript edit (and optionally a rule). Server allows either or both.
+    const sr = await fetch(API + '/transcript_corrections/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ call_id: callId, find_text: findText||'', replace_text: replaceText||'', new_transcript: newTx })
+    });
+    if (!sr.ok) { const t = await sr.text().catch(()=>''); throw new Error('Save failed: ' + (t.substring(0,120)||sr.status)); }
+    // Re-analyze with corrected transcript
+    btn.innerHTML = '<span class="spin"></span> Re-analyzing…';
+    const r = await fetch(API + '/transcript_corrections/reapply', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ call_id: callId })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Re-analyze failed');
+    msg.innerHTML = '<div class="msg-ok">✓ Saved and re-analyzed!</div>';
+    await loadCalls();
+    setTimeout(() => { document.getElementById('edit-tx-modal')?.remove(); if(currentPage==='library')renderCallList(); }, 1200);
+  } catch(e) {
+    msg.innerHTML = `<div class="msg-err">${esc(e.message)}</div>`;
+    btn.disabled = false; btn.innerHTML = 'Save & Re-analyze';
+  }
+}
+
+async function reapplyCorrections(callId, btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  try {
+    const r = await fetch(API + '/transcript_corrections/reapply', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ call_id: callId })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    // Show success BEFORE the row gets re-rendered (which would collapse it)
+    btn.innerHTML = '✓ Re-analyzed';
+    btn.style.background = '#16a34a';
+    btn.style.color = '#fff';
+    showToast('✓ Call re-analyzed successfully — refreshing data…', 'success');
+    // Brief pause so user sees the confirmation, then reload
+    setTimeout(async () => {
+      await loadCalls();
+      if (currentPage === 'library') renderCallList();
+    }, 800);
+  } catch(e) {
+    btn.innerHTML = orig; btn.disabled = false;
+    showToast('Re-analyze failed: ' + e.message, 'error');
+  }
+}
+
+// Lightweight toast notification for success/error feedback
+function showToast(msg, kind, duration) {
+  let toast = document.getElementById('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 18px;border-radius:8px;font-size:14px;font-weight:500;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:opacity .3s;max-width:400px;cursor:pointer';
+    toast.onclick = () => { toast.style.opacity = '0'; };
+    document.body.appendChild(toast);
+  }
+  const colors = {success:'#16a34a', error:'#dc2626', info:'#2563eb', warn:'#d97706'};
+  toast.style.background = colors[kind] || colors.info;
+  toast.style.color = '#fff';
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toast._timeout);
+  const dur = (typeof duration === 'number' && duration > 0) ? duration : 3500;
+  toast._timeout = setTimeout(() => { toast.style.opacity = '0'; }, dur);
+}
+
+
+// ── TRANSCRIPT CORRECTIONS PAGE ──
+let txCorrections = [];
+async function loadTxCorrections() {
+  try {
+    const r = await fetch(API + '/transcript_corrections');
+    if (r.ok) txCorrections = await r.json();
+  } catch(e) {}
+}
+
+function renderTxCorrections() {
+  loadTxCorrections().then(() => {
+    set('page', `<div class="mgmt-card">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Transcript Correction Rules</div>
+        <span class="bdg">${txCorrections.length} rules</span>
+      </div>
+      <p class="mgmt-card-subtitle">
+        These find/replace rules are automatically applied to every new transcript before Claude analysis.
+        They also populate Deepgram's keyterm list to improve recognition at the source.
+        Add rules by clicking "Edit Transcript" on any call.
+      </p>
+      <div class="mgmt-card-body">
+        <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
+          <input type="text" id="new-find" class="ovr-inp" placeholder="Find text…" style="flex:1;min-width:160px" />
+          <input type="text" id="new-replace" class="ovr-inp" placeholder="Replace with…" style="flex:1;min-width:160px" />
+          <button class="btn btn-p btn-sm" onclick="addTxRule()">+ Add Rule</button>
+        </div>
+        <div id="tx-rules-msg"></div>
+        ${txCorrections.length ? `
+        <table class="rmgmt-table-v2">
+          <colgroup>
+            <col />
+            <col />
+            <col style="width:130px" />
+            <col style="width:80px" />
+          </colgroup>
+          <thead><tr>
+            <th>Find</th>
+            <th>Replace With</th>
+            <th>Added</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${txCorrections.map(r => `<tr>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--lg-red)">${esc(r.find_text)}</td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--lg-green-dark)">${esc(r.replace_text)}</td>
+            <td style="font-size:12px;color:var(--ink3)">${fmt(r.created_at)}</td>
+            <td style="text-align:right"><button class="btn btn-d btn-xs" onclick="deleteTxRule('${r.id}')">Delete</button></td>
+          </tr>`).join('')}
+          </tbody>
+        </table>` : '<div class="empty"><span class="empty-ico">🔤</span><p>No rules yet.<br>Edit a transcript to add your first correction rule.</p></div>'}
+      </div>
+    </div>`);
+  });
+}
+
+async function addTxRule() {
+  const find = document.getElementById('new-find')?.value?.trim();
+  const replace = document.getElementById('new-replace')?.value?.trim();
+  const msg = document.getElementById('tx-rules-msg');
+  if (!find || !replace) { msg.innerHTML = '<div class="msg-err">Both fields required</div>'; return; }
+  try {
+    await fetch(API + '/transcript_corrections/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ find_text: find, replace_text: replace })
+    });
+    msg.innerHTML = '<div class="msg-ok">✓ Rule saved</div>';
+    await loadTxCorrections();
+    setTimeout(() => renderTxCorrections(), 800);
+  } catch(e) { msg.innerHTML = `<div class="msg-err">${e.message}</div>`; }
+}
+
+async function deleteTxRule(id) {
+  if (!confirm('Delete this rule?')) return;
+  try {
+    await fetch(API + '/transcript_corrections/delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ id })
+    });
+    txCorrections = txCorrections.filter(r => r.id !== id);
+    renderTxCorrections();
+  } catch(e) { alert(e.message); }
+}
+
+
+// ── VONAGE SYNC PAGE ──
+let vonageStatusPoller = null;
+
+async function renderVonage() {
+  // Stop any prior poller before re-rendering
+  if (vonageStatusPoller) { clearInterval(vonageStatusPoller); vonageStatusPoller = null; }
+
+  // Fetch status, mapping, and recent ingestions in parallel
+  let status = null, mapping = [], recent = [];
+  try {
+    const [s, m, r] = await Promise.all([
+      fetch(API + '/vonage/status').then(r => r.json()),
+      fetch(API + '/vonage/extension_map').then(r => r.json()),
+      fetch(API + '/vonage/recent').then(r => r.json()),
+    ]);
+    status = s; mapping = m || []; recent = r || [];
+  } catch (e) {
+    set('page', `<div class="mgmt-card"><div class="mgmt-card-body"><div class="msg-err">Failed to load Vonage status: ${esc(e.message)}</div></div></div>`);
+    return;
+  }
+
+  set('page', vonagePageHtml(status, mapping, recent));
+
+  // Auto-refresh status every 15 seconds while page is open
+  vonageStatusPoller = setInterval(async () => {
+    if (currentPage !== 'vonage') {
+      clearInterval(vonageStatusPoller); vonageStatusPoller = null; return;
+    }
+    try {
+      const s = await fetch(API + '/vonage/status').then(r => r.json());
+      const el = g('vonage-status-block');
+      if (el) el.outerHTML = vonageStatusBlockHtml(s);
+    } catch (e) { /* ignore polling errors */ }
+  }, 15000);
+}
+
+function vonageStatusBlockHtml(s) {
+  if (!s) return `<div id="vonage-status-block"></div>`;
+
+  let statusPill = '', actionBtns = '';
+  const cfg = s.configured;
+  const st = s.status;
+
+  if (!cfg) {
+    statusPill = `<span class="rmgmt-loc-empty">⚠ Not configured</span>`;
+    actionBtns = `<span style="font-size:12px;color:var(--ink3)">Set VONAGE_CLIENT_ID, VONAGE_CLIENT_SECRET, and VONAGE_ACCOUNT_ID in Render env vars to enable.</span>`;
+  } else if (st === 'running') {
+    statusPill = `<span class="rmgmt-status-pill">● Running</span>`;
+    actionBtns = `
+      <button class="btn btn-g btn-sm" onclick="vonagePause()">⏸ Pause</button>
+      <button class="btn btn-g btn-sm" onclick="vonagePollNow()">↻ Poll now</button>
+      <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
+  } else if (st === 'paused') {
+    statusPill = `<span class="rmgmt-status-pill" style="background:rgba(227,177,36,0.18);color:var(--lg-gold-dark, #8A6420)">⏸ Paused</span>`;
+    actionBtns = `
+      <button class="btn btn-p btn-sm" onclick="vonageResume()">▶ Resume</button>
+      <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
+  } else if (st === 'error') {
+    statusPill = `<span class="rmgmt-status-pill" style="background:var(--lg-red-bg);color:var(--lg-red)">⚠ Error</span>`;
+    actionBtns = `
+      <button class="btn btn-p btn-sm" onclick="vonageStart()">▶ Restart</button>
+      <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
+  } else {
+    // idle / disabled
+    statusPill = `<span class="rmgmt-loc-empty">○ Idle</span>`;
+    actionBtns = `<button class="btn btn-p btn-sm" onclick="vonageStart()">▶ Start polling</button>`;
+  }
+
+  const lastPoll = s.last_poll_at ? fmt(s.last_poll_at) : '—';
+  const lastPollOk = s.last_poll_succeeded;
+  const lastPollLabel = lastPollOk === true ? 'OK' : lastPollOk === false ? 'failed' : '—';
+  const lastPollColor = lastPollOk === true ? 'var(--lg-green-dark)' : lastPollOk === false ? 'var(--lg-red)' : 'var(--ink3)';
+  const interval = s.poll_interval_seconds ? Math.round(s.poll_interval_seconds / 60) + ' min' : '—';
+  const last24 = s.last_24h || { done: 0, skipped: 0, failed: 0, pending: 0 };
+
+  return `<div id="vonage-status-block" class="mgmt-card" style="margin-bottom:16px">
+    <div class="mgmt-card-head">
+      <div class="mgmt-card-title">Polling Status</div>
+      ${statusPill}
+    </div>
+    <div class="mgmt-card-body">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">${actionBtns}</div>
+      <div class="mgmt-stat-row">
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${last24.done}</div><div class="mgmt-stat-cell-label">Ingested 24h</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${last24.skipped}</div><div class="mgmt-stat-cell-label">Skipped 24h</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${last24.failed}</div><div class="mgmt-stat-cell-label">Failed 24h</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${last24.pending}</div><div class="mgmt-stat-cell-label">Pending 24h</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:3px">Last poll</div>
+          <div style="font-size:13px;color:var(--ink2)">${lastPoll} <span style="color:${lastPollColor};font-weight:500">${lastPollLabel}</span></div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:3px">Interval</div>
+          <div style="font-size:13px;color:var(--ink2)">Every ${interval}</div>
+        </div>
+        <div>
+          <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:3px">Auto-start</div>
+          <div style="font-size:13px;color:var(--ink2)">${s.autostart_enabled ? 'On' : 'Off'}</div>
+        </div>
+      </div>
+      ${s.last_error ? `<div class="msg-err" style="margin-top:14px">Last error: ${esc(s.last_error)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function vonagePageHtml(status, mapping, recent) {
+  // ── Mapping table ──
+  const mapRows = mapping.length
+    ? mapping.map(m => `<tr>
+        <td><span style="font-family:'JetBrains Mono',monospace;font-size:13px">${esc(m.extension_id)}</span></td>
+        <td>${esc(m.rep_name)}</td>
+        <td style="color:var(--ink3);font-size:12px">${esc(m.notes || '')}</td>
+        <td style="text-align:right">
+          <button class="btn btn-d btn-xs" onclick="vonageDeleteExt('${esc(m.extension_id)}')">Delete</button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;color:var(--ink3);padding:14px;font-style:italic">No mappings yet. Add one above to attribute calls to reps.</td></tr>';
+
+  // ── Recent ingestions table ──
+  const recentRows = recent.length
+    ? recent.map(r => {
+        const statusCls = r.status === 'done' ? 'g' : r.status === 'failed' ? 'r' : 'n';
+        const statusBadge = `<span style="font-family:var(--font-label);font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border-radius:999px;background:${statusCls==='g'?'var(--lg-green-bg)':statusCls==='r'?'var(--lg-red-bg)':'var(--surface)'};color:${statusCls==='g'?'var(--lg-green-dark)':statusCls==='r'?'var(--lg-red)':'var(--ink3)'}">${esc(r.status)}</span>`;
+        const repName = r.call_rep_name || (r.extension_id ? `(ext ${esc(r.extension_id)})` : '—');
+        const errCell = r.error_message ? `<div style="color:var(--lg-red);font-size:11px;margin-top:2px">${esc(r.error_message.substring(0, 100))}</div>` : '';
+        return `<tr>
+          <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${esc((r.recording_id || '').substring(0, 20))}${r.recording_id && r.recording_id.length > 20 ? '…' : ''}</span></td>
+          <td>${esc(repName)}</td>
+          <td>${r.duration_seconds ? Math.round(r.duration_seconds / 60) + ' min' : '—'}</td>
+          <td style="font-size:12px;color:var(--ink3)">${r.ingested_at ? fmt(r.ingested_at) : '—'}</td>
+          <td>${statusBadge}${errCell}</td>
+          <td style="text-align:right">${r.call_id ? `<button class="btn btn-g btn-xs" onclick="libFilters={rep:'',out:'',score:'',search:'${esc((r.call_filename||'').substring(0,30))}',sort:'newest',showExcl:false,attn:'',obj:'',kw:'',move_cat:'',confidence:''};nav('library')">View call</button>` : ''}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:14px;font-style:italic">No recordings ingested yet.</td></tr>';
+
+  return `
+    ${vonageStatusBlockHtml(status)}
+
+    <div class="mgmt-card" style="margin-bottom:16px">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Extension → Rep Mapping</div>
+      </div>
+      <p class="mgmt-card-subtitle">Map Vonage extension IDs to reps. Calls coming from a mapped extension will be attributed to that rep automatically. Unmapped extensions ingest as "Unknown — ext &lt;id&gt;" so you can map them later.</p>
+      <div class="mgmt-card-body">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:end">
+          <div style="flex:0 0 140px">
+            <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:5px">Extension</div>
+            <input type="text" id="vonage-new-ext" class="ovr-inp" placeholder="e.g. 101" />
+          </div>
+          <div style="flex:1;min-width:160px">
+            <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:5px">Rep name</div>
+            <input type="text" id="vonage-new-rep" class="ovr-inp" placeholder="e.g. Caleb" />
+          </div>
+          <div style="flex:1;min-width:160px">
+            <div style="font-family:var(--font-label);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);font-weight:500;margin-bottom:5px">Notes (optional)</div>
+            <input type="text" id="vonage-new-notes" class="ovr-inp" placeholder="" />
+          </div>
+          <button class="btn btn-p btn-sm" onclick="vonageSaveExt()">+ Add mapping</button>
+        </div>
+        <div id="vonage-map-msg" style="font-size:12px;margin-bottom:8px"></div>
+        <table class="rmgmt-table-v2">
+          <colgroup>
+            <col style="width:120px" />
+            <col />
+            <col />
+            <col style="width:100px" />
+          </colgroup>
+          <thead><tr><th>Extension</th><th>Rep</th><th>Notes</th><th></th></tr></thead>
+          <tbody>${mapRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mgmt-card">
+      <div class="mgmt-card-head">
+        <div class="mgmt-card-title">Recent Ingestions</div>
+        <span class="bdg">${recent.length} shown</span>
+      </div>
+      <p class="mgmt-card-subtitle">Last 50 recordings the polling worker has touched. Click a row to jump to the corresponding call in the Library.</p>
+      <div class="mgmt-card-body flush">
+        <table class="rmgmt-table-v2">
+          <colgroup>
+            <col style="width:170px" />
+            <col />
+            <col style="width:80px" />
+            <col style="width:130px" />
+            <col style="width:140px" />
+            <col style="width:100px" />
+          </colgroup>
+          <thead><tr><th>Recording ID</th><th>Rep / Ext</th><th>Duration</th><th>Ingested</th><th>Status</th><th></th></tr></thead>
+          <tbody>${recentRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function vonageStart()    { await vonageAction('/vonage/start'); }
+async function vonageStop()     { if (!confirm('Stop the polling worker? It will need to be restarted manually.')) return; await vonageAction('/vonage/stop'); }
+async function vonagePause()    { await vonageAction('/vonage/pause'); }
+async function vonageResume()   { await vonageAction('/vonage/resume'); }
+async function vonagePollNow()  { await vonageAction('/vonage/poll_now', 'Polling now…'); }
+
+async function vonageAction(path, statusMsg) {
+  const block = g('vonage-status-block');
+  if (statusMsg && block) {
+    // Show transient status message
+    const orig = block.innerHTML;
+    block.innerHTML = `<div class="mgmt-card-body"><div style="font-size:13px;color:var(--ink3)">${statusMsg}</div></div>`;
+  }
+  try {
+    await fetch(API + path, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+  } catch (e) {
+    alert('Action failed: ' + e.message);
+  }
+  // Re-render whole page to refresh status, mapping, and recent ingestions
+  setTimeout(() => renderVonage(), 800);
+}
+
+async function vonageSaveExt() {
+  const ext = g('vonage-new-ext')?.value?.trim();
+  const rep = g('vonage-new-rep')?.value?.trim();
+  const notes = g('vonage-new-notes')?.value?.trim() || '';
+  const msg = g('vonage-map-msg');
+  if (!ext || !rep) {
+    if (msg) msg.innerHTML = '<span style="color:var(--lg-red)">Extension and rep name are required.</span>';
+    return;
+  }
+  try {
+    const r = await fetch(API + '/vonage/extension_map/save', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ extension_id: ext, rep_name: rep, notes: notes }),
+    });
+    if (!r.ok) throw new Error('Server returned ' + r.status);
+    if (msg) msg.innerHTML = '<span style="color:var(--lg-green-dark)">✓ Saved</span>';
+    setTimeout(() => renderVonage(), 600);
+  } catch (e) {
+    if (msg) msg.innerHTML = `<span style="color:var(--lg-red)">${esc(e.message)}</span>`;
+  }
+}
+
+async function vonageDeleteExt(extId) {
+  if (!confirm(`Delete mapping for extension ${extId}? Future calls from this extension will ingest as "Unknown".`)) return;
+  try {
+    await fetch(API + '/vonage/extension_map/delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ extension_id: extId }),
+    });
+    renderVonage();
+  } catch (e) { alert(e.message); }
+}
+
+
+// ── BULK ZIP UPLOAD ──
+let bulkZipFile = null;
+let bulkPoller = null;
+
+function handleBulkDrop(e) {
+  e.preventDefault();
+  g('bulk-drop').classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) handleBulkSelect(f);
+}
+
+function handleBulkSelect(f) {
+  if (!f || (!f.name.endsWith('.zip') && f.type !== 'application/zip')) {
+    g('bulk-msg').innerHTML = '<div class="msg-err">Please select a ZIP file</div>';
+    return;
+  }
+  bulkZipFile = f;
+  const info = g('bulk-file-info');
+  info.style.display = 'block';
+  info.innerHTML = `📦 <strong>${f.name}</strong> — ${(f.size/1024/1024).toFixed(1)}MB<br><span style="color:var(--tx3);font-size:12px">Estimated time: ~${Math.round(f.size/1024/1024/1.8)} min at 3 calls/batch</span>`;
+  g('bulk-btn').disabled = false;
+  g('bulk-msg').innerHTML = '';
+}
+
+async function startBulkUpload() {
+  if (!bulkZipFile) return;
+  const btn = g('bulk-btn');
+  const progText = g('bulk-prog-text');
+  const progWrap = g('bulk-progress');
+  const msg = g('bulk-msg');
+
+  // Lock UI immediately so user knows something is happening
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Sending to server…';
+  if (progWrap) progWrap.style.display = 'block';
+  if (progText) progText.textContent = `Sending ${(bulkZipFile.size/1024/1024).toFixed(1)}MB to server…`;
+  if (msg) msg.innerHTML = '';
+
+  // Pre-populate the global status bar immediately so it shows even if user navigates away
+  window._lastBatchStatus = { status: 'running', total: 0, processed: 0, skipped: 0, errors: 0, current: 'Sending ZIP…' };
+  updateStatusBar();
+
+  try {
+    // Send as multipart/form-data — no base64, no browser freeze, no 33% size inflation
+    const form = new FormData();
+    form.append('zip', bulkZipFile, bulkZipFile.name);
+
+    // Use XMLHttpRequest so we can track upload progress
+    const uploadPct = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', API + '/batch_upload/start');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && progText) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          progText.textContent = `Sending: ${pct}% of ${(bulkZipFile.size/1024/1024).toFixed(1)}MB…`;
+          // Also update global status bar current field
+          if (window._lastBatchStatus) window._lastBatchStatus.current = `Sending ZIP: ${pct}%`;
+          updateStatusBar();
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch(e) { resolve({}); }
+        } else {
+          try { reject(new Error(JSON.parse(xhr.responseText).error || `Server error ${xhr.status}`)); }
+          catch(e) { reject(new Error(`Server error ${xhr.status}`)); }
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network error — check your connection'));
+      xhr.send(form);
+    });
+
+    // ZIP is on the server, background processing has started
+    if (msg) msg.innerHTML = '<div class="msg-ok">✓ ZIP received — processing in background. You can navigate away freely.</div>';
+    btn.innerHTML = '<span class="spin"></span> Processing in background…';
+    window._lastBatchStatus = { status: 'running', total: 0, processed: 0, skipped: 0, errors: 0, current: 'Extracting files…' };
+    updateStatusBar();
+    startBulkPoller();
+
+  } catch(e) {
+    if (msg) msg.innerHTML = `<div class="msg-err">⚠ ${esc(e.message)}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = 'Start Background Upload';
+    window._lastBatchStatus = { status: 'error', current: e.message };
+    updateStatusBar();
+  }
+}
+
+function updateBulkPanelUI(d) {
+  // Update the local Add Calls panel progress bar if the elements exist (user is on Add Calls page)
+  const bar = g('bulk-prog-bar');
+  const txt = g('bulk-prog-text');
+  const prog = g('bulk-progress');
+  const btn = g('bulk-btn');
+  const msg = g('bulk-msg');
+  const done = (d.processed || 0) + (d.skipped || 0) + (d.errors || 0);
+  const pct = d.total ? Math.round(done / d.total * 100) : 0;
+
+  if (d.status === 'running') {
+    if (prog) prog.style.display = 'block';
+    if (bar) bar.style.width = pct + '%';
+    if (txt) {
+      const curr = d.current ? ` · ${d.current}` : '';
+      txt.textContent = `[${done}/${d.total || '?'}] ${d.processed} saved · ${d.skipped} skipped · ${d.errors} errors${curr}`;
+    }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Processing in background…'; }
+  } else if (d.status === 'complete' || d.status === 'stopped' || d.status === 'error') {
+    if (bar) bar.style.width = '100%';
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Start Background Upload'; }
+    const label = d.status === 'complete'
+      ? `✓ Done! ${d.processed} calls saved, ${d.skipped} skipped, ${d.errors} errors`
+      : d.status === 'stopped'
+      ? `⏹ Stopped at ${done}/${d.total || '?'} files — ${d.processed} saved`
+      : `⚠ Upload error: ${d.current || 'unknown'}`;
+    if (txt) txt.textContent = label;
+    // Show error list
+    if (d.error_list?.length && msg) {
+      const items = d.error_list.slice(0, 15).map(e => `<div style="margin:2px 0">• ${esc(e)}</div>`).join('');
+      const more = d.error_list.length > 15 ? `<div style="color:var(--ink3)">…and ${d.error_list.length - 15} more</div>` : '';
+      msg.innerHTML = `<div style="margin-top:10px;font-size:11.5px;color:var(--red,#c0392b)">${items}${more}</div>`;
+    }
+  }
+}
+
+function startBulkPoller() {
+  if (bulkPoller) clearInterval(bulkPoller);
+  bulkPoller = setInterval(async () => {
+    try {
+      const r = await fetch(API + '/batch_upload/status');
+      const d = await r.json();
+      window._lastBatchStatus = d;
+      updateStatusBar();
+      updateBulkPanelUI(d);
+      if (d.status !== 'running') {
+        clearInterval(bulkPoller); bulkPoller = null;
+        // Data reload is handled by startStatusPoller's nowDone logic — no need to reload here too
+      }
+    } catch(e) {}
+  }, 3000);
+}
+
+// Called by renderAdd() — if a batch is already running when user opens Add Calls, reattach UI
+async function reattachBulkIfRunning() {
+  // Use cached status if available, otherwise fetch fresh
+  const d = window._lastBatchStatus || null;
+  if (!d) return;  // startStatusPoller will have populated this already
+  if (d.status === 'running') {
+    updateBulkPanelUI(d);
+    if (!bulkPoller) startBulkPoller();
+  } else if (d.status === 'complete' || d.status === 'stopped') {
+    // Show last result summary even if no poller is running
+    const prog = g('bulk-progress');
+    if (prog) prog.style.display = 'block';
+    updateBulkPanelUI(d);
+  }
+}
+
+// Check bulk status on page load
+async function cleanupEmptyRecords(e) {
+  if (e) e.preventDefault();
+  const confirmed = confirm("This will delete all call records from today that have no transcript data (broken records from failed uploads). Your 3 successfully saved calls from today will NOT be affected — only empty/incomplete records are removed.\n\nContinue?");
+  if (!confirmed) return;
+  try {
+    const r = await fetch(API + '/batch_upload/cleanup_empty', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json();
+    if (d.deleted > 0) {
+      showToast(`✓ Cleaned up ${d.deleted} incomplete records — you can now re-upload your ZIP`, 'success', 8000);
+      await loadCalls();
+    } else {
+      showToast(d.message || 'No incomplete records found', 'info', 5000);
+    }
+  } catch(e) {
+    showToast('Cleanup failed: ' + e.message, 'error', 6000);
+  }
+}
+
+async function checkBulkStatus() {
+  // startStatusPoller handles global status bar — this just ensures the Add Calls panel
+  // is wired up correctly if the user is already on that page when they load.
+  // In practice startStatusPoller runs first and populates _lastBatchStatus,
+  // so this is mostly a no-op unless called explicitly.
+  if (window._lastBatchStatus?.status === 'running' && !bulkPoller) {
+    updateBulkPanelUI(window._lastBatchStatus);
+    startBulkPoller();
+  }
+}
+
+
+// ── COST CALCULATOR ──
+function renderCostCalc(fc) {
+  const el = g('cost-calculator'); if (!el) return;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthCalls = (fc || allCalls).filter(c => new Date(c.created_at) >= monthStart);
+  const allTimeCalls = allCalls;
+
+  // Cost estimates
+  const DEEPGRAM_PER_MIN = 0.0043;
+  const CLAUDE_PER_CALL = 0.023;
+  const RENDER_MONTHLY = 25.00; // Starter=$7, Standard=$25
+
+  function calcCosts(calls) {
+    const deepgramMins = calls.reduce((a,c) => a + ((c.word_count||0) / 150), 0);
+    const deepgramCost = deepgramMins * DEEPGRAM_PER_MIN;
+    const claudeCost = calls.length * CLAUDE_PER_CALL;
+    return { deepgram: deepgramCost, claude: claudeCost, total: deepgramCost + claudeCost, calls: calls.length, mins: deepgramMins };
+  }
+
+  const month = calcCosts(monthCalls);
+  const allTime = calcCosts(allTimeCalls);
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  const dayOfMonth = now.getDate();
+  const projected = month.total / dayOfMonth * daysInMonth;
+  const perCall = allTimeCalls.length ? allTime.total / allTimeCalls.length : 0;
+
+  el.innerHTML = `<div class="mgmt-stat-row" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">This Month</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${(month.total + RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${month.calls} calls · ${Math.round(month.mins)} min audio</div>
+    </div>
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">Projected Monthly</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${(projected + RENDER_MONTHLY).toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">incl. $${RENDER_MONTHLY} Render</div>
+    </div>
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">Per Call</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${perCall.toFixed(3)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">avg all time</div>
+    </div>
+    <div class="mgmt-stat-cell" style="text-align:left;padding:14px">
+      <div class="mgmt-stat-cell-label" style="text-align:left;margin-bottom:6px">All Time</div>
+      <div class="mgmt-stat-cell-value n" style="font-size:22px">$${allTime.total.toFixed(2)}</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px">${allTimeCalls.length} calls analyzed</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:16px;margin-top:10px;font-size:11.5px;color:var(--ink3)">
+    <span>Deepgram: $${month.deepgram.toFixed(3)}/mo est.</span>
+    <span>Claude: $${month.claude.toFixed(2)}/mo est.</span>
+    <span>Render: $${RENDER_MONTHLY}/mo flat</span>
+  </div>`;
+}
+
+// ── RUNNING COSTS PAGE ──
+function renderCosts(){
+  const now=new Date();
+  const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
+  const fc=getFC();
+  const monthCalls=fc.filter(c=>new Date(c.created_at)>=monthStart);
+  const allTimeCalls=locationFilter?fc:allCalls;
+  const DEEPGRAM_PER_MIN=0.0043,CLAUDE_PER_CALL=0.023,RENDER_MONTHLY=25.00;
+  function calcCosts(calls){
+    const mins=calls.reduce((a,c)=>a+((c.word_count||0)/150),0);
+    const deepgram=mins*DEEPGRAM_PER_MIN,claude=calls.length*CLAUDE_PER_CALL;
+    return{deepgram,claude,total:deepgram+claude,calls:calls.length,mins};
+  }
+  const month=calcCosts(monthCalls),allTime=calcCosts(allTimeCalls);
+  const daysInMonth=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  const dayOfMonth=now.getDate();
+  const projected=dayOfMonth>0?(month.total/dayOfMonth*daysInMonth):0;
+  const perCall=allTimeCalls.length?allTime.total/allTimeCalls.length:0;
+  // Per-rep costs this month
+  const repCosts={};monthCalls.forEach(c=>{
+    const r=c.rep_name||'Unknown';
+    if(!repCosts[r])repCosts[r]={calls:0,mins:0};
+    repCosts[r].calls++;repCosts[r].mins+=(c.word_count||0)/150;
+  });
+  const repRows=Object.entries(repCosts).sort((a,b)=>b[1].calls-a[1].calls).map(([r,d])=>{
+    const cost=d.mins*DEEPGRAM_PER_MIN+d.calls*CLAUDE_PER_CALL;
+    return`<tr><td><div class="rmgmt-name">${esc(r)}</div></td><td class="col-calls">${d.calls}</td><td class="col-calls">${Math.round(d.mins)} min</td><td class="col-calls">$${cost.toFixed(2)}</td></tr>`;
+  }).join('');
+  set('page',`
+    <div class="metric-grid" style="margin-bottom:20px">
+      <div class="mc blue"><div class="mc-label">This Month</div><div class="mc-val">$${(month.total+RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2)}</div><div class="mc-sub">${month.calls} calls · ${Math.round(month.mins)} min audio</div></div>
+      <div class="mc blue"><div class="mc-label">Projected Monthly</div><div class="mc-val">$${(projected+RENDER_MONTHLY).toFixed(2)}</div><div class="mc-sub">incl. $${RENDER_MONTHLY} Render</div></div>
+      <div class="mc amber"><div class="mc-label">Per Call Avg</div><div class="mc-val">$${perCall.toFixed(3)}</div><div class="mc-sub">all time average</div></div>
+      <div class="mc green"><div class="mc-label">All Time</div><div class="mc-val">$${allTime.total.toFixed(2)}</div><div class="mc-sub">${allTimeCalls.length} calls analyzed</div></div>
+    </div>
+    <div class="mgmt-grid">
+      <div class="mgmt-card">
+        <div class="mgmt-card-head">
+          <div class="mgmt-card-title">This Month Breakdown</div>
+        </div>
+        <div class="mgmt-card-body">
+          <div style="display:flex;flex-direction:column;gap:10px">
+          ${[['Deepgram (transcription)','$'+month.deepgram.toFixed(3),'$0.0043/min'],['Claude (analysis)','$'+month.claude.toFixed(2),'$0.023/call'],['Render (hosting)','$'+(RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2),'$25/mo flat'],['Total','$'+(month.total+RENDER_MONTHLY/daysInMonth*dayOfMonth).toFixed(2),'']].map(([label,val,note])=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--surface);border-radius:9px;border:1px solid var(--border)">
+            <div><div style="font-size:12.5px;font-weight:600;color:var(--ink)">${label}</div>${note?`<div style="font-size:11px;color:var(--ink3);margin-top:2px">${note}</div>`:''}</div>
+            <div style="font-size:18px;font-weight:600;color:var(--lg-green-dark);font-family:var(--font-display)">${val}</div>
+          </div>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="mgmt-card">
+        <div class="mgmt-card-head">
+          <div class="mgmt-card-title">Cost by Rep — This Month</div>
+        </div>
+        <div class="mgmt-card-body flush">
+        ${repRows?`<table class="rmgmt-table-v2">
+          <colgroup>
+            <col />
+            <col style="width:70px" />
+            <col style="width:90px" />
+            <col style="width:90px" />
+          </colgroup>
+          <thead><tr>
+            <th>Rep</th>
+            <th class="col-calls">Calls</th>
+            <th class="col-calls">Audio</th>
+            <th class="col-calls">Cost</th>
+          </tr></thead>
+          <tbody>${repRows}</tbody>
+        </table>`:'<div class="empty"><p>No calls this month</p></div>'}
+        </div>
+      </div>
+    </div>`);
+}
+
+// ── REP COMPARISON PAGE ──
+let compareRepA='',compareRepB='';
+function renderCompare(opts={}){
+  if(opts.repA)compareRepA=opts.repA;
+  if(opts.repB)compareRepB=opts.repB;
+  const repNames=[...new Set(allCalls.filter(c=>!c.exclude_from_scoring).map(c=>c.rep_name))].filter(Boolean).sort();
+  const repOpts=r=>repNames.map(n=>`<option value="${esc(n)}"${n===r?' selected':''}>${esc(n)}</option>`).join('');
+  const teamSc=scc(getFC());
+  const initials=n=>(n||'').split(/\s+/).map(p=>p[0]).filter(Boolean).slice(0,2).join('').toUpperCase()||'—';
+
+  function repStats(name){
+    if(!name)return null;
+    const sc=allCalls.filter(c=>c.rep_name===name&&!c.exclude_from_scoring);
+    if(!sc.length)return null;
+    const avgK=k=>sc.length?(sc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/sc.length):0;
+    const ckPcts=CK.map(k=>sc.length?Math.round(sc.filter(c=>c.checklist?.[k]).length/sc.length*100):0);
+    const booked=sc.filter(c=>c.call_outcome==='booked').length;
+    const br=Math.round(booked/sc.length*100);
+    // compliance %
+    const compHits=sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]===true).length,0);
+    const compPossible=sc.reduce((a,c)=>a+CK.filter(k=>c.checklist?.[k]!=='na').length,0);
+    const compPct=compPossible?Math.round(compHits/compPossible*100):0;
+    // trend: split scored calls in half and compare overall
+    const oldest=[...sc].sort((a,b)=>new Date(a.call_date||a.created_at)-new Date(b.call_date||b.created_at));
+    const half=Math.floor(oldest.length/2);
+    const overall=avgK('overall');
+    const firstHalfAvg=half>0?oldest.slice(0,half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/half:0;
+    const recentHalfAvg=half>0?oldest.slice(half).reduce((a,c)=>a+(c.scores?.overall?.score||0),0)/(oldest.length-half):overall;
+    const trendDelta=recentHalfAvg-firstHalfAvg;
+    const trend=trendDelta>0.3?'up':trendDelta<-0.3?'down':'flat';
+    const coachMap={};sc.forEach(c=>(c.coaching_points||[]).forEach(p=>{coachMap[p]=(coachMap[p]||0)+1;}));
+    const topCoach=Object.entries(coachMap).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([p])=>p);
+    return{name,sc,scores:SK.map(k=>({k,avg:avgK(k)})),overall,ckPcts,br,compPct,trend,trendDelta,topCoach};
+  }
+
+  const A=repStats(compareRepA),B=repStats(compareRepB);
+  const teamAvgK=k=>teamSc.length?(teamSc.reduce((a,c)=>a+(c.scores?.[k]?.score||0),0)/teamSc.length):0;
+
+  // ── SELECTOR CARD ──
+  const selectorCard=`<div class="cmp-selector-card">
+    <div class="cmp-selector-row">
+      <div>
+        <div class="cmp-selector-col-label rep-a">● Rep A</div>
+        <select class="fsel" style="width:100%" onchange="compareRepA=this.value;renderCompare()">
+          <option value="">— select rep —</option>${repOpts(compareRepA)}
+        </select>
+      </div>
+      <div class="cmp-swap-icon">⇄</div>
+      <div>
+        <div class="cmp-selector-col-label rep-b">● Rep B</div>
+        <select class="fsel" style="width:100%" onchange="compareRepB=this.value;renderCompare()">
+          <option value="">— select rep —</option>${repOpts(compareRepB)}
+        </select>
+      </div>
+    </div>
+  </div>`;
+
+  // ── EMPTY STATE ──
+  if(!A&&!B){
+    set('page',selectorCard+`<div class="empty"><span class="empty-ico">⚖️</span><p>Select two reps above to compare their performance side by side.</p></div>`);
+    return;
+  }
+
+  // ── HERO STRIP (one card per rep) ──
+  function heroCard(R,role){
+    if(!R)return`<div class="cmp-hero-card ${role}" style="display:flex;align-items:center;justify-content:center;color:var(--ink4);font-style:italic;min-height:200px">Select a rep…</div>`;
+    const trendCls=R.trend==='up'?'up':R.trend==='down'?'down':'flat';
+    const trendArrow=R.trend==='up'?'↑':R.trend==='down'?'↓':'→';
+    const trendVal=R.trendDelta>=0?'+'+R.trendDelta.toFixed(1):R.trendDelta.toFixed(1);
+    const scoreColor=R.overall>=8?'var(--lg-green-dark)':R.overall>=5?'var(--lg-gold-dark, #8A6420)':'var(--lg-red)';
+    return`<div class="cmp-hero-card ${role}">
+      <div class="cmp-hero-rep-label">${role==='rep-a'?'Rep A':'Rep B'}</div>
+      <div class="cmp-hero-name">${esc(R.name)}</div>
+      <div class="cmp-hero-score">
+        <div class="cmp-hero-score-value" style="color:${scoreColor}">${R.overall.toFixed(1)}<span class="cmp-hero-score-suffix">/10</span></div>
+        <div class="cmp-hero-score-delta ${trendCls}">${trendArrow} ${trendVal}</div>
+      </div>
+      <div class="cmp-hero-stats">
+        <div>
+          <div class="cmp-hero-stat-label">Calls</div>
+          <div class="cmp-hero-stat-value">${R.sc.length}</div>
+        </div>
+        <div>
+          <div class="cmp-hero-stat-label">Booking</div>
+          <div class="cmp-hero-stat-value">${R.br}%</div>
+        </div>
+        <div>
+          <div class="cmp-hero-stat-label">Compliance</div>
+          <div class="cmp-hero-stat-value">${R.compPct}%</div>
+        </div>
+      </div>
+    </div>`;
+  }
+  const heroStrip=`<div class="cmp-hero-grid">
+    ${heroCard(A,'rep-a')}
+    ${heroCard(B,'rep-b')}
+  </div>`;
+
+  // ── SCORE PROFILE (dual bars per skill) ──
+  // Skip 'overall' here since hero strip already shows it
+  const skillSkIndices=SK.map((k,i)=>({k,i})).filter(x=>x.k!=='overall');
+  const scoreProfile=`<div class="cmp-score-profile">
+    <div class="cmp-score-profile-head">
+      <div class="cmp-score-profile-title">Score Profile</div>
+      <div class="cmp-score-profile-legend">
+        <div class="cmp-score-profile-legend-item"><span class="cmp-score-profile-legend-dot" style="background:var(--lg-blue, #0066B3)"></span>${A?esc(A.name):'Rep A'}</div>
+        <div class="cmp-score-profile-legend-item"><span class="cmp-score-profile-legend-dot" style="background:var(--lg-gold, #E3B124)"></span>${B?esc(B.name):'Rep B'}</div>
+        <div class="cmp-score-profile-legend-item">Team avg →</div>
+      </div>
+    </div>
+    ${skillSkIndices.map(({k,i})=>{
+      const av=A?A.scores[i].avg:null;
+      const bv=B?B.scores[i].avg:null;
+      const ta=teamAvgK(k);
+      const winner=av!==null&&bv!==null?(av>bv+0.05?'A':bv>av+0.05?'B':null):null;
+      const aWidth=av!==null?(av*10):0;
+      const bWidth=bv!==null?(bv*10):0;
+      return`<div class="cmp-skill-row">
+        <div class="cmp-skill-label">${SL[i]}</div>
+        <div class="cmp-skill-bar-cell ${winner==='A'?'winner':''}">
+          <div class="cmp-skill-bar-track">${av!==null?`<div class="cmp-skill-bar-fill rep-a" style="width:${aWidth}%"></div>`:''}</div>
+          <div class="cmp-skill-bar-value ${av===null?'empty':''}">${av!==null?av.toFixed(1):'—'}</div>
+        </div>
+        <div class="cmp-skill-bar-cell ${winner==='B'?'winner':''}">
+          <div class="cmp-skill-bar-track">${bv!==null?`<div class="cmp-skill-bar-fill rep-b" style="width:${bWidth}%"></div>`:''}</div>
+          <div class="cmp-skill-bar-value ${bv===null?'empty':''}">${bv!==null?bv.toFixed(1):'—'}</div>
+        </div>
+        <div class="cmp-skill-team">team<br><span class="cmp-skill-team-val">${ta.toFixed(1)}</span></div>
+      </div>`;
+    }).join('')}
+  </div>`;
+
+  // ── COACHING (side-by-side panels) ──
+  function coachPanel(R,role){
+    const label=role==='rep-a'?'Coaching focus':'Coaching focus';
+    if(!R)return'';
+    const items=R.topCoach.length?R.topCoach.map(p=>`<li>${esc(p)}</li>`).join(''):'<li class="cmp-coach-empty">Not enough data yet.</li>';
+    return`<div class="cmp-coach-card ${role}">
+      <div class="cmp-coach-card-title">${esc(R.name)} — ${label}</div>
+      <ul class="cmp-coach-list">${items}</ul>
+    </div>`;
+  }
+  const coachGrid=(A||B)?`<div class="cmp-coach-grid">
+    ${coachPanel(A,'rep-a')}
+    ${coachPanel(B,'rep-b')}
+  </div>`:'';
+
+  // ── 22-STEP COMPLIANCE (collapsible) ──
+  function complianceSection(){
+    if(!A&&!B)return'';
+    const hits=A&&B?Math.abs(A.compPct-B.compPct):0;
+    const pillCls=hits<=5?'':hits<=15?'mid':'low';
+    const pillText=A&&B?`Δ ${hits}%`:`${(A||B).compPct}% avg`;
+    return`<div class="detail-section" id="cmp-compliance-section">
+      <div class="detail-section-head" onclick="document.getElementById('cmp-compliance-section').classList.toggle('open')">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="detail-section-title">22-Step Compliance</div>
+          <span class="detail-section-pill ${pillCls}">${pillText}</span>
+        </div>
+        <div class="detail-section-chev">▶</div>
+      </div>
+      <div class="detail-section-body">
+        <div class="cmp-compliance-list">
+          ${CK.map((k,i)=>{
+            const ap=A?A.ckPcts[i]:null;
+            const bp=B?B.ckPcts[i]:null;
+            return`<div class="cmp-compliance-row">
+              <div class="cmp-compliance-label">${CKFULL[i]}</div>
+              <div class="cmp-compliance-bar-cell rep-a">
+                <div class="cmp-compliance-bar-track">${ap!==null?`<div class="cmp-compliance-bar-fill" style="width:${ap}%"></div>`:''}</div>
+                <div class="cmp-compliance-bar-pct">${ap!==null?ap+'%':'—'}</div>
+              </div>
+              <div class="cmp-compliance-bar-cell rep-b">
+                <div class="cmp-compliance-bar-track">${bp!==null?`<div class="cmp-compliance-bar-fill" style="width:${bp}%"></div>`:''}</div>
+                <div class="cmp-compliance-bar-pct">${bp!==null?bp+'%':'—'}</div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  set('page',selectorCard+heroStrip+scoreProfile+coachGrid+complianceSection());
+}
+
+function exportCSV(){window.open(API+'/export/csv','_blank');}
+function exportPDFCall(id){window.open(API+`/export/pdf/call/${id}`,'_blank');}
+function exportPDFRep(name){window.open(API+`/export/pdf/rep/${encodeURIComponent(name)}`,'_blank');}
+
+init();
+</script>
+</body>
+</html>
