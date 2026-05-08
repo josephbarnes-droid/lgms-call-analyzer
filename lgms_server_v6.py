@@ -2206,6 +2206,8 @@ class Handler(BaseHTTPRequestHandler):
             self._get_corrections()
         elif path == "/transcript_corrections":
             self._get_transcript_corrections_endpoint()
+        elif path.startswith("/call_transcript/"):
+            self._get_call_transcript()
         elif path.startswith("/audio_url/"):
             self._get_audio_url()
         elif path == "/vonage/status":
@@ -2573,6 +2575,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = supa("GET", "corrections?order=created_at.desc&limit=200")
             self._ok(result)
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _get_call_transcript(self):
+        try:
+            call_id = self.path.split("/call_transcript/")[1].split("?")[0]
+            result = supa("GET", f"calls?id=eq.{call_id}&select=id,transcript,word_timestamps&limit=1")
+            if not result:
+                self._err(404, "Call not found"); return
+            self._ok(result[0])
         except Exception as e:
             self._err(500, str(e))
 
