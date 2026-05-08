@@ -4515,10 +4515,8 @@ function renderCallList(){
     window._pendingOpenCallId=null;
     setTimeout(()=>{
       const row=g('row-'+callId);
-      const detail=g('detail-'+callId);
-      if(row&&detail){
-        row.classList.add('expanded');
-        detail.style.display='grid';
+      if(row){
+        toggleRow(callId);
         row.scrollIntoView({behavior:'smooth',block:'start'});
       }
     },80);
@@ -4750,7 +4748,7 @@ function buildRow(c){
   </div>` : '';
   const hasTimedTx = Array.isArray(c.word_timestamps) && c.word_timestamps.length;
   const txHint = hasTimedTx ? `<div style="font-family:var(--font-label);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink4);margin-bottom:6px">▸ Click any word to play audio from there</div>` : '';
-  const transcriptBlock = c.transcript ? `${txHint}<div class="transcript-wrap-mockup" id="tx-${c.id}">${buildTxHtml(c)}</div>` : '<div style="color:var(--ink3);font-size:12px;padding:12px">No transcript available</div>';
+  const transcriptBlock = `<div id="tx-container-${c.id}">${c.transcript ? `${txHint}<div class="transcript-wrap-mockup" id="tx-${c.id}">${buildTxHtml(c)}</div>` : `<div style="color:var(--ink3);font-size:12px;padding:12px">No transcript available</div>`}</div>`;
 
   // Action buttons
   const actionsBar = `<div class="detail-actions">
@@ -5063,12 +5061,37 @@ function jumpTx(evt,spanId){
     setTimeout(()=>span.classList.remove('active'),2500);
   },wasOpen?50:200);
 }
-function toggleRow(id){
+const _txFetching = new Set();
+async function fetchAndInjectTranscript(id){
+  if(_txFetching.has(id))return;
+  _txFetching.add(id);
+  const container=g('tx-container-'+id);
+  if(container)container.innerHTML='<div style="color:var(--ink3);font-size:12px;padding:12px"><span class="spin spin-dark"></span> Loading transcript…</div>';
+  try{
+    const r=await fetch(API+'/call_transcript/'+encodeURIComponent(id));
+    if(!r.ok)throw new Error('not found');
+    const d=await r.json();
+    const idx=allCalls.findIndex(c=>c.id===id);
+    if(idx>=0){allCalls[idx].transcript=d.transcript||'';allCalls[idx].word_timestamps=d.word_timestamps||null;}
+    const c=idx>=0?allCalls[idx]:d;
+    const hasTimedTx=Array.isArray(c.word_timestamps)&&c.word_timestamps.length;
+    const txHint=hasTimedTx?`<div style="font-family:var(--font-label);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink4);margin-bottom:6px">▸ Click any word to play audio from there</div>`:'';
+    const inner=c.transcript?`${txHint}<div class="transcript-wrap-mockup" id="tx-${c.id}">${buildTxHtml(c)}</div>`:`<div style="color:var(--ink3);font-size:12px;padding:12px">No transcript available</div>`;
+    if(container)container.innerHTML=inner;
+  }catch(e){
+    if(container)container.innerHTML='<div style="color:var(--ink3);font-size:12px;padding:12px">No transcript available</div>';
+  }finally{_txFetching.delete(id);}
+}
+async function toggleRow(id){
   const r=g('row-'+id);
   const d=g('detail-'+id);
   if(r){
-    const isOpen = r.classList.toggle('expanded');
-    if(d) d.style.display = isOpen ? 'grid' : 'none';
+    const isOpen=r.classList.toggle('expanded');
+    if(d)d.style.display=isOpen?'grid':'none';
+    if(isOpen){
+      const idx=allCalls.findIndex(c=>c.id===id);
+      if(idx>=0&&!allCalls[idx].transcript)fetchAndInjectTranscript(id);
+    }
   }
 }
 function toggleSel(id){if(selected.has(id))selected.delete(id);else selected.add(id);updateBB();const r=g('row-'+id);if(r){const cb=r.querySelector('input[type=checkbox]');if(cb)cb.checked=selected.has(id);}}
@@ -6131,26 +6154,29 @@ async function submitAudio(){
   const btn=g('add-audio-btn');btn.disabled=true;btn.innerHTML='<span class="spin"></span> Processing…';
   g('audio-progress').style.display='block';
   const skipped=[];let processed=0;const total=audioFiles.length;
-  for(let i=0;i<total;i++){
-    const af=audioFiles[i];
-    setQS(i,'processing');
-    g('audio-prog-text').textContent=`Processing ${i+1}/${total}: ${af.name}`;
-    g('audio-prog-bar').style.width=Math.round(i/total*100)+'%';
-    if(af.size>25*1024*1024){skipped.push(`${af.name} (too large)`);setQS(i,'skipped');continue;}
-    try{
-      const dupR=await fetch(API+'/check_duplicate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:af.name})});
-      const dupD=await dupR.json();
-      if(dupD.duplicate){skipped.push(`${af.name} — already exists`);setQS(i,'skipped');continue;}
-      const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=()=>rej(new Error('Read failed'));r.readAsDataURL(af);});
-      const tr=await fetch(API+'/transcribe_and_analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:b64,filename:af.name})});
-      const trD=await tr.json();
-      if(!tr.ok){skipped.push(`${af.name} (${trD.error||'failed'})`);setQS(i,'error');continue;}
-      const repName=trD.rep_name_detected&&trD.rep_name_detected!=='Unknown'?trD.rep_name_detected:'Unknown';
-      const sr=await fetch(API+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...trD,rep_name:repName,filename:af.name,check_duplicate:true})});
-      const saved=await sr.json();
-      if(!sr.ok||saved.duplicate){skipped.push(`${af.name} (${saved.duplicate?'duplicate':saved.error||'failed'})`);setQS(i,saved.duplicate?'skipped':'error');continue;}
-      allCalls.unshift(Array.isArray(saved)?saved[0]:saved);setQS(i,'done');processed++;
-    }catch(e){skipped.push(`${af.name} (${e.message})`);setQS(i,'error');}
+  for(let i=0;i<total;i+=3){
+    const batch=audioFiles.slice(i,i+3);
+    await Promise.all(batch.map(async(af,bi)=>{
+      const idx=i+bi;
+      if(af.size>25*1024*1024){skipped.push(`${af.name} (too large)`);setQS(idx,'skipped');return;}
+      setQS(idx,'processing');
+      g('audio-prog-text').textContent=`Processing batch ${Math.floor(i/3)+1}/${Math.ceil(total/3)}: ${af.name}`;
+      try{
+        const dupR=await fetch(API+'/check_duplicate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:af.name})});
+        const dupD=await dupR.json();
+        if(dupD.duplicate){skipped.push(`${af.name} — already exists`);setQS(idx,'skipped');return;}
+        const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=()=>rej(new Error('Read failed'));r.readAsDataURL(af);});
+        const tr=await fetch(API+'/transcribe_and_analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:b64,filename:af.name})});
+        const trD=await tr.json();
+        if(!tr.ok){skipped.push(`${af.name} (${trD.error||'failed'})`);setQS(idx,'error');return;}
+        const repName=trD.rep_name_detected&&trD.rep_name_detected!=='Unknown'?trD.rep_name_detected:'Unknown';
+        const sr=await fetch(API+'/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...trD,rep_name:repName,filename:af.name,check_duplicate:true})});
+        const saved=await sr.json();
+        if(!sr.ok||saved.duplicate){skipped.push(`${af.name} (${saved.duplicate?'duplicate':saved.error||'failed'})`);setQS(idx,saved.duplicate?'skipped':'error');return;}
+        allCalls.unshift(Array.isArray(saved)?saved[0]:saved);setQS(idx,'done');processed++;
+      }catch(e){skipped.push(`${af.name} (${e.message})`);setQS(idx,'error');}
+    }));
+    g('audio-prog-bar').style.width=Math.round(Math.min(i+3,total)/total*100)+'%';
   }
   g('audio-prog-bar').style.width='100%';g('audio-prog-text').textContent=`Done! ${processed} analyzed${skipped.length?`, ${skipped.length} skipped`:''}`;
   if(skipped.length){g('audio-skipped').style.display='block';g('audio-skipped-list').innerHTML=skipped.map(s=>`<div>• ${esc(s)}</div>`).join('');}
