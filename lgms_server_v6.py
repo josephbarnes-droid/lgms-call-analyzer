@@ -72,8 +72,8 @@ _batch_lock = threading.Lock()
 VONAGE_CLIENT_ID     = os.environ.get("VONAGE_CLIENT_ID", "")
 VONAGE_CLIENT_SECRET = os.environ.get("VONAGE_CLIENT_SECRET", "")
 VONAGE_ACCOUNT_ID    = os.environ.get("VONAGE_ACCOUNT_ID", "")
-VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.vonage.com").rstrip("/")
-VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://api.vonage.com/oauth2/token")
+VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.auth.prod.vonagenetworks.net/t/vbc.prod/call_recording/v1").rstrip("/")
+VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://apimanager.auth.prod.vonagenetworks.net:443/t/vbc.prod/oauth2/token")
 VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 1800))  # 30 min default
 VONAGE_AUTOSTART     = os.environ.get("VONAGE_AUTOSTART", "1") == "1"
 
@@ -1700,9 +1700,7 @@ def _vonage_get_token(force_refresh=False):
         if not force_refresh and cached.get("token") and cached.get("expires_at", 0) > now + 60:
             return cached["token"]
 
-        # TODO(vbc): Confirm the OAuth grant type. Most likely "client_credentials"
-        # for server-to-server VBC integrations, but VBC docs may specify otherwise.
-        # If they require Basic auth in the header instead of body, swap to that.
+        # Vonage VBC uses client_credentials OAuth grant for server-to-server auth.
         body = urllib.parse.urlencode({
             "grant_type": "client_credentials",
             "client_id": VONAGE_CLIENT_ID,
@@ -1769,22 +1767,23 @@ def _vonage_list_recordings(since_iso):
     Pagination is handled internally (follows next-page links until
     exhausted).
     """
-    # TODO(vbc): Confirm the actual endpoint path. Educated guess:
-    #   /vbc/v1/accounts/{account_id}/call_recordings
-    #   /api/v1/accounts/{account_id}/recordings
-    # The path will include the account ID. Filter param for time-bounded
-    # queries is typically called "start" or "from" — adjust to match docs.
-    endpoint = f"/vbc/v1/accounts/{VONAGE_ACCOUNT_ID}/call_recordings"
+    # Endpoint confirmed from Vonage VBC Call Recording API docs.
+    # Filters to INBOUND only. Pagination via _links.next.href.
+    endpoint = f"/accounts/{VONAGE_ACCOUNT_ID}/company_call_recordings"
 
     all_items = []
     next_page = None
     page_count = 0
     while True:
         page_count += 1
-        if page_count > 50:  # Safety brake — never paginate forever
+        if page_count > 50:
             log("  Vonage list paginated past 50 pages, stopping for safety")
             break
-        params = {"start": since_iso, "page_size": 100}
+        params = {
+            "call_direction": "INBOUND",
+            "start:gte": since_iso,
+            "page_size": 100,
+        }
         if next_page:
             params["page"] = next_page
         try:
@@ -1793,38 +1792,31 @@ def _vonage_list_recordings(since_iso):
             log(f"  Vonage list error on page {page_count}: {e}")
             raise
 
-        # TODO(vbc): The response shape is unknown until we see the real one.
-        # Most VBC APIs return either:
-        #   {"items": [...], "_links": {"next": {"href": "..."}}}
-        # or
-        #   {"data": [...], "next_cursor": "..."}
-        # Adjust these two lines once the real shape is known:
-        items = resp.get("items") or resp.get("data") or []
+        # Response: {"_embedded": {"recordings": [...]}, "_links": {"next": {"href": "..."}}, ...}
+        items = (resp.get("_embedded") or {}).get("recordings") or []
         all_items.extend(items)
 
-        # Pagination cursor extraction — also needs confirmation:
         next_link = (resp.get("_links") or {}).get("next") or {}
-        next_page = next_link.get("href") or resp.get("next_cursor")
+        next_href = next_link.get("href")
+        if not next_href:
+            break
+        import re as _re
+        page_match = _re.search(r'[?&]page=(\d+)', next_href)
+        next_page = int(page_match.group(1)) if page_match else None
         if not next_page:
             break
 
     return all_items
 
 
-def _vonage_download_recording(recording_id):
-    """Download the audio bytes for a single recording.
-
+def _vonage_download_recording(download_url):
+    """Download audio bytes using the download_url field from the recording object.
+    The URL is absolute — no need to construct it.
     Returns (audio_bytes, mime_type). Raises on error.
     """
-    # TODO(vbc): Confirm download endpoint. Could be:
-    #   /vbc/v1/accounts/{account_id}/call_recordings/{recording_id}/download
-    #   /vbc/v1/recordings/{recording_id}/audio
-    # And it may require a separate signed URL fetch first. Adjust as needed.
-    endpoint = f"/vbc/v1/accounts/{VONAGE_ACCOUNT_ID}/call_recordings/{recording_id}/download"
     token = _vonage_get_token()
-    url = f"{VONAGE_API_BASE}{endpoint}"
     req = urllib.request.Request(
-        url,
+        download_url,
         headers={"Authorization": f"Bearer {token}", "Accept": "audio/mpeg, audio/*"},
         method="GET",
     )
@@ -1836,7 +1828,7 @@ def _vonage_download_recording(recording_id):
     except urllib.error.HTTPError as e:
         if e.code == 401:
             _vonage_get_token(force_refresh=True)
-            return _vonage_download_recording(recording_id)
+            return _vonage_download_recording(download_url)
         err = e.read().decode("utf-8", errors="replace")[:300] if e.fp else ""
         raise RuntimeError(f"Recording download failed: HTTP {e.code} — {err}")
 
@@ -1889,12 +1881,17 @@ def _vonage_process_one(recording, ext_map, keyterms, tx_corrections):
     pipeline, attribute to rep based on extension mapping. Returns one of
     'ingested', 'skipped', 'duplicate', 'failed'.
     """
-    # TODO(vbc): These field names are guesses. Confirm against real API response.
-    recording_id    = recording.get("id") or recording.get("recording_id")
-    extension_id    = recording.get("extension_id") or recording.get("extension") or ""
-    started_at      = recording.get("start_time") or recording.get("call_started_at") or recording.get("created_at")
-    duration_secs   = recording.get("duration") or recording.get("duration_seconds") or 0
-    filename_hint   = recording.get("filename") or f"vonage_{recording_id}.mp3"
+    # Field names confirmed from Vonage VBC Call Recording API docs.
+    # duration is in milliseconds — divide by 1000 for seconds.
+    # extensions is an array — take first element for rep mapping.
+    recording_id  = recording.get("id")
+    download_url  = recording.get("download_url", "")
+    extensions    = recording.get("extensions") or []
+    extension_id  = str(extensions[0]) if extensions else ""
+    started_at    = recording.get("start")
+    duration_ms   = recording.get("duration") or 0
+    duration_secs = int(duration_ms) // 1000
+    filename_hint = recording.get("file_name") or f"vonage_{recording_id}.mp3"
 
     if not recording_id:
         log(f"  Vonage: recording missing ID, skipping: {recording}")
@@ -1918,9 +1915,11 @@ def _vonage_process_one(recording, ext_map, keyterms, tx_corrections):
         _vonage_record_status(recording_id, "skipped", error_message=reason)
         return "skipped"
 
-    # Download audio
+    if not download_url:
+        _vonage_record_status(recording_id, "failed", error_message="No download_url in recording object")
+        return "failed"
     try:
-        audio_bytes, mime = _vonage_download_recording(recording_id)
+        audio_bytes, mime = _vonage_download_recording(download_url)
     except Exception as e:
         _vonage_record_status(recording_id, "failed", error_message=str(e)[:500])
         log(f"  Vonage download failed for {recording_id}: {e}")
