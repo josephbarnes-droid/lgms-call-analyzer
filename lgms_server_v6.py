@@ -1700,16 +1700,23 @@ def _vonage_get_token(force_refresh=False):
         if not force_refresh and cached.get("token") and cached.get("expires_at", 0) > now + 60:
             return cached["token"]
 
-        # Vonage VBC uses client_credentials OAuth grant for server-to-server auth.
+        # Vonage VBC (WSO2 gateway) requires client credentials as Basic auth header.
+        # scope=default is required by this gateway.
+        import base64 as _b64
+        credentials = _b64.b64encode(
+            f"{VONAGE_CLIENT_ID}:{VONAGE_CLIENT_SECRET}".encode()
+        ).decode()
         body = urllib.parse.urlencode({
             "grant_type": "client_credentials",
-            "client_id": VONAGE_CLIENT_ID,
-            "client_secret": VONAGE_CLIENT_SECRET,
+            "scope": "default",
         }).encode()
         req = urllib.request.Request(
             VONAGE_TOKEN_URL,
             data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {credentials}",
+            },
             method="POST",
         )
         try:
@@ -1723,6 +1730,8 @@ def _vonage_get_token(force_refresh=False):
         expires_in = int(resp.get("expires_in", 3600))
         if not token:
             raise RuntimeError(f"OAuth token response missing access_token: {resp}")
+
+        log(f"  Vonage: token obtained, expires in {expires_in}s")
 
         cached["token"] = token
         cached["expires_at"] = now + expires_in
