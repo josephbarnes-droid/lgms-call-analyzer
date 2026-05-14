@@ -72,7 +72,7 @@ _batch_lock = threading.Lock()
 VONAGE_CLIENT_ID     = os.environ.get("VONAGE_CLIENT_ID", "")
 VONAGE_CLIENT_SECRET = os.environ.get("VONAGE_CLIENT_SECRET", "")
 VONAGE_ACCOUNT_ID    = os.environ.get("VONAGE_ACCOUNT_ID", "")
-VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.auth.prod.vonagenetworks.net/t/vbc.prod/call_recording/v1").rstrip("/")
+VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.vonage.com/t/vbc.prod/call_recording/api").rstrip("/")
 VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://apimanager.auth.prod.vonagenetworks.net:443/t/vbc.prod/oauth2/token")
 VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 1800))  # 30 min default
 VONAGE_AUTOSTART     = os.environ.get("VONAGE_AUTOSTART", "1") == "1"
