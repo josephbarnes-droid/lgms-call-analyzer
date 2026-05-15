@@ -1992,22 +1992,34 @@ def _vonage_process_one(recording, ext_map, keyterms, tx_corrections):
 
     # Override rep_name from extension mapping. Extension ID is more reliable
     # than transcript inference because it's tied to the Vonage user account.
+    # If no mapping exists, fall back to whatever transcript inference detected.
+    # Only set "Unknown — ext X" if both the mapping and transcript both failed.
     if call_id and extension_id:
         ext_str = str(extension_id)
         mapped_name = ext_map.get(ext_str)
         if mapped_name:
+            # Extension mapping is most reliable — always use it
             try:
                 supa("PATCH", f"calls?id=eq.{call_id}", {"rep_name": mapped_name})
             except Exception as e:
                 log(f"  Vonage: failed to apply rep mapping for ext {ext_str}: {e}")
         else:
-            # Auto-create "Unknown" rep_name including the extension so it shows
-            # up in the Unmatched Reps panel in Management for easy mapping.
-            unknown_name = f"Unknown — ext {ext_str}"
+            # No extension mapping — check what transcript inference saved
             try:
-                supa("PATCH", f"calls?id=eq.{call_id}", {"rep_name": unknown_name})
-            except Exception as e:
-                log(f"  Vonage: failed to set unknown rep name: {e}")
+                call_row = supa("GET", f"calls?id=eq.{call_id}&select=rep_name&limit=1")
+                transcript_rep = (call_row[0].get("rep_name") or "") if call_row else ""
+            except Exception:
+                transcript_rep = ""
+            if not transcript_rep or transcript_rep.lower() == "unknown":
+                # Transcript also came up empty — mark with extension so it shows
+                # in the Unmatched Reps panel in Management for easy mapping later
+                unknown_name = f"Unknown — ext {ext_str}"
+                try:
+                    supa("PATCH", f"calls?id=eq.{call_id}", {"rep_name": unknown_name})
+                except Exception as e:
+                    log(f"  Vonage: failed to set unknown rep name: {e}")
+            else:
+                log(f"  Vonage: no ext mapping for {ext_str}, keeping transcript-detected rep '{transcript_rep}'")
 
     _vonage_record_status(recording_id, "done", call_id=call_id)
     return "ingested"
