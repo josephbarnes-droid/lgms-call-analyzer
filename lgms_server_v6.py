@@ -76,7 +76,7 @@ VONAGE_VBC_USERNAME  = os.environ.get("VONAGE_VBC_USERNAME", "")
 VONAGE_VBC_PASSWORD  = os.environ.get("VONAGE_VBC_PASSWORD", "")
 VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.vonage.com/t/vbc.prod/call_recording/api").rstrip("/")
 VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://apimanager.auth.prod.vonagenetworks.net:443/t/vbc.prod/oauth2/token")
-VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 300))  # 5 min for testing (change back to 1800 when working)
+VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 1800))  # 30 min default
 VONAGE_AUTOSTART     = os.environ.get("VONAGE_AUTOSTART", "1") == "1"
 
 # OAuth token cache. Refreshed automatically when expired or on 401.
@@ -1905,7 +1905,7 @@ def _vonage_process_one(recording, ext_map, keyterms, tx_corrections):
     # Field names confirmed from Vonage VBC Call Recording API docs.
     # duration is in milliseconds — divide by 1000 for seconds.
     # extensions is an array — take first element for rep mapping.
-    recording_id  = recording.get("id")
+    recording_id  = str(recording.get("id") or "")
     download_url  = recording.get("download_url", "")
     extensions    = recording.get("extensions") or []
     extension_id  = str(extensions[0]) if extensions else ""
