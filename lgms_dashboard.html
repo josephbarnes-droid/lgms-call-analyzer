@@ -5664,10 +5664,11 @@ function openRepProfile(repName){
 // ── MANAGEMENT ──
 let expandedRep=null;
 function renderManagement(){
-  const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
-  // Also show unmatched reps — in calls but no roster record
+  const namesFromCalls=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean);
+  const namesFromRoster=reps.map(r=>r.full_name).filter(Boolean);
+  const repNames=[...new Set([...namesFromCalls,...namesFromRoster])].sort();
   const rosterNames=new Set(reps.flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
-  const unmatched=repNames.filter(r=>!rosterNames.has(r));
+  const unmatched=namesFromCalls.filter(r=>!rosterNames.has(r));
 
   const rows=repNames.map(r=>{
     const cnt=allCalls.filter(c=>c.rep_name===r).length;
