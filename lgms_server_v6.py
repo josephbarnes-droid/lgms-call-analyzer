@@ -76,7 +76,7 @@ VONAGE_VBC_USERNAME  = os.environ.get("VONAGE_VBC_USERNAME", "")
 VONAGE_VBC_PASSWORD  = os.environ.get("VONAGE_VBC_PASSWORD", "")
 VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.vonage.com/t/vbc.prod/call_recording/api").rstrip("/")
 VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://apimanager.auth.prod.vonagenetworks.net:443/t/vbc.prod/oauth2/token")
-VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 1800))  # 30 min default
+VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 300))  # 5 min for testing (change back to 1800 when working)
 VONAGE_AUTOSTART     = os.environ.get("VONAGE_AUTOSTART", "1") == "1"
 
 # OAuth token cache. Refreshed automatically when expired or on 401.
@@ -1767,7 +1767,7 @@ def _vonage_api(method, path, params=None, retry_on_401=True):
         method=method,
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=120) as r:
             data = r.read()
             if not data:
                 return None
@@ -1788,9 +1788,8 @@ def _vonage_list_recordings(since_iso):
     Pagination is handled internally (follows next-page links until
     exhausted).
     """
-    # Endpoint confirmed from Vonage VBC Call Recording API docs.
-    # Filters to INBOUND only. Pagination via _links.next.href.
-    endpoint = f"/accounts/{VONAGE_ACCOUNT_ID}/company_call_recordings"
+    # Use "self" to refer to the authenticated user's account (per Vonage docs)
+    endpoint = f"/accounts/self/company_call_recordings"
 
     all_items = []
     next_page = None
@@ -1802,9 +1801,10 @@ def _vonage_list_recordings(since_iso):
             break
         params = {
             "call_direction": "INBOUND",
-            "start:gte": since_iso,
-            "page_size": 100,
+            "page_size":      10,
         }
+        if since_iso:
+            params["start:gte"] = since_iso
         if next_page:
             params["page"] = next_page
         try:
