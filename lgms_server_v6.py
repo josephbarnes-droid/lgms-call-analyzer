@@ -62,16 +62,18 @@ _batch_lock = threading.Lock()
 #   VONAGE_CLIENT_ID       — OAuth client ID from VBC API dashboard
 #   VONAGE_CLIENT_SECRET   — OAuth client secret
 #   VONAGE_ACCOUNT_ID      — VBC account identifier (used in API URL paths)
+#   VONAGE_VBC_USERNAME    — VBC integration user username (for password grant)
+#   VONAGE_VBC_PASSWORD    — VBC integration user password (for password grant)
 #   VONAGE_API_BASE        — Base URL for VBC API
-#                            (default https://api.vonage.com — confirm in dashboard)
 #   VONAGE_TOKEN_URL       — OAuth token endpoint
-#                            (default https://api.vonage.com/oauth2/token — confirm)
 #   VONAGE_POLL_INTERVAL   — Seconds between polls (default 1800 = 30 min)
 #   VONAGE_AUTOSTART       — "1" to auto-start polling at boot (default "1")
 
 VONAGE_CLIENT_ID     = os.environ.get("VONAGE_CLIENT_ID", "")
 VONAGE_CLIENT_SECRET = os.environ.get("VONAGE_CLIENT_SECRET", "")
 VONAGE_ACCOUNT_ID    = os.environ.get("VONAGE_ACCOUNT_ID", "")
+VONAGE_VBC_USERNAME  = os.environ.get("VONAGE_VBC_USERNAME", "")
+VONAGE_VBC_PASSWORD  = os.environ.get("VONAGE_VBC_PASSWORD", "")
 VONAGE_API_BASE      = os.environ.get("VONAGE_API_BASE", "https://api.vonage.com/t/vbc.prod/call_recording/api").rstrip("/")
 VONAGE_TOKEN_URL     = os.environ.get("VONAGE_TOKEN_URL", "https://apimanager.auth.prod.vonagenetworks.net:443/t/vbc.prod/oauth2/token")
 VONAGE_POLL_INTERVAL = int(os.environ.get("VONAGE_POLL_INTERVAL", 1800))  # 30 min default
@@ -1700,16 +1702,26 @@ def _vonage_get_token(force_refresh=False):
         if not force_refresh and cached.get("token") and cached.get("expires_at", 0) > now + 60:
             return cached["token"]
 
-        # Vonage VBC (WSO2 gateway) requires client credentials as Basic auth header.
-        # scope=default is required by this gateway.
+        # Vonage VBC (WSO2 gateway) — use password grant with VBC integration
+        # user credentials if available, otherwise fall back to client_credentials.
         import base64 as _b64
         credentials = _b64.b64encode(
             f"{VONAGE_CLIENT_ID}:{VONAGE_CLIENT_SECRET}".encode()
         ).decode()
-        body = urllib.parse.urlencode({
-            "grant_type": "client_credentials",
-            "scope": "default",
-        }).encode()
+        if VONAGE_VBC_USERNAME and VONAGE_VBC_PASSWORD:
+            body = urllib.parse.urlencode({
+                "grant_type": "password",
+                "username":   VONAGE_VBC_USERNAME,
+                "password":   VONAGE_VBC_PASSWORD,
+                "scope":      "default",
+            }).encode()
+            log("  Vonage: requesting token via password grant (VBC integration user)")
+        else:
+            body = urllib.parse.urlencode({
+                "grant_type": "client_credentials",
+                "scope":      "default",
+            }).encode()
+            log("  Vonage: requesting token via client_credentials grant")
         req = urllib.request.Request(
             VONAGE_TOKEN_URL,
             data=body,
