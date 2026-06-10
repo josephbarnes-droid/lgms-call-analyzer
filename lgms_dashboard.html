@@ -5663,6 +5663,7 @@ function openRepProfile(repName){
 
 // ── MANAGEMENT ──
 let expandedRep=null;
+let selectedReps=new Set();
 function renderManagement(){
   const namesFromCalls=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean);
   const namesFromRoster=reps.map(r=>r.full_name).filter(Boolean);
@@ -5684,7 +5685,7 @@ function renderManagement(){
       ?`<span class="loc-tag">${esc(dbRep.location)}</span>`
       :`<span class="rmgmt-loc-empty">⚠ Unset</span>`;
 
-    const editPanel=isExpanded?`<tr class="rmgmt-edit-row" id="panel-${esc(r)}"><td colspan="6">
+    const editPanel=isExpanded?`<tr class="rmgmt-edit-row" id="panel-${esc(r)}"><td colspan="7">
       <div class="rmgmt-edit-panel">
         <div class="rmgmt-edit-block">
           <div class="rmgmt-edit-block-label">Rename</div>
@@ -5714,7 +5715,9 @@ function renderManagement(){
       </div>
     </td></tr>`:'';
 
+    const isChecked=selectedReps.has(r);
     return`<tr class="rmgmt-row${isExpanded?' expanded':''}" onclick="expandedRep=expandedRep==='${esc(r)}'?null:'${esc(r)}';renderManagement()">
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${isChecked?'checked':''} data-rep="${esc(r)}" onchange="toggleRepSel('${esc(r)}',this.checked)" /></td>
       <td><div class="rmgmt-name"><span class="rmgmt-name-chev">▶</span>${esc(r)}</div></td>
       <td class="col-loc">${locCell}</td>
       <td class="col-calls">${cnt}</td>
@@ -5767,12 +5770,16 @@ function renderManagement(){
       <div class="mgmt-card">
         <div class="mgmt-card-head">
           <div class="mgmt-card-title">Rep Roster</div>
-          <button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="btn btn-d btn-sm" id="del-sel-reps-btn" style="display:none" onclick="doDeleteSelectedReps()">🗑 Delete selected (<span id="del-sel-cnt">0</span>)</button>
+            <button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button>
+          </div>
         </div>
         <p class="mgmt-card-subtitle">Click a rep to expand editing options.</p>
         <div class="mgmt-card-body flush">
           <table class="rmgmt-table-v2">
             <colgroup>
+              <col style="width:32px" />
               <col class="col-name" />
               <col class="col-loc" />
               <col class="col-calls" />
@@ -5781,6 +5788,7 @@ function renderManagement(){
               <col class="col-actions" />
             </colgroup>
             <thead><tr>
+              <th style="width:32px"><input type="checkbox" id="sel-all-reps" onchange="toggleSelAllReps(this.checked)" onclick="event.stopPropagation()" /></th>
               <th>Name</th>
               <th class="col-loc">Location</th>
               <th class="col-calls">Calls</th>
@@ -5788,7 +5796,7 @@ function renderManagement(){
               <th class="col-status">Status</th>
               <th class="col-actions"></th>
             </tr></thead>
-            <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody>
+            <tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody>
           </table>
         </div>
       </div>
@@ -5823,6 +5831,48 @@ function renderManagement(){
     </div></div>`);
 }
 
+function toggleRepSel(repName,checked){
+  if(checked)selectedReps.add(repName);else selectedReps.delete(repName);
+  const btn=g('del-sel-reps-btn'),cnt=g('del-sel-cnt');
+  if(btn)btn.style.display=selectedReps.size>0?'':'none';
+  if(cnt)cnt.textContent=selectedReps.size;
+  const allBox=g('sel-all-reps');
+  if(allBox){
+    const boxes=document.querySelectorAll('[data-rep]');
+    allBox.indeterminate=selectedReps.size>0&&selectedReps.size<boxes.length;
+    allBox.checked=boxes.length>0&&selectedReps.size===boxes.length;
+  }
+}
+function toggleSelAllReps(checked){
+  document.querySelectorAll('[data-rep]').forEach(cb=>{
+    const r=cb.getAttribute('data-rep');
+    cb.checked=checked;
+    if(checked)selectedReps.add(r);else selectedReps.delete(r);
+  });
+  const btn=g('del-sel-reps-btn'),cnt=g('del-sel-cnt');
+  if(btn)btn.style.display=selectedReps.size>0?'':'none';
+  if(cnt)cnt.textContent=selectedReps.size;
+}
+async function doDeleteSelectedReps(){
+  if(!selectedReps.size)return;
+  const names=[...selectedReps];
+  const totalCalls=names.reduce((acc,r)=>acc+allCalls.filter(c=>c.rep_name===r).length,0);
+  const msg=totalCalls>0
+    ?`Delete ${names.length} rep${names.length>1?'s':''}? This will NOT delete their ${totalCalls} call${totalCalls>1?'s':''} — those calls will appear as unmatched.`
+    :`Delete ${names.length} rep${names.length>1?'s':''}? They have no calls.`;
+  if(!confirm(msg))return;
+  for(const r of names){
+    const dbRep=reps.find(rep=>rep.full_name===r||rep.nickname===r);
+    if(!dbRep?.id){console.warn('No DB id for rep:',r);continue;}
+    try{
+      const res=await fetch(API+'/reps/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:dbRep.id})});
+      if(!res.ok)throw new Error(await res.text());
+    }catch(e){alert(`Failed to delete ${r}: ${e.message}`);return;}
+  }
+  selectedReps.clear();
+  await loadReps();
+  renderManagement();
+}
 async function doInlineRename(repName){
   const el=g('ren-'+repName),msg=g('ren-msg-'+repName);
   const n=el?.value?.trim();if(!n){if(msg)msg.innerHTML='<span style="color:var(--red)">Enter a new name</span>';return;}
