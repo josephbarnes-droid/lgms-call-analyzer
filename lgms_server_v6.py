@@ -175,7 +175,7 @@ WHAT A 10/10 CALL LOOKS LIKE:
 - Delivers price confidently with value framing first
 - Uses multiple salesmanship phrases naturally throughout
 - Assumes the close — moves to scheduling without asking permission
-- Overcomes any objection with specific counters (FCFS, availability, value, urgency)
+- Overcomes any objection with specific counters (FCFS, no deposit, availability, value)
 - Sets clear expectations for confirmation and day-of communication
 - Customer feels like they made the right choice
 
@@ -311,7 +311,7 @@ ASSUMED CLOSE: if rep moved directly to scheduling without asking permission (e.
 
 CLOSING LANGUAGE (strong signals):
 "I have a spot available", "let me get you on the board/schedule/calendar",
-"first come first serve", "no cancellation fee",
+"first come first serve", "no cancellation fee", "no deposit to hold a spot",
 "save/hold that for you", "get you taken care of", "let me go ahead and book"
 
 OBJECTION HANDLING:
@@ -319,27 +319,20 @@ OBJECTION HANDLING:
 - abandoned: rep accepted without counter ("ok call us back", "completely understand", "no problem")
 
 Ideal counters:
-- Need to think → "Let me hold that spot while you decide — it's first come first serve"
-- Need to check with partner → "Want me to lock that in while you check? We can always adjust"
+- Need to think → "No deposit required — would it make sense to hold the spot while you decide?"
+- Need to check with partner → "No deposit to hold — want me to lock that in while you check?"
 - Price too high → "What were you expecting? Let me see what I can do"
 - Already have a quote → "What are they quoting? We'd love to earn your business today"
 
-CAPACITY / UNAVAILABILITY:
-When LGMS cannot accommodate the customer (fully booked, wrong date, wrong location):
-- Score positively if rep offers alternatives: a different date, referral to another mover,
-  a waitlist, or a sister company. This shows professionalism and protects LGMS reputation.
-- Score negatively if rep simply says "we're booked" with no further help.
-- A strong rep turns a turned-away call into a goodwill moment.
-
 FOLLOW-UP LANGUAGE (important for soft pipeline):
-Good reps mention: follow-up call timeframe, first come first serve, urgency framing.
+Good reps mention: follow-up call timeframe, first come first serve, no deposit to hold.
 Missing these on soft pipeline = coaching point.
 
 pipeline_recovery_quality (soft_pipeline only, 1-10):
 - 1-3: "ok call us back" — no next step
 - 4-6: sent email estimate, some info
-- 7-8: specific callback time + FCFS + urgency framing
-- 9-10: held spot + callback + email + FCFS + urgency — clear path to book
+- 7-8: specific callback time + FCFS + no deposit mentioned
+- 9-10: held spot + callback + email + FCFS + no deposit — clear path to book
 
 STEP 9 — RAPPORT OPPORTUNITIES:
 Scan for moments where customer shared something personal, stressful, or emotionally significant.
@@ -349,10 +342,6 @@ Examples:
 - Life event (divorce, new job) → empathy
 - Stressed/anxious → reassurance
 - Bad experience with movers → "That won't happen with us"
-- Customer mentions past positive experience, referral, or brand recognition (used us before,
-  friend recommended, sees our trucks, heard great things) → rep should warmly acknowledge and
-  thank them: "That means a lot to us", "We really appreciate the referral", "So glad to hear that"
-  Failing to acknowledge a loyalty/referral signal = missed rapport opportunity and coaching point
 
 STEP 10 — SALESMANSHIP:
 Score on CONCEPT not exact words.
@@ -363,7 +352,6 @@ ALWAYS-RELEVANT (most calls):
 - We show up / reliable / don't miss appointments
 - Proper equipment / trucks / tools
 - Customer reassurance from concern — when customer expresses worry, rep responds with specific LGMS quality
-- Asked "How did you hear about us?" — positive signal on any call; helps track referrals and marketing sources
 
 SITUATIONAL (when applicable):
 - "Clothes in the dresser" — bedroom furniture present
@@ -384,12 +372,6 @@ HOURLY VALUE PROPS (when pricing_model = hourly):
 - Clock starts on arrival not drive time
 - Flexibility for extra tasks
 - MUST provide estimated hours — if not given, coaching point
-
-DECISION PROCESS AWARENESS:
-On non-booked calls (soft_pipeline, lost, estimate_sent): if the customer has NOT volunteered where
-they are in the decision process (comparing quotes, not sure yet, ready to book, etc.), the rep
-should proactively ask — e.g. "Are you still comparing options?" or "How soon are you looking to
-make a decision?" Failing to ask when the customer's intent is unclear = coaching point.
 
 CUSTOMER NAME USAGE:
 - Never used: no contribution
@@ -441,7 +423,7 @@ CHECKLIST VALUES: true | false | "na"
 STEP 12 — SCORING (1-10 each):
 
 OVERALL — server recalculates. Sanity check:
-overall = round(closing*0.25 + price*0.10 + rapport*0.20 + salesmanship*0.20 + info_control*0.15 + professionalism*0.10)
+overall = round(closing*0.25 + price*0.15 + rapport*0.15 + salesmanship*0.20 + info_control*0.15 + professionalism*0.10)
 
 CLOSING ATTEMPT (25% weight):
 - 1-2: Never attempted
@@ -449,11 +431,11 @@ CLOSING ATTEMPT (25% weight):
 - 5-6: One attempt, gave up too easily
 - 7: MINIMUM if rep assumed the close
 - 7-8: Clear attempt, handled at least one objection
-- 9: Strong, used FCFS/urgency, overcame objections
+- 9: Strong, used FCFS/no-deposit/urgency, overcame objections
 - 10: Multiple attempts, assumed close, overcame all objections
 Timeline adjustment: exact date or this week = not booking after real attempt is NOT penalized, not attempting IS penalized
 
-PRICE DELIVERY (10% weight):
+PRICE DELIVERY (15% weight):
 
 ═══ POINTED quotes ═══
 - 1-3: No price given on the call
@@ -482,24 +464,6 @@ For each missing mechanic on an hourly call, add a coaching point
 naming the specific mechanic ("did not mention the mileage fee",
 "did not explain quarter-hour rounding", etc.)
 
-═══ LOAD / UNLOAD ONLY calls (move_category = unload_only) ═══
-When the customer has a container, POD, or rental truck and only needs labor, add coaching points for:
-- Did rep ask or confirm the size of the truck or container? (critical for accurate pricing)
-- Did rep recommend or confirm the number of pads and straps needed?
-- Did rep find out the destination address or drop-off location?
-Each of these missed = individual coaching point.
-
-═══ POINTED — inventory adjustment language ═══
-On pointed/flat-rate quotes, rep should mention that the inventory taken during the call is what
-the price is based on, and that the price can be adjusted up or down if anything changes before
-move day. Omitting this = coaching point: "Did not mention that price adjusts if inventory changes."
-
-═══ STORAGE calls (move_category = storage) ═══
-When the customer is moving into or accessing storage, add coaching points for:
-- Did rep recommend a unit size and/or number of units needed?
-- Did rep recommend a local storage facility (if customer doesn't already have one)?
-Each missed = individual coaching point.
-
 ═══ MODEL ANCHORING (applies to both) ═══
 
 Whether pointed or hourly, the rep should explicitly state which
@@ -519,21 +483,17 @@ When the anchoring coaching point applies, include in coaching_points
 phrasing like: "Did not explicitly anchor the quote as [hourly/pointed].
 Should clarify pricing model when delivering price for new customers."
 
-RAPPORT & TONE (20% weight):
-- 1-3: Flat, missed emotional moments, ignored loyalty/referral signals
-- 4-6: Polite but mechanical, minimal acknowledgment
-- 7-8: Warm, acknowledged situation, recognized loyalty/referral with appreciation
-- 9-10: Genuine connection, used situation to reinforce LGMS trust, warmly acknowledged
-        any positive feedback or referrals, customer felt heard
+RAPPORT & TONE (15% weight):
+- 1-3: Flat, missed emotional moments
+- 4-6: Polite but mechanical
+- 7-8: Warm, acknowledged situation
+- 9-10: Genuine connection, used situation to reinforce LGMS trust
 
 SALESMANSHIP (20% weight): see Step 10 rubric
 
 INFORMATION & CONTROL (15% weight — combined):
 Score on what was gathered AND how well rep steered the call.
 Penalize only if required info never obtained. Natural conversation scores well. Do not penalize N/A items.
-Required info always includes: phone number and email address. Missing either = scoring penalty.
-Getting both phone AND email on a soft pipeline or booked call is especially important — penalize
-if a call ends without capturing at least one contact method.
 
 PROFESSIONALISM (10% weight):
 Expectation setting, email explanation, day-of call mention, clean wrap-up, handling complications smoothly.
@@ -558,50 +518,22 @@ CLOSING / URGENCY:
   (use singular form even if rep said "fees")
 - "save that for you" — rep offered to hold/save the spot
 - "go ahead and book" — assumptive close language
-- "put you in that spot" — rep offered to place customer in a specific open slot
-  (covers "get you in that spot", "put you in there", similar slot-claiming language)
-- "schedule you" — rep offered to schedule the customer directly
-  (covers "get you scheduled", "schedule that for you", "go ahead and schedule")
-- "reserve the date" — rep offered to reserve or hold the date
-  (covers "hold that date", "lock in the date", "reserve that for you")
-- "email your quote" — rep offered to email the quote or estimate
-  (covers "send you the quote", "email that over", "shoot you the estimate")
+- "no deposit" — rep noted no deposit needed (use singular "deposit"
+  even if rep said "deposits")
+
 VALUE PROPS:
 - "background checked" — rep mentioned crew is background-checked,
   background-screened, "guys pass background checks", or similar
 - "no day labor" — rep distinguished from day labor / temps
 - "we show up" — rep emphasized reliability, "don't miss appointments"
 - "clothes in the dresser" — rep mentioned this specific service
-- "disassemble" — rep mentioned taking apart / disassembling furniture
-  (use canonical "disassemble" even if rep said "take apart" or "disassembling")
-- "reassemble" — rep mentioned putting furniture back together / reassembling
-  (use canonical "reassemble" even if rep said "put it back together", "reassembly")
-- "price won't change" — rep stated the price is locked in / won't change
-  (covers "price doesn't change", "that price is locked", "flat rate won't change")
-- "adjust the price" — rep mentioned price can be adjusted if inventory changes
-  (covers "we'll adjust", "price will be adjusted", "update the price")
-- "we don't overbook" — rep mentioned LGMS does not overbook or double-book dates
-  (covers "don't double book", "never overbook", "won't overbook you")
-- "prorate" — rep mentioned proration or only paying for time used
-  (covers "pro-rate", "prorate the time", "only pay for the time used", "rounded to the quarter")
-- "place in the room" — rep mentioned placing furniture/boxes in the room the customer wants
-  (covers "put it where you want", "place boxes in the room", "set it up in the room you want")
-- "employee staff" — rep mentioned movers are full-time employees (not contractors or day labor)
-  (covers "work for us full time", "our employees", "on our payroll", "W2 employees")
-- "damage coverage" — rep mentioned coverage for damage up to a dollar amount
-  (covers "covered for damage", "up to X dollars", "damage protection", "liability coverage")
-- "full value protection" — rep specifically mentioned Full Value Protection by name
-  (covers "FVP", "full value protection plan", "full replacement value")
+- "disassemble" — rep mentioned disassembly/reassembly of furniture
+  (use canonical "disassemble" even if rep said "take apart" or
+  "disassembling")
 
 PROCESS:
 - "confirmation call" — rep mentioned the day-of or week-of
   confirmation call
-- "offered alternative" — when LGMS could not accommodate, rep offered
-  a referral, alternative date, waitlist, or other option to help the customer
-- "call when on the way" — rep mentioned the crew will call when they are on their way
-  (covers "give you a call when we're headed over", "call before we arrive", "call on the way")
-- "payment at the end" — rep mentioned payment is collected at the end of the job
-  (covers "we take payment at the end", "pay when we're done", "collect payment after")
 
 Return CHARACTER POSITION of first occurrence in the transcript.
 ONLY include keywords actually said by the REP. Don't include things
@@ -1109,8 +1041,8 @@ def calculate_weighted_overall(scores):
     """Calculate weighted overall score server-side — guaranteed accuracy."""
     w = {
         "closing_attempt":      0.25,
-        "price_delivery":       0.10,
-        "rapport_tone":         0.20,
+        "price_delivery":       0.15,
+        "rapport_tone":         0.15,
         "salesmanship":         0.20,
         "information_control":  0.15,
         "professionalism":      0.10,
@@ -1119,7 +1051,7 @@ def calculate_weighted_overall(scores):
     weight_used = 0.0
     for key, weight in w.items():
         s = scores.get(key, {})
-        score = (s.get("score") or 0) if isinstance(s, dict) else 0
+        score = s.get("score", 0) if isinstance(s, dict) else 0
         if score > 0:
             total += score * weight
             weight_used += weight
@@ -1195,7 +1127,7 @@ def _call_claude_api(req_body, headers, max_retries=3):
     raise Exception("Claude API failed after all retries")
 
 
-def run_claude_analysis(transcript, filename, model="claude-sonnet-4-20250514", is_diarized=False):
+def run_claude_analysis(transcript, filename, model="claude-sonnet-4-6", is_diarized=False):
     corrections = get_recent_corrections()
     # Truncate very long transcripts to prevent exceeding Claude's token limit
     # Prompt template is ~16k chars; Claude's limit is ~200k tokens but request body has practical limits
@@ -2300,6 +2232,8 @@ class Handler(BaseHTTPRequestHandler):
             self._get_audio_url()
         elif path == "/vonage/status":
             self._vonage_status()
+        elif path == "/health":
+            self._health_check()
         elif path == "/vonage/extension_map":
             self._vonage_get_extension_map_endpoint()
         elif path == "/vonage/recent":
@@ -3237,6 +3171,52 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
             except Exception:
                 state["last_24h"] = None
             self._ok(state)
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _health_check(self):
+        """Lightweight health endpoint for uptime monitors (e.g. UptimeRobot).
+        Returns HTTP 200 + healthy:true only when the Vonage poll worker is alive
+        and has polled successfully within the last 2 hours.
+        Returns HTTP 503 + healthy:false otherwise so monitors trip automatically.
+        """
+        try:
+            with _vonage_lock:
+                state = dict(_vonage_job)
+            thread_alive = _vonage_thread is not None and _vonage_thread.is_alive()
+            last_poll_at = state.get("last_poll_at")
+            last_succeeded = state.get("last_poll_succeeded")
+
+            stale = True
+            if last_poll_at:
+                try:
+                    last_dt = datetime.fromisoformat(last_poll_at.replace("Z", "+00:00"))
+                    age_seconds = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                    stale = age_seconds > 7200  # 2 hours
+                except Exception:
+                    stale = True
+
+            healthy = thread_alive and not stale and last_succeeded is not False
+
+            payload = {
+                "healthy": healthy,
+                "thread_alive": thread_alive,
+                "last_poll_at": last_poll_at,
+                "last_poll_succeeded": last_succeeded,
+                "stale": stale,
+                "worker_status": state.get("status"),
+            }
+
+            if healthy:
+                self._ok(payload)
+            else:
+                body = json.dumps(payload).encode()
+                self.send_response(503)
+                self._cors()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
         except Exception as e:
             self._err(500, str(e))
 
