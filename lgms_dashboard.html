@@ -5663,13 +5663,11 @@ function openRepProfile(repName){
 
 // ── MANAGEMENT ──
 let expandedRep=null;
-let selectedReps=new Set();
 function renderManagement(){
-  const namesFromCalls=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean);
-  const namesFromRoster=reps.map(r=>r.full_name).filter(Boolean);
-  const repNames=[...new Set([...namesFromCalls,...namesFromRoster])].sort();
+  const repNames=[...new Set(allCalls.map(c=>c.rep_name))].filter(Boolean).sort();
+  // Also show unmatched reps — in calls but no roster record
   const rosterNames=new Set(reps.flatMap(r=>[r.full_name,r.nickname].filter(Boolean)));
-  const unmatched=namesFromCalls.filter(r=>!rosterNames.has(r));
+  const unmatched=repNames.filter(r=>!rosterNames.has(r));
 
   const rows=repNames.map(r=>{
     const cnt=allCalls.filter(c=>c.rep_name===r).length;
@@ -5685,7 +5683,7 @@ function renderManagement(){
       ?`<span class="loc-tag">${esc(dbRep.location)}</span>`
       :`<span class="rmgmt-loc-empty">⚠ Unset</span>`;
 
-    const editPanel=isExpanded?`<tr class="rmgmt-edit-row" id="panel-${esc(r)}"><td colspan="7">
+    const editPanel=isExpanded?`<tr class="rmgmt-edit-row" id="panel-${esc(r)}"><td colspan="6">
       <div class="rmgmt-edit-panel">
         <div class="rmgmt-edit-block">
           <div class="rmgmt-edit-block-label">Rename</div>
@@ -5715,9 +5713,7 @@ function renderManagement(){
       </div>
     </td></tr>`:'';
 
-    const isChecked=selectedReps.has(r);
     return`<tr class="rmgmt-row${isExpanded?' expanded':''}" onclick="expandedRep=expandedRep==='${esc(r)}'?null:'${esc(r)}';renderManagement()">
-      <td onclick="event.stopPropagation()"><input type="checkbox" ${isChecked?'checked':''} data-rep="${esc(r)}" onchange="toggleRepSel('${esc(r)}',this.checked)" /></td>
       <td><div class="rmgmt-name"><span class="rmgmt-name-chev">▶</span>${esc(r)}</div></td>
       <td class="col-loc">${locCell}</td>
       <td class="col-calls">${cnt}</td>
@@ -5770,16 +5766,12 @@ function renderManagement(){
       <div class="mgmt-card">
         <div class="mgmt-card-head">
           <div class="mgmt-card-title">Rep Roster</div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <button class="btn btn-d btn-sm" id="del-sel-reps-btn" style="display:none" onclick="doDeleteSelectedReps()">🗑 Delete selected (<span id="del-sel-cnt">0</span>)</button>
-            <button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button>
-          </div>
+          <button class="btn btn-p btn-sm" onclick="openAddRepModal()">+ Add Rep</button>
         </div>
         <p class="mgmt-card-subtitle">Click a rep to expand editing options.</p>
         <div class="mgmt-card-body flush">
           <table class="rmgmt-table-v2">
             <colgroup>
-              <col style="width:32px" />
               <col class="col-name" />
               <col class="col-loc" />
               <col class="col-calls" />
@@ -5788,7 +5780,6 @@ function renderManagement(){
               <col class="col-actions" />
             </colgroup>
             <thead><tr>
-              <th style="width:32px"><input type="checkbox" id="sel-all-reps" onchange="toggleSelAllReps(this.checked)" onclick="event.stopPropagation()" /></th>
               <th>Name</th>
               <th class="col-loc">Location</th>
               <th class="col-calls">Calls</th>
@@ -5796,7 +5787,7 @@ function renderManagement(){
               <th class="col-status">Status</th>
               <th class="col-actions"></th>
             </tr></thead>
-            <tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody>
+            <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:var(--ink3);padding:16px">No reps found</td></tr>'}</tbody>
           </table>
         </div>
       </div>
@@ -5831,48 +5822,6 @@ function renderManagement(){
     </div></div>`);
 }
 
-function toggleRepSel(repName,checked){
-  if(checked)selectedReps.add(repName);else selectedReps.delete(repName);
-  const btn=g('del-sel-reps-btn'),cnt=g('del-sel-cnt');
-  if(btn)btn.style.display=selectedReps.size>0?'':'none';
-  if(cnt)cnt.textContent=selectedReps.size;
-  const allBox=g('sel-all-reps');
-  if(allBox){
-    const boxes=document.querySelectorAll('[data-rep]');
-    allBox.indeterminate=selectedReps.size>0&&selectedReps.size<boxes.length;
-    allBox.checked=boxes.length>0&&selectedReps.size===boxes.length;
-  }
-}
-function toggleSelAllReps(checked){
-  document.querySelectorAll('[data-rep]').forEach(cb=>{
-    const r=cb.getAttribute('data-rep');
-    cb.checked=checked;
-    if(checked)selectedReps.add(r);else selectedReps.delete(r);
-  });
-  const btn=g('del-sel-reps-btn'),cnt=g('del-sel-cnt');
-  if(btn)btn.style.display=selectedReps.size>0?'':'none';
-  if(cnt)cnt.textContent=selectedReps.size;
-}
-async function doDeleteSelectedReps(){
-  if(!selectedReps.size)return;
-  const names=[...selectedReps];
-  const totalCalls=names.reduce((acc,r)=>acc+allCalls.filter(c=>c.rep_name===r).length,0);
-  const msg=totalCalls>0
-    ?`Delete ${names.length} rep${names.length>1?'s':''}? This will NOT delete their ${totalCalls} call${totalCalls>1?'s':''} — those calls will appear as unmatched.`
-    :`Delete ${names.length} rep${names.length>1?'s':''}? They have no calls.`;
-  if(!confirm(msg))return;
-  for(const r of names){
-    const dbRep=reps.find(rep=>rep.full_name===r||rep.nickname===r);
-    if(!dbRep?.id){console.warn('No DB id for rep:',r);continue;}
-    try{
-      const res=await fetch(API+'/reps/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:dbRep.id})});
-      if(!res.ok)throw new Error(await res.text());
-    }catch(e){alert(`Failed to delete ${r}: ${e.message}`);return;}
-  }
-  selectedReps.clear();
-  await loadReps();
-  renderManagement();
-}
 async function doInlineRename(repName){
   const el=g('ren-'+repName),msg=g('ren-msg-'+repName);
   const n=el?.value?.trim();if(!n){if(msg)msg.innerHTML='<span style="color:var(--red)">Enter a new name</span>';return;}
@@ -6538,21 +6487,22 @@ async function renderVonage() {
   // Stop any prior poller before re-rendering
   if (vonageStatusPoller) { clearInterval(vonageStatusPoller); vonageStatusPoller = null; }
 
-  // Fetch status, mapping, and recent ingestions in parallel
-  let status = null, mapping = [], recent = [];
+  // Fetch status, mapping, recent ingestions, and backfill state in parallel
+  let status = null, mapping = [], recent = [], backfill = null;
   try {
-    const [s, m, r] = await Promise.all([
+    const [s, m, r, b] = await Promise.all([
       fetch(API + '/vonage/status').then(r => r.json()),
       fetch(API + '/vonage/extension_map').then(r => r.json()),
       fetch(API + '/vonage/recent').then(r => r.json()),
+      fetch(API + '/vonage/backfill/status').then(r => r.json()),
     ]);
-    status = s; mapping = m || []; recent = r || [];
+    status = s; mapping = m || []; recent = r || []; backfill = b;
   } catch (e) {
     set('page', `<div class="mgmt-card"><div class="mgmt-card-body"><div class="msg-err">Failed to load Vonage status: ${esc(e.message)}</div></div></div>`);
     return;
   }
 
-  set('page', vonagePageHtml(status, mapping, recent));
+  set('page', vonagePageHtml(status, mapping, recent, backfill));
 
   // Auto-refresh status every 15 seconds while page is open
   vonageStatusPoller = setInterval(async () => {
@@ -6560,9 +6510,14 @@ async function renderVonage() {
       clearInterval(vonageStatusPoller); vonageStatusPoller = null; return;
     }
     try {
-      const s = await fetch(API + '/vonage/status').then(r => r.json());
+      const [s, b] = await Promise.all([
+        fetch(API + '/vonage/status').then(r => r.json()),
+        fetch(API + '/vonage/backfill/status').then(r => r.json()),
+      ]);
       const el = g('vonage-status-block');
       if (el) el.outerHTML = vonageStatusBlockHtml(s);
+      const bel = g('vonage-backfill-block');
+      if (bel) bel.outerHTML = vonageBackfillBlockHtml(b);
     } catch (e) { /* ignore polling errors */ }
   }, 15000);
 }
@@ -6582,6 +6537,7 @@ function vonageStatusBlockHtml(s) {
     actionBtns = `
       <button class="btn btn-g btn-sm" onclick="vonagePause()">⏸ Pause</button>
       <button class="btn btn-g btn-sm" onclick="vonagePollNow()">↻ Poll now</button>
+      <button class="btn btn-g btn-sm" onclick="vonageBackfill()">⟳ Backfill failed</button>
       <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
   } else if (st === 'paused') {
     statusPill = `<span class="rmgmt-status-pill" style="background:rgba(227,177,36,0.18);color:var(--lg-gold-dark, #8A6420)">⏸ Paused</span>`;
@@ -6638,7 +6594,55 @@ function vonageStatusBlockHtml(s) {
   </div>`;
 }
 
-function vonagePageHtml(status, mapping, recent) {
+function vonageBackfillBlockHtml(b) {
+  if (!b) return `<div id="vonage-backfill-block"></div>`;
+  const st = b.status;
+  if (st === 'idle' && !b.finished_at) return `<div id="vonage-backfill-block"></div>`;
+
+  let pill = '', body = '';
+  const pct = b.total > 0 ? Math.round(b.processed / b.total * 100) : 0;
+
+  if (st === 'running') {
+    pill = `<span class="rmgmt-status-pill" style="background:rgba(59,130,246,0.12);color:#2563eb">⟳ Running</span>`;
+    body = `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink3);margin-bottom:4px">
+          <span>${b.processed} of ${b.total} processed</span><span>${pct}%</span>
+        </div>
+        <div style="background:var(--border);border-radius:4px;height:6px">
+          <div style="background:var(--lg-green);height:6px;border-radius:4px;width:${pct}%;transition:width .3s"></div>
+        </div>
+      </div>
+      <div class="mgmt-stat-row">
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${b.ingested}</div><div class="mgmt-stat-cell-label">Ingested</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${b.skipped}</div><div class="mgmt-stat-cell-label">Skipped</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${b.errors}</div><div class="mgmt-stat-cell-label">Errors</div></div>
+      </div>`;
+  } else if (st === 'done') {
+    pill = `<span class="rmgmt-status-pill" style="background:var(--lg-green-bg);color:var(--lg-green-dark)">✓ Complete</span>`;
+    body = `
+      <div class="mgmt-stat-row">
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${b.ingested}</div><div class="mgmt-stat-cell-label">Ingested</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${b.skipped}</div><div class="mgmt-stat-cell-label">Skipped</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${b.errors}</div><div class="mgmt-stat-cell-label">Errors</div></div>
+        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${b.total}</div><div class="mgmt-stat-cell-label">Total</div></div>
+      </div>
+      ${b.finished_at ? `<div style="font-size:12px;color:var(--ink3);margin-top:10px">Finished ${fmt(b.finished_at)}</div>` : ''}`;
+  } else if (st === 'error') {
+    pill = `<span class="rmgmt-status-pill" style="background:var(--lg-red-bg);color:var(--lg-red)">⚠ Error</span>`;
+    body = b.last_error ? `<div class="msg-err" style="margin-top:8px">${esc(b.last_error)}</div>` : '';
+  }
+
+  return `<div id="vonage-backfill-block" class="mgmt-card" style="margin-bottom:16px">
+    <div class="mgmt-card-head">
+      <div class="mgmt-card-title">Backfill Progress</div>
+      ${pill}
+    </div>
+    <div class="mgmt-card-body">${body}</div>
+  </div>`;
+}
+
+function vonagePageHtml(status, mapping, recent, backfill) {
   // ── Mapping table ──
   const mapRows = mapping.length
     ? mapping.map(m => `<tr>
@@ -6671,6 +6675,7 @@ function vonagePageHtml(status, mapping, recent) {
 
   return `
     ${vonageStatusBlockHtml(status)}
+    ${vonageBackfillBlockHtml(backfill)}
 
     <div class="mgmt-card" style="margin-bottom:16px">
       <div class="mgmt-card-head">
@@ -6736,6 +6741,12 @@ async function vonageStop()     { if (!confirm('Stop the polling worker? It will
 async function vonagePause()    { await vonageAction('/vonage/pause'); }
 async function vonageResume()   { await vonageAction('/vonage/resume'); }
 async function vonagePollNow()  { await vonageAction('/vonage/poll_now', 'Polling now…'); }
+async function vonageBackfill() {
+  if (!confirm('Start backfill? This will reprocess all failed recordings in batches of 5 with 60s delays. It will run automatically until complete (~4-5 hours for 1000+ calls).')) return;
+  await vonageAction('/vonage/backfill/start', 'Starting backfill…');
+  // Refresh the page to show the backfill block
+  setTimeout(renderVonage, 1500);
+}
 
 async function vonageAction(path, statusMsg) {
   const block = g('vonage-status-block');
