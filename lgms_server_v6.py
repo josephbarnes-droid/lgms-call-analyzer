@@ -100,6 +100,21 @@ _vonage_job = {
 _vonage_lock = threading.Lock()
 _vonage_thread = None  # Holds the background thread reference; check if alive before spawning
 
+# Backfill worker state — retries failed vonage_recordings in small batches
+_backfill_job = {
+    "status": "idle",       # idle | running | done | error
+    "started_at": None,
+    "total": 0,
+    "processed": 0,
+    "ingested": 0,
+    "skipped": 0,
+    "errors": 0,
+    "last_error": None,
+    "finished_at": None,
+}
+_backfill_lock = threading.Lock()
+_backfill_thread = None
+
 # Whether VBC env is configured at all
 def _vonage_configured():
     return bool(VONAGE_CLIENT_ID and VONAGE_CLIENT_SECRET and VONAGE_ACCOUNT_ID)
@@ -2186,9 +2201,172 @@ def _vonage_resume_worker():
     return True
 
 
+def _vonage_resume_worker():
+    """Resume a paused worker."""
+    with _vonage_lock:
+        _vonage_job["pause_requested"] = False
+    return True
+
+
 # ──────────────────────────────────────────────
-# HTTP HANDLER
+# BACKFILL WORKER — retries failed recordings in small batches
 # ──────────────────────────────────────────────
+
+BACKFILL_BATCH_SIZE  = 5    # recordings per batch
+BACKFILL_BATCH_DELAY = 60   # seconds between batches
+
+def _backfill_worker():
+    """Background thread: fetch all failed vonage_recordings, reprocess in small
+    batches with a delay between each to avoid Anthropic rate limits.
+    Runs once and stops when all failed rows are exhausted.
+    """
+    global _backfill_thread
+    log("  Backfill: worker starting")
+
+    # Count total failed rows upfront for progress tracking
+    try:
+        count_rows = supa("GET", "vonage_recordings?status=eq.failed&select=recording_id")
+        total = len(count_rows) if count_rows else 0
+    except Exception as e:
+        with _backfill_lock:
+            _backfill_job["status"] = "error"
+            _backfill_job["last_error"] = f"Failed to count rows: {e}"
+        log(f"  Backfill: failed to count rows: {e}")
+        return
+
+    with _backfill_lock:
+        _backfill_job["total"] = total
+        _backfill_job["processed"] = 0
+        _backfill_job["ingested"] = 0
+        _backfill_job["skipped"] = 0
+        _backfill_job["errors"] = 0
+        _backfill_job["last_error"] = None
+
+    log(f"  Backfill: {total} failed recordings to reprocess")
+
+    if total == 0:
+        with _backfill_lock:
+            _backfill_job["status"] = "done"
+            _backfill_job["finished_at"] = datetime.now(timezone.utc).isoformat()
+        log("  Backfill: nothing to do")
+        return
+
+    # Load shared context once
+    ext_map = _vonage_get_extension_map()
+    try:
+        keyterms = get_cached_keyterms()
+    except Exception:
+        keyterms = []
+    try:
+        tx_corrections = get_transcript_corrections()
+    except Exception:
+        tx_corrections = []
+
+    processed = 0
+    offset = 0
+
+    while True:
+        # Check for stop request
+        with _backfill_lock:
+            if _backfill_job.get("stop_requested"):
+                _backfill_job["status"] = "idle"
+                log("  Backfill: stopped by request")
+                return
+
+        # Fetch next batch of failed recording IDs — always offset=0 because
+        # we delete/update rows as we go, so the "failed" set shrinks each batch
+        try:
+            batch_rows = supa(
+                "GET",
+                f"vonage_recordings?status=eq.failed&order=call_started_at.asc"
+                f"&limit={BACKFILL_BATCH_SIZE}&select=recording_id"
+            )
+        except Exception as e:
+            log(f"  Backfill: failed to fetch batch: {e}")
+            with _backfill_lock:
+                _backfill_job["last_error"] = str(e)[:200]
+            time.sleep(BACKFILL_BATCH_DELAY)
+            continue
+
+        if not batch_rows:
+            break  # All done
+
+        recording_ids = [r["recording_id"] for r in batch_rows if r.get("recording_id")]
+
+        for recording_id in recording_ids:
+            # Reset row to pending so _vonage_process_one won't skip it
+            try:
+                supa("PATCH",
+                     f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}",
+                     {"status": "pending", "error_message": None},
+                     prefer_minimal=True)
+            except Exception as e:
+                log(f"  Backfill: failed to reset {recording_id}: {e}")
+                continue
+
+            # Fetch the full recording object from Vonage API
+            try:
+                rec_resp = _vonage_api("GET", f"/accounts/self/company_call_recordings/{recording_id}")
+            except Exception as e:
+                log(f"  Backfill: failed to fetch recording {recording_id} from Vonage: {e}")
+                _vonage_record_status(recording_id, "failed", error_message=f"Backfill fetch error: {str(e)[:200]}")
+                with _backfill_lock:
+                    _backfill_job["errors"] += 1
+                    _backfill_job["processed"] += 1
+                continue
+
+            # Process it through the normal pipeline
+            try:
+                outcome = _vonage_process_one(rec_resp, ext_map, keyterms, tx_corrections)
+            except Exception as e:
+                outcome = "failed"
+                log(f"  Backfill: process error for {recording_id}: {e}")
+
+            with _backfill_lock:
+                _backfill_job["processed"] += 1
+                if outcome == "ingested":
+                    _backfill_job["ingested"] += 1
+                elif outcome in ("skipped", "duplicate"):
+                    _backfill_job["skipped"] += 1
+                else:
+                    _backfill_job["errors"] += 1
+
+            processed += 1
+
+        pct = int(processed / total * 100) if total else 0
+        log(f"  Backfill: {processed}/{total} ({pct}%) — sleeping {BACKFILL_BATCH_DELAY}s")
+
+        with _backfill_lock:
+            _backfill_job["status"] = "running"
+
+        time.sleep(BACKFILL_BATCH_DELAY)
+
+    with _backfill_lock:
+        _backfill_job["status"] = "done"
+        _backfill_job["finished_at"] = datetime.now(timezone.utc).isoformat()
+    log(f"  Backfill: complete — {processed} processed")
+
+
+def _backfill_start():
+    """Start the backfill thread if not already running. Returns True if started."""
+    global _backfill_thread
+    with _backfill_lock:
+        if _backfill_thread and _backfill_thread.is_alive():
+            log("  Backfill: already running, ignoring start request")
+            return False
+        if not _vonage_configured():
+            return False
+        _backfill_job["status"] = "running"
+        _backfill_job["started_at"] = datetime.now(timezone.utc).isoformat()
+        _backfill_job["finished_at"] = None
+        _backfill_job["stop_requested"] = False
+    _backfill_thread = threading.Thread(target=_backfill_worker, daemon=True, name="vonage-backfill")
+    _backfill_thread.start()
+    log("  Backfill: thread started")
+    return True
+
+
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -2238,6 +2416,8 @@ class Handler(BaseHTTPRequestHandler):
             self._vonage_get_extension_map_endpoint()
         elif path == "/vonage/recent":
             self._vonage_get_recent()
+        elif path == "/vonage/backfill/status":
+            self._backfill_status_endpoint()
         else:
             html = read_html()
             self.send_response(200)
@@ -2285,6 +2465,7 @@ class Handler(BaseHTTPRequestHandler):
             "/vonage/pause": self._vonage_pause_endpoint,
             "/vonage/resume": self._vonage_resume_endpoint,
             "/vonage/poll_now": self._vonage_poll_now_endpoint,
+            "/vonage/backfill/start": self._backfill_start_endpoint,
             "/vonage/extension_map/save": self._vonage_save_extension,
             "/vonage/extension_map/delete": self._vonage_delete_extension,
         }
@@ -3286,6 +3467,26 @@ If no duplicates found: {{"suggestions":[],"confidence_overall":1.0}}"""
         try:
             ingested, skipped, errors = _vonage_poll_once()
             self._ok({"ingested": ingested, "skipped": skipped, "errors": errors})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _backfill_start_endpoint(self, body):
+        """Start the backfill worker to reprocess all failed vonage_recordings."""
+        try:
+            started = _backfill_start()
+            with _backfill_lock:
+                state = dict(_backfill_job)
+            self._ok({"started": started, "state": state})
+        except Exception as e:
+            self._err(500, str(e))
+
+    def _backfill_status_endpoint(self):
+        """Return current backfill worker state."""
+        try:
+            with _backfill_lock:
+                state = dict(_backfill_job)
+            state["thread_alive"] = _backfill_thread is not None and _backfill_thread.is_alive()
+            self._ok(state)
         except Exception as e:
             self._err(500, str(e))
 
