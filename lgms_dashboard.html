@@ -6494,7 +6494,7 @@ async function renderVonage() {
       fetch(API + '/vonage/status').then(r => r.json()),
       fetch(API + '/vonage/extension_map').then(r => r.json()),
       fetch(API + '/vonage/recent').then(r => r.json()),
-      fetch(API + '/vonage/backfill/status').then(r => r.json()),
+      fetch(API + '/vonage/backfill/status').then(r => r.json()).catch(() => null),
     ]);
     status = s; mapping = m || []; recent = r || []; backfill = b;
   } catch (e) {
@@ -6512,7 +6512,7 @@ async function renderVonage() {
     try {
       const [s, b] = await Promise.all([
         fetch(API + '/vonage/status').then(r => r.json()),
-        fetch(API + '/vonage/backfill/status').then(r => r.json()),
+        fetch(API + '/vonage/backfill/status').then(r => r.json()).catch(() => null),
       ]);
       const el = g('vonage-status-block');
       if (el) el.outerHTML = vonageStatusBlockHtml(s);
