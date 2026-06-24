@@ -2294,14 +2294,16 @@ def _backfill_worker():
         recording_ids = [r["recording_id"] for r in batch_rows if r.get("recording_id")]
 
         for recording_id in recording_ids:
-            # Reset row to pending so _vonage_process_one won't skip it
+            # Delete the row so _vonage_recording_seen returns False
+            # and the full pipeline runs fresh (resetting to pending is not
+            # enough — _vonage_recording_seen checks existence, not status)
             try:
-                supa("PATCH",
+                supa("DELETE",
                      f"vonage_recordings?recording_id=eq.{urllib.parse.quote(recording_id)}",
-                     {"status": "pending", "error_message": None},
+                     None,
                      prefer_minimal=True)
             except Exception as e:
-                log(f"  Backfill: failed to reset {recording_id}: {e}")
+                log(f"  Backfill: failed to delete {recording_id}: {e}")
                 continue
 
             # Fetch the full recording object from Vonage API
