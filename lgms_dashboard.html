@@ -6487,22 +6487,21 @@ async function renderVonage() {
   // Stop any prior poller before re-rendering
   if (vonageStatusPoller) { clearInterval(vonageStatusPoller); vonageStatusPoller = null; }
 
-  // Fetch status, mapping, recent ingestions, and backfill state in parallel
-  let status = null, mapping = [], recent = [], backfill = null;
+  // Fetch status, mapping, and recent ingestions in parallel
+  let status = null, mapping = [], recent = [];
   try {
-    const [s, m, r, b] = await Promise.all([
+    const [s, m, r] = await Promise.all([
       fetch(API + '/vonage/status').then(r => r.json()),
       fetch(API + '/vonage/extension_map').then(r => r.json()),
       fetch(API + '/vonage/recent').then(r => r.json()),
-      fetch(API + '/vonage/backfill/status').then(r => r.json()).catch(() => null),
     ]);
-    status = s; mapping = m || []; recent = r || []; backfill = b;
+    status = s; mapping = m || []; recent = r || [];
   } catch (e) {
     set('page', `<div class="mgmt-card"><div class="mgmt-card-body"><div class="msg-err">Failed to load Vonage status: ${esc(e.message)}</div></div></div>`);
     return;
   }
 
-  set('page', vonagePageHtml(status, mapping, recent, backfill));
+  set('page', vonagePageHtml(status, mapping, recent));
 
   // Auto-refresh status every 15 seconds while page is open
   vonageStatusPoller = setInterval(async () => {
@@ -6510,14 +6509,9 @@ async function renderVonage() {
       clearInterval(vonageStatusPoller); vonageStatusPoller = null; return;
     }
     try {
-      const [s, b] = await Promise.all([
-        fetch(API + '/vonage/status').then(r => r.json()),
-        fetch(API + '/vonage/backfill/status').then(r => r.json()).catch(() => null),
-      ]);
+      const s = await fetch(API + '/vonage/status').then(r => r.json());
       const el = g('vonage-status-block');
       if (el) el.outerHTML = vonageStatusBlockHtml(s);
-      const bel = g('vonage-backfill-block');
-      if (bel) bel.outerHTML = vonageBackfillBlockHtml(b);
     } catch (e) { /* ignore polling errors */ }
   }, 15000);
 }
@@ -6537,7 +6531,6 @@ function vonageStatusBlockHtml(s) {
     actionBtns = `
       <button class="btn btn-g btn-sm" onclick="vonagePause()">⏸ Pause</button>
       <button class="btn btn-g btn-sm" onclick="vonagePollNow()">↻ Poll now</button>
-      <button class="btn btn-g btn-sm" onclick="vonageBackfill()">⟳ Backfill failed</button>
       <button class="btn btn-d btn-sm" onclick="vonageStop()">⏹ Stop</button>`;
   } else if (st === 'paused') {
     statusPill = `<span class="rmgmt-status-pill" style="background:rgba(227,177,36,0.18);color:var(--lg-gold-dark, #8A6420)">⏸ Paused</span>`;
@@ -6594,55 +6587,7 @@ function vonageStatusBlockHtml(s) {
   </div>`;
 }
 
-function vonageBackfillBlockHtml(b) {
-  if (!b) return `<div id="vonage-backfill-block"></div>`;
-  const st = b.status;
-  if (st === 'idle' && !b.finished_at) return `<div id="vonage-backfill-block"></div>`;
-
-  let pill = '', body = '';
-  const pct = b.total > 0 ? Math.round(b.processed / b.total * 100) : 0;
-
-  if (st === 'running') {
-    pill = `<span class="rmgmt-status-pill" style="background:rgba(59,130,246,0.12);color:#2563eb">⟳ Running</span>`;
-    body = `
-      <div style="margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink3);margin-bottom:4px">
-          <span>${b.processed} of ${b.total} processed</span><span>${pct}%</span>
-        </div>
-        <div style="background:var(--border);border-radius:4px;height:6px">
-          <div style="background:var(--lg-green);height:6px;border-radius:4px;width:${pct}%;transition:width .3s"></div>
-        </div>
-      </div>
-      <div class="mgmt-stat-row">
-        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${b.ingested}</div><div class="mgmt-stat-cell-label">Ingested</div></div>
-        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${b.skipped}</div><div class="mgmt-stat-cell-label">Skipped</div></div>
-        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${b.errors}</div><div class="mgmt-stat-cell-label">Errors</div></div>
-      </div>`;
-  } else if (st === 'done') {
-    pill = `<span class="rmgmt-status-pill" style="background:var(--lg-green-bg);color:var(--lg-green-dark)">✓ Complete</span>`;
-    body = `
-      <div class="mgmt-stat-row">
-        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value g">${b.ingested}</div><div class="mgmt-stat-cell-label">Ingested</div></div>
-        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${b.skipped}</div><div class="mgmt-stat-cell-label">Skipped</div></div>
-        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value r">${b.errors}</div><div class="mgmt-stat-cell-label">Errors</div></div>
-        <div class="mgmt-stat-cell"><div class="mgmt-stat-cell-value n">${b.total}</div><div class="mgmt-stat-cell-label">Total</div></div>
-      </div>
-      ${b.finished_at ? `<div style="font-size:12px;color:var(--ink3);margin-top:10px">Finished ${fmt(b.finished_at)}</div>` : ''}`;
-  } else if (st === 'error') {
-    pill = `<span class="rmgmt-status-pill" style="background:var(--lg-red-bg);color:var(--lg-red)">⚠ Error</span>`;
-    body = b.last_error ? `<div class="msg-err" style="margin-top:8px">${esc(b.last_error)}</div>` : '';
-  }
-
-  return `<div id="vonage-backfill-block" class="mgmt-card" style="margin-bottom:16px">
-    <div class="mgmt-card-head">
-      <div class="mgmt-card-title">Backfill Progress</div>
-      ${pill}
-    </div>
-    <div class="mgmt-card-body">${body}</div>
-  </div>`;
-}
-
-function vonagePageHtml(status, mapping, recent, backfill) {
+function vonagePageHtml(status, mapping, recent) {
   // ── Mapping table ──
   const mapRows = mapping.length
     ? mapping.map(m => `<tr>
@@ -6675,7 +6620,6 @@ function vonagePageHtml(status, mapping, recent, backfill) {
 
   return `
     ${vonageStatusBlockHtml(status)}
-    ${vonageBackfillBlockHtml(backfill)}
 
     <div class="mgmt-card" style="margin-bottom:16px">
       <div class="mgmt-card-head">
@@ -6741,12 +6685,6 @@ async function vonageStop()     { if (!confirm('Stop the polling worker? It will
 async function vonagePause()    { await vonageAction('/vonage/pause'); }
 async function vonageResume()   { await vonageAction('/vonage/resume'); }
 async function vonagePollNow()  { await vonageAction('/vonage/poll_now', 'Polling now…'); }
-async function vonageBackfill() {
-  if (!confirm('Start backfill? This will reprocess all failed recordings in batches of 5 with 60s delays. It will run automatically until complete (~4-5 hours for 1000+ calls).')) return;
-  await vonageAction('/vonage/backfill/start', 'Starting backfill…');
-  // Refresh the page to show the backfill block
-  setTimeout(renderVonage, 1500);
-}
 
 async function vonageAction(path, statusMsg) {
   const block = g('vonage-status-block');
